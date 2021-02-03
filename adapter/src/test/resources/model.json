@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "defaultSchema": "redisearch",
+  "schemas": [
+    {
+      "name": "redisearch",
+      "type": "custom",
+      "factory": "com.redislabs.redisearch.jdbc.RediSearchSchemaFactory",
+      "operand": {
+        "index": "beers"
+      },
+      "tables": [
+        {
+          "name": "view",
+          "type": "view",
+          "sql": "select cast(_MAP['name'] AS varchar(200)) AS \"name\", cast(_MAP['abv'] AS varchar(200)) AS \"abv\", cast(_MAP['ounces'] AS varchar(200)) AS \"ounces\", cast(_MAP['ibu'] AS varchar(200)) AS \"ibu\", cast(_MAP['style'] AS varchar(200)) AS \"style\", cast(_MAP['brewery_id'] AS varchar(200)) AS \"brewery_id\", cast(_MAP['id'] AS varchar(5)) AS \"id\" from \"redisearch\".\"beers\""
+        }
+      ]
+    }
+  ]
+}
