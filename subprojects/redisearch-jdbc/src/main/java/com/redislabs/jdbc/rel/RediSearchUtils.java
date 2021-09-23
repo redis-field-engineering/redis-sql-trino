@@ -1,6 +1,7 @@
 package com.redislabs.jdbc.rel;
 
-import com.redislabs.lettusearch.Document;
+import com.redis.lettucemod.api.search.Document;
+import com.redis.lettucemod.api.search.Field;
 import org.apache.calcite.linq4j.tree.Primitive;
 import org.apache.calcite.rel.type.RelDataTypeField;
 
@@ -24,7 +25,7 @@ public class RediSearchUtils {
      * @param relDataTypeFields Table relation types
      * @return List of objects values corresponding to the relDataTypeFields
      */
-    public static Object convertToRowValues(List<RelDataTypeField> relDataTypeFields, Map<String, com.redislabs.lettusearch.Field.Type> fieldTypes, Document<String, String> doc) {
+    public static Object convertToRowValues(List<RelDataTypeField> relDataTypeFields, Map<String, Field.Type> fieldTypes, Document<String, String> doc) {
         Object[] values = new Object[relDataTypeFields.size()];
         int index = 0;
         for (RelDataTypeField relDataTypeField : relDataTypeFields) {
@@ -41,7 +42,7 @@ public class RediSearchUtils {
     }
 
     @SuppressWarnings("JavaUtilDate")
-    private static Object convert(String s, com.redislabs.lettusearch.Field.Type fieldType, Class clazz) {
+    private static Object convert(String s, Field.Type fieldType, Class clazz) {
         if (s == null) {
             return null;
         }
@@ -57,7 +58,7 @@ public class RediSearchUtils {
         if (clazz.isInstance(s)) {
             return s;
         }
-        if (fieldType == com.redislabs.lettusearch.Field.Type.NUMERIC && primitive != null) {
+        if (fieldType == Field.Type.NUMERIC && primitive != null) {
             return primitive.number(Double.parseDouble(s));
         }
         return s;

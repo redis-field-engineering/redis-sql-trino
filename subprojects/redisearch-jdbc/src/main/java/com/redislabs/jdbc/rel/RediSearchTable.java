@@ -1,10 +1,19 @@
 package com.redislabs.jdbc.rel;
 
 import com.google.common.collect.ImmutableMap;
-import com.redislabs.lettusearch.*;
+import com.redis.lettucemod.api.StatefulRedisModulesConnection;
+import com.redis.lettucemod.api.search.Field;
+import com.redis.lettucemod.api.search.IndexInfo;
+import com.redis.lettucemod.api.search.Order;
+import com.redis.lettucemod.api.search.SearchOptions;
+import com.redis.lettucemod.api.search.SearchResults;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.calcite.adapter.java.AbstractQueryableTable;
-import org.apache.calcite.linq4j.*;
+import org.apache.calcite.linq4j.AbstractEnumerable;
+import org.apache.calcite.linq4j.Enumerable;
+import org.apache.calcite.linq4j.Enumerator;
+import org.apache.calcite.linq4j.QueryProvider;
+import org.apache.calcite.linq4j.Queryable;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.rel.RelFieldCollation;
@@ -20,7 +29,10 @@ import org.apache.calcite.schema.impl.AbstractTableQueryable;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.Util;
 
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * Table based on a RediSearch index.
@@ -28,10 +40,11 @@ import java.util.*;
 @Slf4j
 public class RediSearchTable extends AbstractQueryableTable implements TranslatableTable {
 
-    private final IndexInfo<String> indexInfo;
+    public static final int DEFAULT_LIMIT = 100;
+    private final IndexInfo indexInfo;
     private final RelDataType rowType;
 
-    RediSearchTable(IndexInfo<String> indexInfo) {
+    RediSearchTable(IndexInfo indexInfo) {
         super(Object[].class);
         this.indexInfo = indexInfo;
         this.rowType = new JavaTypeFactoryExtImpl().createIndexType(indexInfo);
@@ -42,12 +55,13 @@ public class RediSearchTable extends AbstractQueryableTable implements Translata
         return "RedisSearchTable {" + indexInfo.getIndexName() + "}";
     }
 
-    public Enumerable<Object> query(final StatefulRediSearchConnection<String, String> connection, final List<Map.Entry<String, Class>> fields, final List<Map.Entry<String, String>> selectFields, final List<Map.Entry<String, String>> aggregateFunctions, final List<String> groupByFields, List<String> predicates, List<Map.Entry<String, RelFieldCollation.Direction>> sort, Long offsetValue, Long limitValue) {
+    @SuppressWarnings({"unused", "UnusedAssignment"})
+    public Enumerable<Object> query(final StatefulRedisModulesConnection<String, String> connection, final List<Map.Entry<String, Class<?>>> fields, final List<Map.Entry<String, String>> selectFields, final List<Map.Entry<String, String>> aggregateFunctions, final List<String> groupByFields, List<String> predicates, List<Map.Entry<String, RelFieldCollation.Direction>> sort, Long offsetValue, Long limitValue) {
 
         final RelDataTypeFactory typeFactory = new JavaTypeFactoryExtImpl();
         final RelDataTypeFactory.Builder fieldInfo = typeFactory.builder();
 
-        for (Map.Entry<String, Class> field : fields) {
+        for (Map.Entry<String, Class<?>> field : fields) {
             SqlTypeName typeName = typeFactory.createJavaType(field.getValue()).getSqlTypeName();
             RelDataType type;
             if (typeName == SqlTypeName.ARRAY) {
@@ -76,7 +90,7 @@ public class RediSearchTable extends AbstractQueryableTable implements Translata
 
         // Combine all predicates conjunctively
         String query = predicates.isEmpty() ? "*" : Util.toString(predicates, "", " ", "");
-        SearchOptions.SearchOptionsBuilder<String> options = SearchOptions.builder();
+        SearchOptions.SearchOptionsBuilder<String, String> options = SearchOptions.builder();
         if (!groupByFields.isEmpty()) {
             throw new UnsupportedOperationException("GROUP BY not yet supported");
         }
@@ -85,16 +99,9 @@ public class RediSearchTable extends AbstractQueryableTable implements Translata
                 throw new UnsupportedOperationException("ORDER BY only supports a single field");
             }
             Map.Entry<String, RelFieldCollation.Direction> sortBy = sort.iterator().next();
-            options.sortBy(SearchOptions.SortBy.<String>builder().field(sortBy.getKey()).direction(sortBy.getValue() == RelFieldCollation.Direction.ASCENDING ? SearchOptions.SortBy.Direction.Ascending : SearchOptions.SortBy.Direction.Descending).build());
+            options.sortBy(SearchOptions.SortBy.<String, String>field(sortBy.getKey()).order(sortBy.getValue() == RelFieldCollation.Direction.ASCENDING ? Order.ASC : Order.DESC));
         }
-        SearchOptions.Limit.LimitBuilder limit = SearchOptions.Limit.builder();
-        if (offsetValue != null) {
-            limit.offset(offsetValue);
-        }
-        if (limitValue != null) {
-            limit.num(limitValue);
-        }
-        options.limit(limit.build());
+        options.limit(SearchOptions.Limit.offset(offsetValue == null ? 0 : offsetValue).num(limitValue == null ? DEFAULT_LIMIT : limitValue));
         Hook.QUERY_PLAN.run(query);
         log.info("RediSearch query: {}", query);
 
@@ -157,7 +164,7 @@ public class RediSearchTable extends AbstractQueryableTable implements Translata
             return (RediSearchTable) table;
         }
 
-        private StatefulRediSearchConnection getConnection() {
+        private StatefulRedisModulesConnection<String, String> getConnection() {
             return schema.unwrap(RediSearchSchema.class).connection;
         }
 
@@ -165,7 +172,7 @@ public class RediSearchTable extends AbstractQueryableTable implements Translata
          * Called via code-generation.
          */
         @SuppressWarnings("UnusedDeclaration")
-        public Enumerable<Object> query(List<Map.Entry<String, Class>> fields, List<Map.Entry<String, String>> selectFields, List<Map.Entry<String, String>> aggregateFunctions, List<String> groupByFields, List<String> predicates, List<Map.Entry<String, RelFieldCollation.Direction>> sort, Long offset, Long limit) {
+        public Enumerable<Object> query(List<Map.Entry<String, Class<?>>> fields, List<Map.Entry<String, String>> selectFields, List<Map.Entry<String, String>> aggregateFunctions, List<String> groupByFields, List<String> predicates, List<Map.Entry<String, RelFieldCollation.Direction>> sort, Long offset, Long limit) {
             return getTable().query(getConnection(), fields, selectFields, aggregateFunctions, groupByFields, predicates, sort, offset, limit);
         }
     }

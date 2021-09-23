@@ -1,69 +1,79 @@
-plugins {
-	id 'java'
-	id 'java-library'
-	id 'java-library-distribution'
-	id 'org.springframework.boot' version '2.4.3'
-	id 'io.spring.dependency-management' version '1.0.11.RELEASE'
-	id 'net.researchgate.release' version '2.8.1'
-	id 'org.asciidoctor.jvm.convert' version '3.3.2'
-	id 'org.ajoberstar.git-publish' version '3.0.0'
-	id 'com.github.ben-manes.versions' version '0.38.0'
-	id 'com.github.breadmoirai.github-release' version '2.2.12'
-	id 'com.github.johnrengelman.shadow' version '6.1.0'
-}
+config {
+	info {
+		description = 'RediSearch JDBC'
+		inceptionYear = '2021'
+		tags = ['redisearch', 'jdbc']
 
-group = 'com.redislabs.redisearch.jdbc'
-sourceCompatibility = '1.8'
-targetCompatibility = '1.8'
+		links {
+			website = "https://github.com/redis-field-engineering/${project.rootProject.name}"
+			issueTracker = "https://github.com/redis-field-engineering/${project.rootProject.name}/issues"
+			scm = "https://github.com/redis-field-engineering/${project.rootProject.name}.git"
+		}
 
-bootJar {
-	enabled = false
-}
+		scm {
+			url = "https://github.com/redis-field-engineering/${project.rootProject.name}"
+			connection = "scm:git:https://github.com/redis-field-engineering/${project.rootProject.name}.git"
+			developerConnection = "scm:git:git@github.com:redis-field-engineering/${project.rootProject.name}.git"
+		}
 
-jar {
-	enabled = true
-}
+		specification {
+			enabled = true
+		}
 
-repositories {
-	mavenLocal()
-	mavenCentral()
-}
+		implementation {
+			enabled = true
+		}
+	}
 
-dependencyManagement {
-	imports {
-		mavenBom 'org.apache.logging.log4j:log4j-bom:2.14.0'
+	licensing {
+		enabled = false
+		licenses {
+			license {
+				id = 'Apache-2.0'
+			}
+		}
+	}
+
+	docs {
+		javadoc {
+			options {
+				autoLinks {
+					enabled = false
+				}
+			}
+			aggregate {
+				enabled = false
+			}
+		}
 	}
 }
 
-dependencies {
-	compileOnly 'org.projectlombok:lombok'
-	annotationProcessor 'org.projectlombok:lombok'
-	implementation ('org.apache.calcite:calcite-core:1.26.0') {
-		exclude group: 'org.codehaus.janino', module: 'commons-compiler'
+allprojects {
+	repositories {
+		gradlePluginPortal()
+		mavenCentral()
+		mavenLocal()
 	}
-	implementation 'org.apache.calcite:calcite-linq4j:1.26.0'
-	implementation 'org.apache.calcite.avatica:avatica-core:1.17.0'
-	implementation 'org.codehaus.janino:commons-compiler:3.1.3'
-	implementation 'com.google.guava:guava:30.1-jre'
-	implementation 'org.apache.commons:commons-lang3'
-	implementation 'com.redislabs:lettusearch:3.0.1'
-	implementation 'com.redislabs:jredisearch:2.0.0'
-	implementation 'org.apache.logging.log4j:log4j-api'
-	implementation 'org.apache.logging.log4j:log4j-core'
-	implementation 'org.apache.logging.log4j:log4j-slf4j-impl'
-	implementation 'org.slf4j:jcl-over-slf4j'
-	testCompileOnly 'org.projectlombok:lombok'
-	testAnnotationProcessor 'org.projectlombok:lombok'
-	testImplementation 'org.apache.calcite:calcite-core:1.26.0:tests'
-	testImplementation 'org.junit.jupiter:junit-jupiter-api'
-	testImplementation 'org.junit.jupiter:junit-jupiter-engine'
-	testImplementation 'org.junit.jupiter:junit-jupiter-params'
-	testImplementation 'org.testcontainers:testcontainers:1.15.2'
-	testImplementation 'org.testcontainers:junit-jupiter:1.15.2'
-	testImplementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-csv'
+
+	tasks.withType(GenerateModuleMetadata) {
+		enabled = false
+	}
 }
 
-test {
-	useJUnitPlatform()
+subprojects {
+	config {
+		info {
+			description = project.project_description
+		}
+	}
+	test {
+		useJUnitPlatform()
+	}
+	bootJar {
+		enabled = false
+	}
+	jar {
+		enabled = true
+		archiveClassifier = ''
+	}
 }
-

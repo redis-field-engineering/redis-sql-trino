@@ -1,0 +1,61 @@
+project:
+  name: redisearch-jdbc
+  description: RediSearch JDBC
+  longDescription: JDBC driver for RediSearch
+  website: https://github.com/redis-field-engineering/redisearch-jdbc
+  authors:
+    - Julien Ruaux
+  license: Apache-2.0
+  java:
+    groupId: com.redis
+    version: 8
+    multiProject: true
+  extraProperties:
+    inceptionYear: 2020
+
+release:
+  github:
+    username: jruaux
+    overwrite: true
+    changelog:
+      sort: DESC
+      formatted: ALWAYS
+      format: '- {{commitShortHash}} {{commitTitle}}'
+      labelers:
+        - label: 'feature'
+          title: 'Resolves #'
+          body: 'Resolves #'
+        - label: 'issue'
+          title: 'Fixes #'
+          body: 'Fixes #'
+        - label: 'issue'
+          title: 'Relates to #'
+          body: 'Relates to #'
+        - label: 'task'
+          title: '[chore]'
+        - label: 'dependencies'
+          title: '[deps]'
+      categories:
+        - title: '🚀 Features'
+          labels:
+            - 'feature'
+        - title: '✅ Issues'
+          labels:
+            - 'issue'
+        - title: '🧰 Tasks'
+          labels:
+            - 'task'
+        - title: '⚙️ Dependencies'
+          labels:
+            - 'dependencies'
+      replacers:
+        - search: '\[chore\] '
+          replace: ''
+        - search: '\[deps\] '
+          replace: ''
+
+files:
+  artifacts:
+    - path: VERSION
+    - path: subprojects/redisearch-jdbc/build/distributions/redisearch-jdbc-{{projectVersion}}.zip
+      transform: redisearch-jdbc-{{projectEffectiveVersion}}.zip

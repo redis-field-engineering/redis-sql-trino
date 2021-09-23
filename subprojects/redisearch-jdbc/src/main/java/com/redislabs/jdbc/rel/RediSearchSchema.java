@@ -2,9 +2,9 @@ package com.redislabs.jdbc.rel;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.redislabs.lettusearch.IndexInfo;
-import com.redislabs.lettusearch.RediSearchUtils;
-import com.redislabs.lettusearch.StatefulRediSearchConnection;
+import com.redis.lettucemod.Utils;
+import com.redis.lettucemod.api.StatefulRedisModulesConnection;
+import com.redis.lettucemod.api.search.IndexInfo;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.schema.impl.AbstractSchema;
 
@@ -17,11 +17,11 @@ import java.util.Objects;
  */
 public class RediSearchSchema extends AbstractSchema {
 
-    final StatefulRediSearchConnection<String, String> connection;
+    final StatefulRedisModulesConnection<String, String> connection;
     private final List<String> indexNames;
     private ImmutableMap<String, Table> tableMap;
 
-    public RediSearchSchema(StatefulRediSearchConnection<String, String> connection, final Iterable<String> indexNames) {
+    public RediSearchSchema(StatefulRedisModulesConnection<String, String> connection, final Iterable<String> indexNames) {
         this.connection = Objects.requireNonNull(connection, "connection");
         this.indexNames = ImmutableList.copyOf(Objects.requireNonNull(indexNames, "indexNames"));
     }
@@ -31,7 +31,7 @@ public class RediSearchSchema extends AbstractSchema {
         if (tableMap == null) {
             final ImmutableMap.Builder<String, Table> builder = ImmutableMap.builder();
             for (String indexName : indexNames) {
-                IndexInfo<String> info = RediSearchUtils.getInfo(connection.sync().ftInfo(indexName));
+                IndexInfo info = Utils.indexInfo(connection.sync().indexInfo(indexName));
                 Table table = new RediSearchTable(info);
                 builder.put(indexName, table);
             }

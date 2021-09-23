@@ -1,7 +1,7 @@
 package com.redislabs.jdbc.rel;
 
 import com.google.common.base.Preconditions;
-import com.redislabs.lettusearch.Field;
+import com.redis.lettucemod.api.search.Field;
 import io.redisearch.querybuilder.QueryBuilder;
 import io.redisearch.querybuilder.QueryNode;
 import io.redisearch.querybuilder.Value;

@@ -1,6 +1,6 @@
 package com.redislabs.jdbc.rel;
 
-import com.redislabs.lettusearch.IndexInfo;
+import com.redis.lettucemod.api.search.IndexInfo;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.jdbc.JavaRecordType;
 import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
@@ -37,16 +37,16 @@ public class JavaTypeFactoryExtImpl extends JavaTypeFactoryImpl {
         return canonize(new JavaRecordType(list, type));
     }
 
-    public RelDataType createIndexType(IndexInfo<String> indexInfo) {
+    public RelDataType createIndexType(IndexInfo indexInfo) {
         final List<RelDataTypeField> list = new ArrayList<>();
-        for (com.redislabs.lettusearch.Field<String> field : indexInfo.getFields()) {
+        for (com.redis.lettucemod.api.search.Field field : indexInfo.getFields()) {
             Type fieldType = fieldType(field);
             list.add(new RelDataTypeFieldImpl(field.getName(), list.size(), createType(fieldType)));
         }
         return canonize(new RelRecordType(list));
     }
 
-    private Type fieldType(com.redislabs.lettusearch.Field<String> field) {
+    private Type fieldType(com.redis.lettucemod.api.search.Field field) {
         switch (field.getType()) {
             case NUMERIC:
                 return Double.class;

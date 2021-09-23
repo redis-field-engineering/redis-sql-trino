@@ -1,8 +1,8 @@
 package com.redislabs.jdbc.rel;
 
-import com.redislabs.lettusearch.Document;
-import com.redislabs.lettusearch.Field;
-import com.redislabs.lettusearch.SearchResults;
+import com.redis.lettucemod.api.search.Document;
+import com.redis.lettucemod.api.search.Field;
+import com.redis.lettucemod.api.search.SearchResults;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.calcite.linq4j.Enumerator;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
@@ -24,8 +24,8 @@ class RediSearchEnumerator implements Enumerator<Object> {
 
     private final Map<String, Field.Type> indexFields;
     private final Iterator<Document<String, String>> iterator;
+    private final List<RelDataTypeField> fieldTypes;
     private Document<String, String> current;
-    private List<RelDataTypeField> fieldTypes;
 
     /**
      * Creates a RediSearchEnumerator.

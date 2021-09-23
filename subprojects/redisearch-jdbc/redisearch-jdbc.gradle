@@ -1,0 +1,30 @@
+dependencyManagement {
+    imports {
+        mavenBom 'org.apache.logging.log4j:log4j-bom:2.14.0'
+    }
+}
+
+dependencies {
+    implementation (group: 'org.apache.calcite', name: 'calcite-core', version: calciteVersion) {
+        exclude group: 'org.codehaus.janino', module: 'commons-compiler'
+    }
+    implementation group: 'org.apache.calcite', name: 'calcite-linq4j', version: calciteVersion
+    implementation 'org.apache.calcite.avatica:avatica-core:1.17.0'
+    implementation 'org.codehaus.janino:commons-compiler:3.1.3'
+    implementation 'com.google.guava:guava:30.1-jre'
+    implementation 'org.apache.commons:commons-lang3'
+    implementation group: 'com.redis', name: 'lettucemod', version: lettucemodVersion
+    implementation 'com.redislabs:jredisearch:2.0.0'
+    implementation 'org.apache.logging.log4j:log4j-api'
+    implementation 'org.apache.logging.log4j:log4j-core'
+    implementation 'org.apache.logging.log4j:log4j-slf4j-impl'
+    implementation 'org.slf4j:jcl-over-slf4j'
+    testImplementation group: 'org.apache.calcite', name: 'calcite-core', version: calciteVersion, classifier: 'tests'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api'
+    testImplementation 'org.junit.jupiter:junit-jupiter-engine'
+    testImplementation 'org.junit.jupiter:junit-jupiter-params'
+    testImplementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-csv'
+    testImplementation group: 'com.redis.testcontainers', name: 'testcontainers-redis', version: testcontainersRedisVersion
+    testImplementation group: 'com.redis.testcontainers', name: 'junit-jupiter', version: testcontainersVersion
+
+}
