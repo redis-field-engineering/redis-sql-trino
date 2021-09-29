@@ -1,8 +1,8 @@
 config {
 	info {
-		description = 'RediSearch JDBC'
+		description = 'Calcite adapter for RediSearch'
 		inceptionYear = '2021'
-		tags = ['redisearch', 'jdbc']
+		tags = ['calcite', 'redisearch']
 
 		links {
 			website = "https://github.com/redis-field-engineering/${project.rootProject.name}"

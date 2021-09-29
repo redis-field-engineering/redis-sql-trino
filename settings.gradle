@@ -15,7 +15,7 @@ buildscript {
 
 apply plugin: 'org.kordamp.gradle.kordamp-parentbuild'
 
-rootProject.name = 'redisearch-jdbc'
+rootProject.name = 'calcite-redisearch'
 
 projects {
     directories = ['subprojects']

@@ -1,8 +1,8 @@
 project:
-  name: redisearch-jdbc
-  description: RediSearch JDBC
-  longDescription: JDBC driver for RediSearch
-  website: https://github.com/redis-field-engineering/redisearch-jdbc
+  name: calcite-redisearch
+  description: Calcite adapter for RediSearch
+  longDescription: Calcite adapter for RediSearch
+  website: https://github.com/redis-field-engineering/calcite-redisearch
   authors:
     - Julien Ruaux
   license: Apache-2.0
@@ -57,5 +57,5 @@ release:
 files:
   artifacts:
     - path: VERSION
-    - path: subprojects/redisearch-jdbc/build/distributions/redisearch-jdbc-{{projectVersion}}.zip
-      transform: redisearch-jdbc-{{projectEffectiveVersion}}.zip
+    - path: subprojects/calcite-redisearch/build/distributions/calcite-redisearch-{{projectVersion}}.zip
+      transform: calcite-redisearch-{{projectEffectiveVersion}}.zip

@@ -1,7 +1,7 @@
-= RediSearch JDBC
+= Calcite Adapter for RediSearch
 :linkattrs:
 :project-owner:   redis-field-engineering
-:project-name:    redisearch-jdbc
+:project-name:    calcite-redisearch
 :project-group:   com.redis
 :project-version: 0.0.1-SNAPSHOT
 
@@ -10,7 +10,7 @@ image:https://img.shields.io/maven-central/v/{project-group}/{project-name}[Down
 image:https://img.shields.io/nexus/s/{project-group}/{project-name}?server=https%3A%2F%2Fs01.oss.sonatype.org[Snapshot,link="https://s01.oss.sonatype.org/#nexus-search;quick~{project-name}"]
 image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg?token=9I4H9NOBRQ["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
 
-JDBC Driver for RediSearch based on https://calcite.apache.org[Apache Calcite].
+https://calcite.apache.org[Apache Calcite] adapter for RediSearch.
 
 == Getting Started
 
