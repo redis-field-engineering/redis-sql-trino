@@ -13,11 +13,11 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Schema mapped onto a RediSearch Region.
+ * Schema mapped onto a RediSearch index.
  */
 public class RediSearchSchema extends AbstractSchema {
 
-    final StatefulRedisModulesConnection<String, String> connection;
+    private final StatefulRedisModulesConnection<String, String> connection;
     private final List<String> indexNames;
     private ImmutableMap<String, Table> tableMap;
 
@@ -40,4 +40,13 @@ public class RediSearchSchema extends AbstractSchema {
 
         return tableMap;
     }
+
+    public StatefulRedisModulesConnection<String, String> getConnection() {
+        return connection;
+    }
+
+    public List<String> getIndexNames() {
+        return indexNames;
+    }
+
 }

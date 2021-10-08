@@ -6,14 +6,21 @@ import io.redisearch.querybuilder.QueryBuilder;
 import io.redisearch.querybuilder.QueryNode;
 import io.redisearch.querybuilder.Value;
 import io.redisearch.querybuilder.Values;
-import org.apache.calcite.plan.*;
+import org.apache.calcite.plan.RelOptCluster;
+import org.apache.calcite.plan.RelOptCost;
+import org.apache.calcite.plan.RelOptPlanner;
+import org.apache.calcite.plan.RelOptUtil;
+import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rex.*;
+import org.apache.calcite.rex.RexBuilder;
+import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexInputRef;
+import org.apache.calcite.rex.RexLiteral;
+import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.SqlKind;
-import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -28,23 +35,17 @@ import java.util.stream.Stream;
  */
 public class RediSearchFilter extends Filter implements RediSearchRel {
 
-    private final String match;
     private final Map<String, Field.Type> indexFields;
 
-    RediSearchFilter(RelOptCluster cluster, RelTraitSet traitSet, RelNode input, RexNode condition, Map<String, Field.Type> indexFields) {
-
-        super(cluster, traitSet, input, condition);
+    public RediSearchFilter(RelOptCluster cluster, RelTraitSet traitSet, RelNode child, RexNode condition, Map<String, Field.Type> indexFields) {
+        super(cluster, traitSet, child, condition);
+        assert getConvention() == RediSearchRel.CONVENTION;
+        assert getConvention() == child.getConvention();
         this.indexFields = indexFields;
-
-        Translator translator = new Translator(getRowType(), getCluster().getRexBuilder(), indexFields);
-        this.match = translator.translateMatch(condition).toString();
-
-        assert getConvention() == CONVENTION;
-        assert getConvention() == input.getConvention();
     }
 
     @Override
-    public @Nullable RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {
+    public RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {
         return super.computeSelfCost(planner, mq).multiplyBy(0.1);
     }
 
@@ -57,13 +58,15 @@ public class RediSearchFilter extends Filter implements RediSearchRel {
     public void implement(RediSearchImplementContext rediSearchImplementContext) {
         // first call the input down the tree.
         rediSearchImplementContext.visitChild(getInput());
+        Translator translator = new Translator(getRowType(), getCluster().getRexBuilder(), indexFields);
+        String match = translator.translateMatch(condition).toString();
         rediSearchImplementContext.addPredicates(Collections.singletonList(match));
     }
 
     /**
      * Translates {@link RexNode} expressions into RediSearch expression strings.
      */
-    static class Translator {
+    public static class Translator {
         @SuppressWarnings("unused")
         private final RelDataType rowType;
         private final List<String> fieldNames;
@@ -85,13 +88,8 @@ public class RediSearchFilter extends Filter implements RediSearchRel {
          * @return OQL predicate string
          */
         private QueryNode translateMatch(RexNode condition) {
-            // Remove SEARCH calls because current translation logic cannot handle it.
-            // However, it would efficient to handle SEARCH explicitly; a RediSearch
-            // 'IN SET' would always manifest as a SEARCH.
-            final RexNode condition2 = RexUtil.expandSearch(rexBuilder, null, condition);
-
             // Returns condition decomposed by OR
-            List<RexNode> disjunctions = RelOptUtil.disjunctions(condition2);
+            List<RexNode> disjunctions = RelOptUtil.disjunctions(condition);
             if (disjunctions.size() == 1) {
                 return translateAnd(disjunctions.get(0));
             } else {
@@ -125,7 +123,6 @@ public class RediSearchFilter extends Filter implements RediSearchRel {
                 case CAST:
                     // FIXME This will not work in all cases (for example, we ignore string encoding)
                     return getLeftNodeFieldName(((RexCall) left).operands.get(0));
-                case ITEM:
                 case OTHER_FUNCTION:
                     return left.accept(new RediSearchRules.RexToRediSearchTranslator(this.fieldNames));
                 default:
@@ -323,7 +320,7 @@ public class RediSearchFilter extends Filter implements RediSearchRel {
                 case CAST:
                     // FIXME This will not work in all cases (for example, we ignore string encoding)
                     return translateBinary2(op, ((RexCall) left).operands.get(0), right);
-                case ITEM:
+                case OTHER_FUNCTION:
                     String item = left.accept(new RediSearchRules.RexToRediSearchTranslator(this.fieldNames));
                     return QueryBuilder.intersect(item, value(type(item), op, rightLiteral));
                 default:

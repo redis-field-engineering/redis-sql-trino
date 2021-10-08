@@ -4,6 +4,10 @@ import org.apache.calcite.adapter.enumerable.EnumerableConvention;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
+import org.apache.calcite.rel.core.RelFactories;
+import org.apache.calcite.tools.RelBuilderFactory;
+
+import java.util.function.Predicate;
 
 /**
  * Rule to convert a relational expression from
@@ -11,10 +15,12 @@ import org.apache.calcite.rel.convert.ConverterRule;
  */
 public class RediSearchToEnumerableConverterRule extends ConverterRule {
 
-    public static final ConverterRule INSTANCE = Config.INSTANCE.withConversion(RelNode.class, RediSearchRel.CONVENTION, EnumerableConvention.INSTANCE, "RediSearchToEnumerableConverterRule").withRuleFactory(RediSearchToEnumerableConverterRule::new).toRule(RediSearchToEnumerableConverterRule.class);
+    public static final ConverterRule INSTANCE = new RediSearchToEnumerableConverterRule(RelFactories.LOGICAL_BUILDER);
 
-    protected RediSearchToEnumerableConverterRule(Config config) {
-        super(config);
+    private RediSearchToEnumerableConverterRule(RelBuilderFactory relBuilderFactory) {
+        super(RelNode.class, (Predicate<RelNode>) r -> true,
+                RediSearchRel.CONVENTION, EnumerableConvention.INSTANCE,
+                relBuilderFactory, "RediSearchToEnumerableConverterRule");
     }
 
     @Override

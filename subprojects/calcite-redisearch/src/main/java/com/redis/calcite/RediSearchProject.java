@@ -1,6 +1,5 @@
 package com.redis.calcite;
 
-import com.google.common.collect.ImmutableList;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptCost;
 import org.apache.calcite.plan.RelOptPlanner;
@@ -11,7 +10,6 @@ import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.util.Pair;
-import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,8 +22,8 @@ import java.util.Map;
  */
 public class RediSearchProject extends Project implements RediSearchRel {
 
-    RediSearchProject(RelOptCluster cluster, RelTraitSet traitSet, RelNode input, List<? extends RexNode> projects, RelDataType rowType) {
-        super(cluster, traitSet, ImmutableList.of(), input, projects, rowType);
+    public RediSearchProject(RelOptCluster cluster, RelTraitSet traitSet, RelNode input, List<? extends RexNode> projects, RelDataType rowType) {
+        super(cluster, traitSet, input, projects, rowType);
         assert getConvention() == CONVENTION;
         assert getConvention() == input.getConvention();
     }
@@ -36,7 +34,7 @@ public class RediSearchProject extends Project implements RediSearchRel {
     }
 
     @Override
-    public @Nullable RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {
+    public RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {
         return super.computeSelfCost(planner, mq).multiplyBy(0.1);
     }
 

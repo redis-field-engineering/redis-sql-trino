@@ -1,6 +1,11 @@
 package com.redis.calcite;
 
-import org.apache.calcite.plan.*;
+import org.apache.calcite.plan.Convention;
+import org.apache.calcite.plan.RelOptRule;
+import org.apache.calcite.plan.RelOptRuleCall;
+import org.apache.calcite.plan.RelOptUtil;
+import org.apache.calcite.plan.RelTrait;
+import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
@@ -9,7 +14,11 @@ import org.apache.calcite.rel.logical.LogicalAggregate;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rex.*;
+import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexInputRef;
+import org.apache.calcite.rex.RexLiteral;
+import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.rex.RexVisitorImpl;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.SqlTypeName;
@@ -24,7 +33,7 @@ import java.util.List;
  */
 public class RediSearchRules {
 
-    static final RelOptRule[] RULES = {RediSearchSortLimitRule.INSTANCE, RediSearchFilterRule.INSTANCE, RediSearchProjectRule.INSTANCE, RediSearchAggregateRule.INSTANCE,};
+    public static final RelOptRule[] RULES = {RediSearchSortLimitRule.INSTANCE, RediSearchFilterRule.INSTANCE, RediSearchProjectRule.INSTANCE, RediSearchAggregateRule.INSTANCE,};
 
 
     private RediSearchRules() {
@@ -69,8 +78,7 @@ public class RediSearchRules {
 
         @Override
         public String visitCall(RexCall call) {
-            final List<String> strings = new ArrayList<>();
-            visitList(call.operands, strings);
+            final List<String> strings = visitList(call.operands);
             if (call.getOperator() == SqlStdOperatorTable.ITEM) {
                 final RexNode op1 = call.getOperands().get(1);
                 if (op1 instanceof RexLiteral) {
@@ -85,6 +93,14 @@ public class RediSearchRules {
             return super.visitCall(call);
         }
 
+        List<String> visitList(List<RexNode> list) {
+            final List<String> strings = new ArrayList<>();
+            for (RexNode node : list) {
+                strings.add(node.accept(this));
+            }
+            return strings;
+        }
+
         private static String stripQuotes(String s) {
             return s.startsWith("'") && s.endsWith("'") ? s.substring(1, s.length() - 1) : s;
         }
@@ -94,10 +110,10 @@ public class RediSearchRules {
      * Rule to convert a {@link LogicalProject} to a {@link RediSearchProject}.
      */
     private static class RediSearchProjectRule extends RediSearchConverterRule {
-        private static final RediSearchProjectRule INSTANCE = Config.INSTANCE.withConversion(LogicalProject.class, Convention.NONE, RediSearchRel.CONVENTION, "RediSearchProjectRule").withRuleFactory(RediSearchProjectRule::new).toRule(RediSearchProjectRule.class);
+        private static final RediSearchProjectRule INSTANCE = new RediSearchProjectRule();
 
-        protected RediSearchProjectRule(Config config) {
-            super(config);
+        private RediSearchProjectRule() {
+            super(LogicalProject.class, Convention.NONE, RediSearchRel.CONVENTION, "RediSearchProjectRule");
         }
 
         @Override
@@ -114,8 +130,8 @@ public class RediSearchRules {
         }
 
         @Override
-        public RelNode convert(RelNode rel) {
-            final LogicalProject project = (LogicalProject) rel;
+        public RelNode convert(RelNode relNode) {
+            final LogicalProject project = (LogicalProject) relNode;
             final RelTraitSet traitSet = project.getTraitSet().replace(getOutConvention());
             return new RediSearchProject(project.getCluster(), traitSet, convert(project.getInput(), getOutConvention()), project.getProjects(), project.getRowType());
         }
@@ -126,10 +142,11 @@ public class RediSearchRules {
      * {@link RediSearchAggregate}.
      */
     private static class RediSearchAggregateRule extends RediSearchConverterRule {
-        private static final RediSearchAggregateRule INSTANCE = Config.INSTANCE.withConversion(LogicalAggregate.class, Convention.NONE, RediSearchRel.CONVENTION, "RediSearchAggregateRule").withRuleFactory(RediSearchAggregateRule::new).toRule(RediSearchAggregateRule.class);
+        private static final RediSearchAggregateRule INSTANCE = new RediSearchAggregateRule();
 
-        protected RediSearchAggregateRule(Config config) {
-            super(config);
+        protected RediSearchAggregateRule() {
+            super(LogicalAggregate.class, Convention.NONE, RediSearchRel.CONVENTION,
+                    "RediSearchAggregateRule");
         }
 
         @Override
@@ -144,54 +161,43 @@ public class RediSearchRules {
      * Rule to convert the Limit in {@link Sort} to a
      * {@link RediSearchSort}.
      */
-    public static class RediSearchSortLimitRule extends RelRule<RediSearchSortLimitRule.Config> {
+    public static class RediSearchSortLimitRule extends RediSearchConverterRule {
 
-        private static final RediSearchSortLimitRule INSTANCE = Config.EMPTY.withOperandSupplier(b -> b.operand(Sort.class)
-                // OQL doesn't support offsets (e.g. LIMIT 10 OFFSET 500)
-                .predicate(sort -> sort.offset == null).anyInputs()).as(Config.class).toRule();
+        private static final RediSearchSortLimitRule INSTANCE = new RediSearchSortLimitRule();
 
         /**
          * Creates a RediSearchSortLimitRule.
          */
-        protected RediSearchSortLimitRule(Config config) {
-            super(config);
+        protected RediSearchSortLimitRule() {
+            super(Sort.class, Convention.NONE, RediSearchRel.CONVENTION,
+                    "RediSearchSortRule");
         }
 
         @Override
-        public void onMatch(RelOptRuleCall call) {
-            final Sort sort = call.rel(0);
+        public RelNode convert(RelNode relNode) {
+            final Sort sort = (Sort) relNode;
 
-            final RelTraitSet traitSet = sort.getTraitSet().replace(RediSearchRel.CONVENTION).replace(sort.getCollation());
+            final RelTraitSet traitSet = sort.getTraitSet().replace(out).replace(sort.getCollation());
 
-            RediSearchSort rediSearchSort = new RediSearchSort(sort.getCluster(), traitSet, convert(sort.getInput(), traitSet.replace(RelCollations.EMPTY)), sort.getCollation(), sort.fetch, sort.offset);
-
-            call.transformTo(rediSearchSort);
+            return new RediSearchSort(relNode.getCluster(), traitSet, convert(sort.getInput(), traitSet.replace(RelCollations.EMPTY)), sort.getCollation(), sort.offset, sort.fetch);
         }
 
-        /**
-         * Rule configuration.
-         */
-        public interface Config extends RelRule.Config {
-            @Override
-            default RediSearchSortLimitRule toRule() {
-                return new RediSearchSortLimitRule(this);
-            }
-        }
     }
 
     /**
      * Rule to convert a {@link LogicalFilter} to a
      * {@link RediSearchFilter}.
      */
-    public static class RediSearchFilterRule extends RelRule<RediSearchFilterRule.Config> {
+    public static class RediSearchFilterRule extends RelOptRule {
 
-        private static final RediSearchFilterRule INSTANCE = Config.EMPTY.withOperandSupplier(b0 -> b0.operand(LogicalFilter.class).oneInput(b1 -> b1.operand(RediSearchTableScan.class).noInputs())).as(Config.class).toRule();
+        public static final RediSearchFilterRule INSTANCE = new RediSearchFilterRule();
 
         /**
          * Creates a RediSearchFilterRule.
          */
-        protected RediSearchFilterRule(Config config) {
-            super(config);
+        protected RediSearchFilterRule() {
+            super(operand(LogicalFilter.class, operand(RediSearchTableScan.class, none())),
+                    "RediSearchFilterRule");
         }
 
         @Override
@@ -231,7 +237,7 @@ public class RediSearchRules {
                 return true;
             }
 
-            if (!SqlKind.COMPARISON.contains(node.getKind()) && node.getKind() != SqlKind.SEARCH) {
+            if (!SqlKind.COMPARISON.contains(node.getKind())) {
                 return false;
             }
 
@@ -295,7 +301,11 @@ public class RediSearchRules {
                 String rightName = fieldNames.get(right1.getIndex());
 
                 return (leftName != null) && (rightName != null);
-            } else return left.isA(SqlKind.ITEM) && right.isA(SqlKind.LITERAL);
+            }
+            if (left.isA(SqlKind.OTHER_FUNCTION) && right.isA(SqlKind.LITERAL)) {
+                return ((RexCall) left).getOperator() == SqlStdOperatorTable.ITEM;
+            }
+            return false;
         }
 
         @Override
@@ -313,15 +323,6 @@ public class RediSearchRules {
             return new RediSearchFilter(filter.getCluster(), traitSet, convert(filter.getInput(), RediSearchRel.CONVENTION), filter.getCondition(), scan.rediSearchTable.indexFields());
         }
 
-        /**
-         * Rule configuration.
-         */
-        public interface Config extends RelRule.Config {
-            @Override
-            default RediSearchFilterRule toRule() {
-                return new RediSearchFilterRule(this);
-            }
-        }
     }
 
     /**
@@ -329,8 +330,13 @@ public class RediSearchRules {
      * expression to RediSearch calling convention.
      */
     abstract static class RediSearchConverterRule extends ConverterRule {
-        protected RediSearchConverterRule(Config config) {
-            super(config);
+
+        final Convention out;
+
+        protected RediSearchConverterRule(Class<? extends RelNode> clazz, RelTrait in, Convention out,
+                                          String description) {
+            super(clazz, in, out, description);
+            this.out = out;
         }
     }
 }

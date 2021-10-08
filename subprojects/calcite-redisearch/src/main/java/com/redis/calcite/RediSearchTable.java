@@ -165,7 +165,7 @@ public class RediSearchTable extends AbstractQueryableTable implements Translata
         }
 
         private StatefulRedisModulesConnection<String, String> getConnection() {
-            return schema.unwrap(RediSearchSchema.class).connection;
+            return schema.unwrap(RediSearchSchema.class).getConnection();
         }
 
         /**
