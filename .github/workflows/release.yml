@@ -30,6 +30,7 @@ jobs:
           sonatype-password: ${{ secrets.SONATYPE_PASSWORD }}
           github-token: ${{ secrets.GIT_ACCESS_TOKEN }}
           slack-webhook: ${{ secrets.JRELEASER_SLACK_WEBHOOK }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload test reports
         if: failure()
