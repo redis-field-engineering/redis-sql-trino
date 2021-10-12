@@ -1,9 +1,7 @@
-package com.redis.calcite;
+package org.apache.calcite.adapter.redisearch;
 
-import com.google.common.collect.ImmutableMap;
 import com.redis.lettucemod.api.StatefulRedisModulesConnection;
 import com.redis.lettucemod.api.search.Field;
-import com.redis.lettucemod.api.search.IndexInfo;
 import com.redis.lettucemod.api.search.Order;
 import com.redis.lettucemod.api.search.SearchOptions;
 import com.redis.lettucemod.api.search.SearchResults;
@@ -21,11 +19,13 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeImpl;
+import org.apache.calcite.rel.type.RelDataTypeSystem;
 import org.apache.calcite.rel.type.RelProtoDataType;
 import org.apache.calcite.runtime.Hook;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.TranslatableTable;
 import org.apache.calcite.schema.impl.AbstractTableQueryable;
+import org.apache.calcite.sql.type.SqlTypeFactoryImpl;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.Util;
 
@@ -41,26 +41,26 @@ import java.util.Map;
 public class RediSearchTable extends AbstractQueryableTable implements TranslatableTable {
 
     public static final int DEFAULT_LIMIT = 100;
-    private final IndexInfo indexInfo;
-    private final RelDataType rowType;
+    private final RediSearchSchema schema;
+    private final String index;
+    private RelProtoDataType protoRowType;
 
-    RediSearchTable(IndexInfo indexInfo) {
+    RediSearchTable(RediSearchSchema schema, String index) {
         super(Object[].class);
-        this.indexInfo = indexInfo;
-        this.rowType = new JavaTypeFactoryExtImpl().createIndexType(indexInfo);
+        this.schema = schema;
+        this.index = index;
     }
 
     @Override
     public String toString() {
-        return "RedisSearchTable {" + indexInfo.getIndexName() + "}";
+        return "RedisSearchTable {" + index + "}";
     }
 
-    @SuppressWarnings({"unused", "UnusedAssignment"})
+    @SuppressWarnings("unused")
     public Enumerable<Object> query(final StatefulRedisModulesConnection<String, String> connection, final List<Map.Entry<String, Class<?>>> fields, final List<Map.Entry<String, String>> selectFields, final List<Map.Entry<String, String>> aggregateFunctions, final List<String> groupByFields, List<String> predicates, List<Map.Entry<String, RelFieldCollation.Direction>> sort, Long offsetValue, Long limitValue) {
-
-        final RelDataTypeFactory typeFactory = new JavaTypeFactoryExtImpl();
+        final RelDataTypeFactory typeFactory =
+                new SqlTypeFactoryImpl(RelDataTypeSystem.DEFAULT);
         final RelDataTypeFactory.Builder fieldInfo = typeFactory.builder();
-
         for (Map.Entry<String, Class<?>> field : fields) {
             SqlTypeName typeName = typeFactory.createJavaType(field.getValue()).getSqlTypeName();
             RelDataType type;
@@ -79,14 +79,15 @@ public class RediSearchTable extends AbstractQueryableTable implements Translata
 
         final RelProtoDataType resultRowType = RelDataTypeImpl.proto(fieldInfo.build());
 
-        ImmutableMap<String, String> aggFuncMap = ImmutableMap.of();
-        if (!aggregateFunctions.isEmpty()) {
-            ImmutableMap.Builder<String, String> aggFuncMapBuilder = ImmutableMap.builder();
-            for (Map.Entry<String, String> e : aggregateFunctions) {
-                aggFuncMapBuilder.put(e.getKey(), e.getValue());
-            }
-            aggFuncMap = aggFuncMapBuilder.build();
-        }
+        // TODO
+//        ImmutableMap<String, String> aggFuncMap = ImmutableMap.of();
+//        if (!aggregateFunctions.isEmpty()) {
+//            ImmutableMap.Builder<String, String> aggFuncMapBuilder = ImmutableMap.builder();
+//            for (Map.Entry<String, String> e : aggregateFunctions) {
+//                aggFuncMapBuilder.put(e.getKey(), e.getValue());
+//            }
+//            aggFuncMap = aggFuncMapBuilder.build();
+//        }
 
         // Combine all predicates conjunctively
         String query = predicates.isEmpty() ? "*" : Util.toString(predicates, "", " ", "");
@@ -109,10 +110,10 @@ public class RediSearchTable extends AbstractQueryableTable implements Translata
             @Override
             public Enumerator<Object> enumerator() {
                 try {
-                    SearchResults<String, String> results = connection.sync().search(indexInfo.getIndexName(), query, options.build());
-                    return new RediSearchEnumerator(indexFields(), results, resultRowType);
+                    SearchResults<String, String> results = connection.sync().search(index, query, options.build());
+                    return new RediSearchEnumerator(results, resultRowType);
                 } catch (Exception e) {
-                    String message = String.format(Locale.ROOT, "Failed to execute query [%s] on %s", query, indexInfo.getIndexName());
+                    String message = String.format(Locale.ROOT, "Failed to execute query [%s] on %s", query, index);
                     throw new RuntimeException(message, e);
                 }
             }
@@ -121,7 +122,7 @@ public class RediSearchTable extends AbstractQueryableTable implements Translata
 
     public Map<String, Field.Type> indexFields() {
         Map<String, Field.Type> fieldTypes = new LinkedHashMap<>();
-        indexInfo.getFields().forEach(f -> fieldTypes.put(f.getName(), f.getType()));
+        schema.getIndexInfo().getFields().forEach(f -> fieldTypes.put(f.getName(), f.getType()));
         return fieldTypes;
     }
 
@@ -140,7 +141,11 @@ public class RediSearchTable extends AbstractQueryableTable implements Translata
 
     @Override
     public RelDataType getRowType(RelDataTypeFactory typeFactory) {
-        return rowType;
+        if (protoRowType == null) {
+            protoRowType = schema.getRelDataType();
+        }
+        return protoRowType.apply(typeFactory);
+
     }
 
     /**

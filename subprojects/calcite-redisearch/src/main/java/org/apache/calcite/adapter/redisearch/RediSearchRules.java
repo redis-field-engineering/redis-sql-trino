@@ -1,4 +1,4 @@
-package com.redis.calcite;
+package org.apache.calcite.adapter.redisearch;
 
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptRule;
@@ -37,22 +37,6 @@ public class RediSearchRules {
 
 
     private RediSearchRules() {
-    }
-
-    /**
-     * Returns 'string' if it is a call to item['string'], null otherwise.
-     */
-    static String isItem(RexCall call) {
-        if (call.getOperator() != SqlStdOperatorTable.ITEM) {
-            return null;
-        }
-        final RexNode op0 = call.getOperands().get(0);
-        final RexNode op1 = call.getOperands().get(1);
-
-        if (op0 instanceof RexInputRef && ((RexInputRef) op0).getIndex() == 0 && op1 instanceof RexLiteral && ((RexLiteral) op1).getValue2() instanceof String) {
-            return (String) ((RexLiteral) op1).getValue2();
-        }
-        return null;
     }
 
     static List<String> rediSearchFieldNames(final RelDataType rowType) {
@@ -333,8 +317,7 @@ public class RediSearchRules {
 
         final Convention out;
 
-        protected RediSearchConverterRule(Class<? extends RelNode> clazz, RelTrait in, Convention out,
-                                          String description) {
+        protected RediSearchConverterRule(Class<? extends RelNode> clazz, RelTrait in, Convention out, String description) {
             super(clazz, in, out, description);
             this.out = out;
         }

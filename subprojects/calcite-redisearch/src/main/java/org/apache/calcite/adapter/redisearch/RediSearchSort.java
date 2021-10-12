@@ -1,4 +1,4 @@
-package com.redis.calcite;
+package org.apache.calcite.adapter.redisearch;
 
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptCost;

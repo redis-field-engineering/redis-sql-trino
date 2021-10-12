@@ -1,11 +1,10 @@
-package com.redis.calcite;
+package org.apache.calcite.adapter.redisearch;
 
 import com.redis.lettucemod.RedisModulesClient;
 import org.apache.calcite.schema.Schema;
 import org.apache.calcite.schema.SchemaFactory;
 import org.apache.calcite.schema.SchemaPlus;
 
-import java.util.Arrays;
 import java.util.Map;
 
 
@@ -15,16 +14,13 @@ import java.util.Map;
 @SuppressWarnings("UnusedDeclaration")
 public class RediSearchSchemaFactory implements SchemaFactory {
 
-    public RediSearchSchemaFactory() {
-        // Do Nothing
-    }
-
     @Override
     public Schema create(SchemaPlus parentSchema, String name, Map<String, Object> operand) {
-        Map map = (Map) operand;
-        String uri = (String) map.get("uri");
-        String index = (String) map.get("index");
+        String uri = (String) operand.get("uri");
+        String index = (String) operand.get("index");
+        String username = (String) operand.get("username");
+        String password = (String) operand.get("password");
         RedisModulesClient client = RedisModulesClient.create(uri);
-        return new RediSearchSchema(client.connect(), Arrays.asList(index));
+        return new RediSearchSchema(uri, index, username, password);
     }
 }

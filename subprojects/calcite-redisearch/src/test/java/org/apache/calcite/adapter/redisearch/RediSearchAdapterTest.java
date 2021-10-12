@@ -1,4 +1,4 @@
-package com.redis.calcite;
+package org.apache.calcite.adapter.redisearch;
 
 import com.fasterxml.jackson.databind.MappingIterator;
 import com.fasterxml.jackson.dataformat.csv.CsvMapper;
@@ -18,7 +18,6 @@ import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.test.CalciteAssert;
 import org.apache.calcite.util.TestUtil;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Container;
@@ -31,7 +30,6 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -51,8 +49,6 @@ class RediSearchAdapterTest {
     public final static Field[] FIELDS = new Field[]{Field.text(NAME).matcher(Field.Text.PhoneticMatcher.English).build(), Field.tag(STYLE).sortable().build(), Field.numeric(ABV).sortable().build(), Field.tag(BREWERY_ID).sortable().build()};
     public final static String BEERS = "beers";
 
-    protected static RedisModulesClient client;
-    protected static StatefulRedisModulesConnection<String, String> rediSearchConnection;
     protected static String host;
     protected static int port;
 
@@ -63,13 +59,13 @@ class RediSearchAdapterTest {
     public static void setup() throws IOException {
         host = REDISEARCH.getHost();
         port = REDISEARCH.getFirstMappedPort();
-        client = RedisModulesClient.create(RedisURI.create(host, port));
-        rediSearchConnection = client.connect();
-        RedisModulesCommands<String, String> sync = rediSearchConnection.sync();
+        RedisModulesClient client = RedisModulesClient.create(RedisURI.create(host, port));
+        StatefulRedisModulesConnection<String, String> connection = client.connect();
+        RedisModulesCommands<String, String> sync = connection.sync();
         sync.flushall();
         List<Map<String, String>> beers = beers();
         sync.create(BEERS, CreateOptions.<String, String>builder().prefix("beer").build(), FIELDS);
-        RedisModulesAsyncCommands<String, String> async = rediSearchConnection.async();
+        RedisModulesAsyncCommands<String, String> async = connection.async();
         async.setAutoFlushCommands(false);
         List<RedisFuture<?>> futures = new ArrayList<>();
         for (Map<String, String> beer : beers) {
@@ -78,16 +74,9 @@ class RediSearchAdapterTest {
         async.flushCommands();
         async.setAutoFlushCommands(true);
         LettuceFutures.awaitAll(RedisURI.DEFAULT_TIMEOUT_DURATION, futures.toArray(new RedisFuture[0]));
-    }
-
-    @AfterAll
-    protected static void teardown() {
-        if (rediSearchConnection != null) {
-            rediSearchConnection.close();
-        }
-        if (client != null) {
-            client.shutdown();
-        }
+        connection.close();
+        client.shutdown();
+        client.getResources().shutdown();
     }
 
     protected static List<Map<String, String>> beers() throws IOException {
@@ -110,7 +99,7 @@ class RediSearchAdapterTest {
     protected Connection connection() throws SQLException {
         final Connection connection = DriverManager.getConnection("jdbc:calcite:lex=JAVA");
         final SchemaPlus root = connection.unwrap(CalciteConnection.class).getRootSchema();
-        root.add("redisearch", new RediSearchSchema(client.connect(), Collections.singletonList(BEERS)));
+        root.add("redisearch", new RediSearchSchema(REDISEARCH.getRedisURI(), BEERS, null, null));
         return connection;
     }
 
@@ -224,7 +213,7 @@ class RediSearchAdapterTest {
     @Test
     void testFilterSort() {
         final String sql = "select * from redisearch.beers where style = 'American IPA' and abv >= .05 order by abv";
-        final String explain = "PLAN=RediSearchToEnumerableConverter\n  RediSearchSort(sort0=[$2], dir0=[ASC])\n    RediSearchFilter(condition=[AND(=(CAST($1):VARCHAR, 'American IPA'), >=($2, 0.05:DECIMAL(2, 2)))])\n      RediSearchTableScan(table=[[redisearch, beers]])\n\n";
+        final String explain = "PLAN=RediSearchToEnumerableConverter\n  RediSearchSort(sort0=[$2], dir0=[ASC])\n    RediSearchFilter(condition=[AND(=($1, 'American IPA'), >=($2, 0.05:DECIMAL(2, 2)))])\n      RediSearchTableScan(table=[[redisearch, beers]])\n\n";
         final String returns = "name=Citrafest; style=American IPA; abv=0.05; brewery_id=27\nname=Grand Circus IPA; style=American IPA; abv=0.05; brewery_id=72\nname=Lasso; style=American IPA; abv=0.05; brewery_id=6\nname=Grapefruit IPA; style=American IPA; abv=0.05; brewery_id=13\nname=Lil SIPA; style=American IPA; abv=0.05; brewery_id=321\nname=Jah Mon; style=American IPA; abv=0.05; brewery_id=43\nname=Dayman IPA; style=American IPA; abv=0.05; brewery_id=43\nname=TailGate IPA; style=American IPA; abv=0.05; brewery_id=449\nname=TailGate IPA; style=American IPA; abv=0.05; brewery_id=449\nname=South Bay Session IPA; style=American IPA; abv=0.05; brewery_id=33\nname=Hop Session; style=American IPA; abv=0.05; brewery_id=47\nname=Quaff India Style Session Ale; style=American IPA; abv=0.051; brewery_id=201\nname=Firewater India Pale Ale; style=American IPA; abv=0.052000000000000005; brewery_id=331\nname=Firewater India Pale Ale; style=American IPA; abv=0.052000000000000005; brewery_id=331\nname=Self Starter; style=American IPA; abv=0.052000000000000005; brewery_id=94\nname=Fisherman's IPA; style=American IPA; abv=0.055; brewery_id=230\nname=Mosaic Single Hop IPA; style=American IPA; abv=0.055; brewery_id=41\nname=Manayunk IPA; style=American IPA; abv=0.055; brewery_id=356\nname=Pump House IPA; style=American IPA; abv=0.055; brewery_id=68\nname=Texas Pale Ale (TPA); style=American IPA; abv=0.055; brewery_id=257\nname=Nice Rack IPA; style=American IPA; abv=0.055; brewery_id=436\nname=Ghost Ship White IPA; style=American IPA; abv=0.055999999999999994; brewery_id=192\nname=Duluchan India Pale Ale; style=American IPA; abv=0.055999999999999994; brewery_id=345\nname=Wachusett IPA; style=American IPA; abv=0.055999999999999994; brewery_id=295\nname=IPA #11; style=American IPA; abv=0.057; brewery_id=121\nname=Tumbleweed IPA; style=American IPA; abv=0.057; brewery_id=537\nname=Sockeye Red IPA; style=American IPA; abv=0.057; brewery_id=223\nname=Triangle India Pale Ale; style=American IPA; abv=0.057; brewery_id=524\nname=Mango Ginger; style=American IPA; abv=0.057999999999999996; brewery_id=167\nname=Hop Farm IPA; style=American IPA; abv=0.057999999999999996; brewery_id=297\nname=Alloy; style=American IPA; abv=0.057999999999999996; brewery_id=17\nname=Charlie in the Rye; style=American IPA; abv=0.057999999999999996; brewery_id=351\nname=Train Hopper; style=American IPA; abv=0.057999999999999996; brewery_id=14\nname=Rude Parrot IPA; style=American IPA; abv=0.059000000000000004; brewery_id=481\nname=Liberty Ale; style=American IPA; abv=0.059000000000000004; brewery_id=35\nname=Soul Doubt; style=American IPA; abv=0.059000000000000004; brewery_id=66\nname=Point the Way IPA; style=American IPA; abv=0.059000000000000004; brewery_id=240\nname=Point the Way IPA; style=American IPA; abv=0.059000000000000004; brewery_id=240\nname=Point the Way IPA (2012); style=American IPA; abv=0.059000000000000004; brewery_id=240\nname=Goose Island India Pale Ale; style=American IPA; abv=0.059000000000000004; brewery_id=196\nname=Harpoon IPA; style=American IPA; abv=0.059000000000000004; brewery_id=234\nname=Harpoon IPA (2012); style=American IPA; abv=0.059000000000000004; brewery_id=234\nname=Harpoon IPA (2010); style=American IPA; abv=0.059000000000000004; brewery_id=234\nname=Troopers Alley IPA; style=American IPA; abv=0.059000000000000004; brewery_id=344\nname=Pile of Face; style=American IPA; abv=0.06; brewery_id=1\nname=Charlie's Rye IPA; style=American IPA; abv=0.06; brewery_id=146\nname=Shiva IPA; style=American IPA; abv=0.06; brewery_id=528\nname=Barrio Blanco; style=American IPA; abv=0.06; brewery_id=251\nname=House Brand IPA; style=American IPA; abv=0.06; brewery_id=519\nname=Linnaeus Mango IPA; style=American IPA; abv=0.06; brewery_id=10\nname=11th Hour IPA; style=American IPA; abv=0.06; brewery_id=212\nname=Half Cycle IPA; style=American IPA; abv=0.06; brewery_id=16\nname=Backyahd IPA; style=American IPA; abv=0.06; brewery_id=279\nname=The 26th; style=American IPA; abv=0.06; brewery_id=22\nname=Good People IPA; style=American IPA; abv=0.06; brewery_id=478\nname=JP's Ould Sod Irish Red IPA; style=American IPA; abv=0.06; brewery_id=32\nname=KelSo India Pale Ale; style=American IPA; abv=0.06; brewery_id=342\nname=King Street IPA; style=American IPA; abv=0.06; brewery_id=102\nname=Saranac White IPA; style=American IPA; abv=0.06; brewery_id=299\nname=Homefront IPA; style=American IPA; abv=0.06; brewery_id=163\nname=40 Mile IPA; style=American IPA; abv=0.06; brewery_id=273\nname=The Green Room; style=American IPA; abv=0.06; brewery_id=126\nname=Dragonfly IPA; style=American IPA; abv=0.06; brewery_id=202\nname=Green Monsta IPA; style=American IPA; abv=0.06; brewery_id=295\nname=Green Monsta IPA; style=American IPA; abv=0.06; brewery_id=295\nname=Super G IPA; style=American IPA; abv=0.06; brewery_id=396\nname=Fairweather IPA; style=American IPA; abv=0.061; brewery_id=493\nname=Caldera IPA (2009); style=American IPA; abv=0.061; brewery_id=155\nname=Caldera IPA (2007); style=American IPA; abv=0.061; brewery_id=155\nname=Caldera IPA; style=American IPA; abv=0.061; brewery_id=155\nname=Category 3 IPA; style=American IPA; abv=0.061; brewery_id=340\nname=Lumberyard IPA; style=American IPA; abv=0.061; brewery_id=158\nname=5 Day IPA; style=American IPA; abv=0.061; brewery_id=442\nname=Camelback; style=American IPA; abv=0.061; brewery_id=157\nname=Damnesia; style=American IPA; abv=0.062; brewery_id=401\nname=Desolation IPA; style=American IPA; abv=0.062; brewery_id=401\nname=Fire Eagle IPA; style=American IPA; abv=0.062; brewery_id=413\nname=Bent Hop Golden IPA; style=American IPA; abv=0.062; brewery_id=75\nname=Ryecoe; style=American IPA; abv=0.062; brewery_id=8\nname=Big Sky IPA; style=American IPA; abv=0.062; brewery_id=336\nname=Big Sky IPA (2012); style=American IPA; abv=0.062; brewery_id=336\nname=Heavy Lifting; style=American IPA; abv=0.062; brewery_id=31\nname=Lucky U IPA; style=American IPA; abv=0.062; brewery_id=391\nname=Mutiny IPA; style=American IPA; abv=0.062; brewery_id=192\nname=Operation Homefront; style=American IPA; abv=0.062; brewery_id=141\nname=Escape to Colorado; style=American IPA; abv=0.062; brewery_id=81\nname=Country Boy IPA; style=American IPA; abv=0.062; brewery_id=170\nname=The Optimist; style=American IPA; abv=0.062; brewery_id=206\nname=Great Crescent IPA; style=American IPA; abv=0.062; brewery_id=165\nname=Great Crescent IPA (2011); style=American IPA; abv=0.062; brewery_id=165\nname=Face Plant IPA; style=American IPA; abv=0.062; brewery_id=430\nname=Marble India Pale Ale; style=American IPA; abv=0.062; brewery_id=443\nname=Big Swell IPA; style=American IPA; abv=0.062; brewery_id=375\nname=Sea Hag IPA; style=American IPA; abv=0.062; brewery_id=410\nname=Sea Hag IPA (Current); style=American IPA; abv=0.062; brewery_id=410\nname=Outlaw IPA; style=American IPA; abv=0.062; brewery_id=307\nname=Amazon Princess IPA; style=American IPA; abv=0.062; brewery_id=205\nname=Gangway IPA; style=American IPA; abv=0.062; brewery_id=475\nname=Old Wylie's IPA; style=American IPA; abv=0.062; brewery_id=43\nname=360° India Pale Ale; style=American IPA; abv=0.062; brewery_id=371";
         final String query = "(@style:{American IPA} @abv:[0.05 inf])";
         calciteAssert().query(sql).returnsOrdered(returns).queryContains(checker(query)).explainContains(explain);

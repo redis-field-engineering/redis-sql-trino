@@ -1,4 +1,4 @@
-package com.redis.calcite;
+package org.apache.calcite.adapter.redisearch;
 
 import com.google.common.base.Preconditions;
 import com.redis.lettucemod.api.search.Field;
@@ -39,7 +39,7 @@ public class RediSearchFilter extends Filter implements RediSearchRel {
 
     public RediSearchFilter(RelOptCluster cluster, RelTraitSet traitSet, RelNode child, RexNode condition, Map<String, Field.Type> indexFields) {
         super(cluster, traitSet, child, condition);
-        assert getConvention() == RediSearchRel.CONVENTION;
+        assert getConvention() == CONVENTION;
         assert getConvention() == child.getConvention();
         this.indexFields = indexFields;
     }
@@ -67,15 +67,11 @@ public class RediSearchFilter extends Filter implements RediSearchRel {
      * Translates {@link RexNode} expressions into RediSearch expression strings.
      */
     public static class Translator {
-        @SuppressWarnings("unused")
-        private final RelDataType rowType;
         private final List<String> fieldNames;
         private final Map<String, Field.Type> indexFields;
-        @SuppressWarnings("unused")
-        private RexBuilder rexBuilder;
+        private final RexBuilder rexBuilder;
 
         Translator(RelDataType rowType, RexBuilder rexBuilder, Map<String, Field.Type> indexFields) {
-            this.rowType = rowType;
             this.rexBuilder = rexBuilder;
             this.fieldNames = RediSearchRules.rediSearchFieldNames(rowType);
             this.indexFields = indexFields;

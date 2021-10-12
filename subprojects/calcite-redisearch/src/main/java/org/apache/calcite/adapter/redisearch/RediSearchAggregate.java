@@ -1,4 +1,4 @@
-package com.redis.calcite;
+package org.apache.calcite.adapter.redisearch;
 
 import com.google.common.collect.ImmutableMap;
 import org.apache.calcite.plan.RelOptCluster;
