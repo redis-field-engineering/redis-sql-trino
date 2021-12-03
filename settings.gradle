@@ -9,7 +9,6 @@ buildscript {
         classpath "org.kordamp.gradle:kordamp-parentbuild:$kordampBuildVersion"
         classpath "org.springframework.boot:spring-boot-gradle-plugin:$bootPluginVersion"
         classpath "io.spring.gradle:dependency-management-plugin:$dependencyPluginVersion"
-        classpath "io.freefair.gradle:lombok-plugin:$lombokPluginVersion"
     }
 }
 
@@ -32,15 +31,10 @@ projects {
             id 'java-library-distribution'
             id 'org.springframework.boot'
             id 'io.spring.dependency-management'
-            id 'io.freefair.lombok'
         }
     }
 }
 
 enforce {
-    mergeStrategy = 'append'
-
-    rule(enforcer.rules.ForceDependencies) { r ->
-        r.dependencies.addAll "commons-logging:commons-logging:1.2"
-    }
+    enabled = false
 }

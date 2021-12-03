@@ -76,4 +76,8 @@ subprojects {
 		enabled = true
 		archiveClassifier = ''
 	}
+
+	sourceCompatibility = 8
+    targetCompatibility = 8
+
 }

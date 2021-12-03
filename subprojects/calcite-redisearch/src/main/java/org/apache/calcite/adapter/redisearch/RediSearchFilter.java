@@ -1,11 +1,12 @@
 package org.apache.calcite.adapter.redisearch;
 
-import com.google.common.base.Preconditions;
-import com.redis.lettucemod.api.search.Field;
-import io.redisearch.querybuilder.QueryBuilder;
-import io.redisearch.querybuilder.QueryNode;
-import io.redisearch.querybuilder.Value;
-import io.redisearch.querybuilder.Values;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptCost;
 import org.apache.calcite.plan.RelOptPlanner;
@@ -22,12 +23,13 @@ import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.SqlKind;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import com.google.common.base.Preconditions;
+import com.redis.lettucemod.search.Field;
+
+import io.redisearch.querybuilder.QueryBuilder;
+import io.redisearch.querybuilder.QueryNode;
+import io.redisearch.querybuilder.Value;
+import io.redisearch.querybuilder.Values;
 
 /**
  * Implementation of

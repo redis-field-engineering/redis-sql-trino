@@ -1,8 +1,9 @@
 package org.apache.calcite.adapter.redisearch;
 
-import com.redis.lettucemod.api.search.Document;
-import com.redis.lettucemod.api.search.SearchResults;
-import lombok.extern.slf4j.Slf4j;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+
 import org.apache.calcite.linq4j.Enumerator;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
@@ -10,16 +11,18 @@ import org.apache.calcite.rel.type.RelDataTypeSystem;
 import org.apache.calcite.rel.type.RelProtoDataType;
 import org.apache.calcite.sql.type.SqlTypeFactoryImpl;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
+import com.redis.lettucemod.search.Document;
+import com.redis.lettucemod.search.SearchResults;
 
 /**
  * Enumerator that reads from a RediSearch Regions.
  */
-@Slf4j
 class RediSearchEnumerator implements Enumerator<Object> {
+	
+	private static final Logger log = LoggerFactory.getLogger(RediSearchEnumerator.class);
 
     private final Iterator<Document<String, String>> iterator;
     private final List<RelDataTypeField> fields;

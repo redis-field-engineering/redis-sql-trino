@@ -1,11 +1,10 @@
 package org.apache.calcite.adapter.redisearch;
 
-import com.redis.lettucemod.api.StatefulRedisModulesConnection;
-import com.redis.lettucemod.api.search.Field;
-import com.redis.lettucemod.api.search.Order;
-import com.redis.lettucemod.api.search.SearchOptions;
-import com.redis.lettucemod.api.search.SearchResults;
-import lombok.extern.slf4j.Slf4j;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
 import org.apache.calcite.adapter.java.AbstractQueryableTable;
 import org.apache.calcite.linq4j.AbstractEnumerable;
 import org.apache.calcite.linq4j.Enumerable;
@@ -28,58 +27,65 @@ import org.apache.calcite.schema.impl.AbstractTableQueryable;
 import org.apache.calcite.sql.type.SqlTypeFactoryImpl;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.Util;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
+import com.redis.lettucemod.api.StatefulRedisModulesConnection;
+import com.redis.lettucemod.search.Field;
+import com.redis.lettucemod.search.IndexInfo;
+import com.redis.lettucemod.search.Order;
+import com.redis.lettucemod.search.SearchOptions;
+import com.redis.lettucemod.search.SearchOptions.Builder;
+import com.redis.lettucemod.search.SearchResults;
 
 /**
  * Table based on a RediSearch index.
  */
-@Slf4j
 public class RediSearchTable extends AbstractQueryableTable implements TranslatableTable {
 
-    public static final int DEFAULT_LIMIT = 100;
-    private final RediSearchSchema schema;
-    private final String index;
-    private RelProtoDataType protoRowType;
+	private static final Logger log = LoggerFactory.getLogger(RediSearchTable.class);
 
-    RediSearchTable(RediSearchSchema schema, String index) {
-        super(Object[].class);
-        this.schema = schema;
-        this.index = index;
-    }
+	public static final int DEFAULT_LIMIT = 100;
+	private final StatefulRedisModulesConnection<String, String> connection;
+	private final IndexInfo indexInfo;
+	private RelProtoDataType protoRowType;
 
-    @Override
-    public String toString() {
-        return "RedisSearchTable {" + index + "}";
-    }
+	RediSearchTable(StatefulRedisModulesConnection<String, String> connection, IndexInfo indexInfo) {
+		super(Object[].class);
+		this.connection = connection;
+		this.indexInfo = indexInfo;
+	}
 
-    @SuppressWarnings("unused")
-    public Enumerable<Object> query(final StatefulRedisModulesConnection<String, String> connection, final List<Map.Entry<String, Class<?>>> fields, final List<Map.Entry<String, String>> selectFields, final List<Map.Entry<String, String>> aggregateFunctions, final List<String> groupByFields, List<String> predicates, List<Map.Entry<String, RelFieldCollation.Direction>> sort, Long offsetValue, Long limitValue) {
-        final RelDataTypeFactory typeFactory =
-                new SqlTypeFactoryImpl(RelDataTypeSystem.DEFAULT);
-        final RelDataTypeFactory.Builder fieldInfo = typeFactory.builder();
-        for (Map.Entry<String, Class<?>> field : fields) {
-            SqlTypeName typeName = typeFactory.createJavaType(field.getValue()).getSqlTypeName();
-            RelDataType type;
-            if (typeName == SqlTypeName.ARRAY) {
-                type = typeFactory.createArrayType(typeFactory.createSqlType(SqlTypeName.ANY), -1);
-            } else if (typeName == SqlTypeName.MULTISET) {
-                type = typeFactory.createMultisetType(typeFactory.createSqlType(SqlTypeName.ANY), -1);
-            } else if (typeName == SqlTypeName.MAP) {
-                RelDataType anyType = typeFactory.createSqlType(SqlTypeName.ANY);
-                type = typeFactory.createMapType(anyType, anyType);
-            } else {
-                type = typeFactory.createSqlType(typeName);
-            }
-            fieldInfo.add(field.getKey(), type).nullable(true);
-        }
+	@Override
+	public String toString() {
+		return "RedisSearchTable {" + indexInfo.getIndexName() + "}";
+	}
 
-        final RelProtoDataType resultRowType = RelDataTypeImpl.proto(fieldInfo.build());
+	public Enumerable<Object> query(List<Map.Entry<String, Class<?>>> fields,
+			List<Map.Entry<String, String>> selectFields, List<Map.Entry<String, String>> aggregateFunctions,
+			List<String> groupByFields, List<String> predicates,
+			List<Map.Entry<String, RelFieldCollation.Direction>> sort, Long offsetValue, Long limitValue) {
+		final RelDataTypeFactory typeFactory = new SqlTypeFactoryImpl(RelDataTypeSystem.DEFAULT);
+		final RelDataTypeFactory.Builder fieldInfo = typeFactory.builder();
+		for (Map.Entry<String, Class<?>> field : fields) {
+			SqlTypeName typeName = typeFactory.createJavaType(field.getValue()).getSqlTypeName();
+			RelDataType type;
+			if (typeName == SqlTypeName.ARRAY) {
+				type = typeFactory.createArrayType(typeFactory.createSqlType(SqlTypeName.ANY), -1);
+			} else if (typeName == SqlTypeName.MULTISET) {
+				type = typeFactory.createMultisetType(typeFactory.createSqlType(SqlTypeName.ANY), -1);
+			} else if (typeName == SqlTypeName.MAP) {
+				RelDataType anyType = typeFactory.createSqlType(SqlTypeName.ANY);
+				type = typeFactory.createMapType(anyType, anyType);
+			} else {
+				type = typeFactory.createSqlType(typeName);
+			}
+			fieldInfo.add(field.getKey(), type).nullable(true);
+		}
 
-        // TODO
+		final RelProtoDataType resultRowType = RelDataTypeImpl.proto(fieldInfo.build());
+
+		// TODO
 //        ImmutableMap<String, String> aggFuncMap = ImmutableMap.of();
 //        if (!aggregateFunctions.isEmpty()) {
 //            ImmutableMap.Builder<String, String> aggFuncMapBuilder = ImmutableMap.builder();
@@ -89,96 +95,113 @@ public class RediSearchTable extends AbstractQueryableTable implements Translata
 //            aggFuncMap = aggFuncMapBuilder.build();
 //        }
 
-        // Combine all predicates conjunctively
-        String query = predicates.isEmpty() ? "*" : Util.toString(predicates, "", " ", "");
-        SearchOptions.SearchOptionsBuilder<String, String> options = SearchOptions.builder();
-        if (!groupByFields.isEmpty()) {
-            throw new UnsupportedOperationException("GROUP BY not yet supported");
-        }
-        if (!sort.isEmpty()) {
-            if (sort.size() > 1) {
-                throw new UnsupportedOperationException("ORDER BY only supports a single field");
-            }
-            Map.Entry<String, RelFieldCollation.Direction> sortBy = sort.iterator().next();
-            options.sortBy(SearchOptions.SortBy.<String, String>field(sortBy.getKey()).order(sortBy.getValue() == RelFieldCollation.Direction.ASCENDING ? Order.ASC : Order.DESC));
-        }
-        options.limit(SearchOptions.Limit.offset(offsetValue == null ? 0 : offsetValue).num(limitValue == null ? DEFAULT_LIMIT : limitValue));
-        Hook.QUERY_PLAN.run(query);
-        log.info("RediSearch query: {}", query);
+		// Combine all predicates conjunctively
+		String query = predicates.isEmpty() ? "*" : Util.toString(predicates, "", " ", "");
+		Builder<String, String> options = SearchOptions.builder();
+		if (!groupByFields.isEmpty()) {
+			throw new UnsupportedOperationException("GROUP BY not yet supported");
+		}
+		if (!sort.isEmpty()) {
+			if (sort.size() > 1) {
+				throw new UnsupportedOperationException("ORDER BY only supports a single field");
+			}
+			Map.Entry<String, RelFieldCollation.Direction> sortBy = sort.iterator().next();
+			options.sortBy(SearchOptions.SortBy.<String, String>field(sortBy.getKey())
+					.order(sortBy.getValue() == RelFieldCollation.Direction.ASCENDING ? Order.ASC : Order.DESC));
+		}
+		options.limit(SearchOptions.Limit.of(offsetValue == null ? 0 : offsetValue,
+				limitValue == null ? DEFAULT_LIMIT : limitValue));
+		Hook.QUERY_PLAN.run(query);
+		log.info("RediSearch query: {}", query);
 
-        return new AbstractEnumerable<Object>() {
-            @Override
-            public Enumerator<Object> enumerator() {
-                try {
-                    SearchResults<String, String> results = connection.sync().search(index, query, options.build());
-                    return new RediSearchEnumerator(results, resultRowType);
-                } catch (Exception e) {
-                    String message = String.format(Locale.ROOT, "Failed to execute query [%s] on %s", query, index);
-                    throw new RuntimeException(message, e);
-                }
-            }
-        };
-    }
+		return new AbstractEnumerable<Object>() {
+			@Override
+			public Enumerator<Object> enumerator() {
+				try {
+					SearchResults<String, String> results = connection.sync().search(indexInfo.getIndexName(), query,
+							options.build());
+					return new RediSearchEnumerator(results, resultRowType);
+				} catch (Exception e) {
+					String message = String.format(Locale.ROOT, "Failed to execute query [%s] on %s", query,
+							indexInfo.getIndexName());
+					throw new RuntimeException(message, e);
+				}
+			}
+		};
+	}
 
-    public Map<String, Field.Type> indexFields() {
-        Map<String, Field.Type> fieldTypes = new LinkedHashMap<>();
-        schema.getIndexInfo().getFields().forEach(f -> fieldTypes.put(f.getName(), f.getType()));
-        return fieldTypes;
-    }
+	public Map<String, Field.Type> indexFields() {
+		Map<String, Field.Type> fieldTypes = new LinkedHashMap<>();
+		indexInfo.getFields().forEach(f -> fieldTypes.put(f.getName(), f.getType()));
+		return fieldTypes;
+	}
 
+	@Override
+	public <T> Queryable<T> asQueryable(QueryProvider queryProvider, SchemaPlus schema, String tableName) {
+		return new RediSearchQueryable<>(queryProvider, schema, this, tableName);
+	}
 
-    @Override
-    public <T> Queryable<T> asQueryable(QueryProvider queryProvider, SchemaPlus schema, String tableName) {
-        return new RediSearchQueryable<>(queryProvider, schema, this, tableName);
-    }
+	@Override
+	public RelNode toRel(RelOptTable.ToRelContext context, RelOptTable relOptTable) {
+		final RelOptCluster cluster = context.getCluster();
+		return new RediSearchTableScan(cluster, cluster.traitSetOf(RediSearchRel.CONVENTION), relOptTable, this, null);
+	}
 
-    @Override
-    public RelNode toRel(RelOptTable.ToRelContext context, RelOptTable relOptTable) {
+	@Override
+	public RelDataType getRowType(RelDataTypeFactory typeFactory) {
+		if (protoRowType == null) {
+			protoRowType = relDataType();
+		}
+		return protoRowType.apply(typeFactory);
 
-        final RelOptCluster cluster = context.getCluster();
-        return new RediSearchTableScan(cluster, cluster.traitSetOf(RediSearchRel.CONVENTION), relOptTable, this, null);
-    }
+	}
 
-    @Override
-    public RelDataType getRowType(RelDataTypeFactory typeFactory) {
-        if (protoRowType == null) {
-            protoRowType = schema.getRelDataType();
-        }
-        return protoRowType.apply(typeFactory);
+	private RelProtoDataType relDataType() {
+		final RelDataTypeFactory typeFactory = new SqlTypeFactoryImpl(RelDataTypeSystem.DEFAULT);
+		final RelDataTypeFactory.Builder fieldInfo = typeFactory.builder();
+		for (Field field : indexInfo.getFields()) {
+			fieldInfo.add(field.getName(), typeFactory.createSqlType(sqlTypeName(field))).nullable(true);
+		}
+		return RelDataTypeImpl.proto(fieldInfo.build());
+	}
 
-    }
+	private SqlTypeName sqlTypeName(Field field) {
+		if (field.getType() == Field.Type.NUMERIC) {
+			return SqlTypeName.DOUBLE;
+		}
+		return SqlTypeName.VARCHAR;
+	}
 
-    /**
-     * Implementation of {@link Queryable} based on a {@link RediSearchTable}.
-     *
-     * @param <T> type
-     */
-    public static class RediSearchQueryable<T> extends AbstractTableQueryable<T> {
+	/**
+	 * Implementation of {@link Queryable} based on a {@link RediSearchTable}.
+	 *
+	 * @param <T> type
+	 */
+	public static class RediSearchQueryable<T> extends AbstractTableQueryable<T> {
 
-        public RediSearchQueryable(QueryProvider queryProvider, SchemaPlus schema, RediSearchTable table, String tableName) {
-            super(queryProvider, schema, table, tableName);
-        }
+		public RediSearchQueryable(QueryProvider queryProvider, SchemaPlus schema, RediSearchTable table,
+				String tableName) {
+			super(queryProvider, schema, table, tableName);
+		}
 
-        // tzolov: this should never be called for queryable tables???
-        @Override
-        public Enumerator<T> enumerator() {
-            throw new UnsupportedOperationException("Enumerator on Queryable should never be called");
-        }
+		@Override
+		public Enumerator<T> enumerator() {
+			return null;
+		}
 
-        private RediSearchTable getTable() {
-            return (RediSearchTable) table;
-        }
+		private RediSearchTable getTable() {
+			return (RediSearchTable) this.table;
+		}
 
-        private StatefulRedisModulesConnection<String, String> getConnection() {
-            return schema.unwrap(RediSearchSchema.class).getConnection();
-        }
-
-        /**
-         * Called via code-generation.
-         */
-        @SuppressWarnings("UnusedDeclaration")
-        public Enumerable<Object> query(List<Map.Entry<String, Class<?>>> fields, List<Map.Entry<String, String>> selectFields, List<Map.Entry<String, String>> aggregateFunctions, List<String> groupByFields, List<String> predicates, List<Map.Entry<String, RelFieldCollation.Direction>> sort, Long offset, Long limit) {
-            return getTable().query(getConnection(), fields, selectFields, aggregateFunctions, groupByFields, predicates, sort, offset, limit);
-        }
-    }
+		/**
+		 * Called via code-generation.
+		 */
+		public Enumerable<Object> query(List<Map.Entry<String, Class<?>>> fields,
+				List<Map.Entry<String, String>> selectFields, List<Map.Entry<String, String>> aggregateFunctions,
+				List<String> groupByFields, List<String> predicates,
+				List<Map.Entry<String, RelFieldCollation.Direction>> sort, Long offset, Long limit) {
+			return getTable().query(fields, selectFields, aggregateFunctions, groupByFields, predicates, sort, offset,
+					limit);
+		}
+	}
 }

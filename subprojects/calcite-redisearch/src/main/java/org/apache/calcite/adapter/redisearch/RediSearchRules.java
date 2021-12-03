@@ -1,5 +1,8 @@
 package org.apache.calcite.adapter.redisearch;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
@@ -23,9 +26,6 @@ import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.validate.SqlValidatorUtil;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Rules and relational operators for {@link RediSearchRel#CONVENTION}
