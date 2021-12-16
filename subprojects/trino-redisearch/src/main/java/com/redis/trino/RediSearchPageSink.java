@@ -22,7 +22,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 import com.github.f4b6a3.ulid.UlidFactory;
 import com.google.common.collect.ImmutableList;
@@ -90,6 +89,7 @@ public class RediSearchPageSink implements ConnectorPageSink {
 		return NOT_BLOCKED;
 	}
 
+	@SuppressWarnings("deprecation")
 	private String getValue(Type type, Block block, int position) {
 		if (block.isNull(position)) {
 			return null;

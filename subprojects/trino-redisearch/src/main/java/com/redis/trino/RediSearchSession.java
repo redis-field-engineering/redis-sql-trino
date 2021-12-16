@@ -1,6 +1,7 @@
 package com.redis.trino;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Throwables.throwIfInstanceOf;
 import static com.google.common.base.Verify.verify;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.DoubleType.DOUBLE;
@@ -10,6 +11,8 @@ import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static java.lang.Math.toIntExact;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
+import static java.util.concurrent.TimeUnit.HOURS;
+import static java.util.concurrent.TimeUnit.MINUTES;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -20,11 +23,15 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.primitives.Primitives;
 import com.google.common.primitives.Shorts;
 import com.google.common.primitives.SignedBytes;
+import com.google.common.util.concurrent.UncheckedExecutionException;
 import com.redis.lettucemod.RedisModulesUtils;
 import com.redis.lettucemod.api.StatefulRedisModulesConnection;
 import com.redis.lettucemod.search.CreateOptions;
@@ -43,6 +50,7 @@ import io.redisearch.querybuilder.QueryBuilder;
 import io.redisearch.querybuilder.Value;
 import io.redisearch.querybuilder.Values;
 import io.trino.spi.HostAddress;
+import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ColumnMetadata;
 import io.trino.spi.connector.SchemaNotFoundException;
@@ -72,12 +80,16 @@ public class RediSearchSession {
 	private final TypeManager typeManager;
 	private final StatefulRedisModulesConnection<String, String> connection;
 	private final RediSearchConfig config;
+	private final LoadingCache<SchemaTableName, RediSearchTable> tableCache;
 
 	public RediSearchSession(TypeManager typeManager, StatefulRedisModulesConnection<String, String> connection,
 			RediSearchConfig config) {
 		this.typeManager = requireNonNull(typeManager, "typeManager is null");
 		this.connection = requireNonNull(connection, "connection is null");
 		this.config = requireNonNull(config, "config is null");
+		// TODO make table cache expiration configurable
+		this.tableCache = CacheBuilder.newBuilder().expireAfterWrite(1, HOURS).refreshAfterWrite(1, MINUTES)
+				.build(CacheLoader.from(this::loadTableSchema));
 	}
 
 	public StatefulRedisModulesConnection<String, String> getConnection() {
@@ -107,7 +119,12 @@ public class RediSearchSession {
 	}
 
 	public RediSearchTable getTable(SchemaTableName tableName) throws TableNotFoundException {
-		return loadTableSchema(tableName);
+		try {
+			return tableCache.getUnchecked(tableName);
+		} catch (UncheckedExecutionException e) {
+			throwIfInstanceOf(e.getCause(), TrinoException.class);
+			throw e;
+		}
 	}
 
 	public void createTable(SchemaTableName name, List<RediSearchColumnHandle> columns) {
@@ -167,7 +184,7 @@ public class RediSearchSession {
 		String index = tableHandle.getSchemaTableName().getTableName();
 		String query = buildQuery(tableHandle.getConstraint());
 		Builder<String, String> options = SearchOptions.<String, String>builder();
-		tableHandle.getLimit().ifPresent(num -> options.limit(Limit.of(0, num)));
+		options.limit(Limit.of(0, tableHandle.getLimit().isPresent() ? tableHandle.getLimit().getAsInt() : 1000));
 		log.debug("Find documents: index: %s, query: %s", index, query);
 		return connection.sync().search(index, query, options.build());
 	}
@@ -227,7 +244,7 @@ public class RediSearchSession {
 
 		// Add back all of the possible single values either as an equality or an IN
 		// predicate
-		
+
 		if (singleValues.size() == 1) {
 			disjuncts.add(QueryBuilder.intersect(name, value(singleValues.get(0), type)));
 		} else {
@@ -263,9 +280,7 @@ public class RediSearchSession {
 			return Values.eq((Long) trinoNativeValue);
 		}
 		if (type instanceof VarcharType) {
-			// TODO introduce RediSearch Field type to know which to use (tag, text,
-			// numeric)
-			return Values.value((String) trinoNativeValue);
+			return Values.tags((String) trinoNativeValue);
 
 		}
 		throw new UnsupportedOperationException("Type " + type + " not supported");
