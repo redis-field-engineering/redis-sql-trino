@@ -1,0 +1,12 @@
+dependencies {
+    implementation project(':calcite-redisearch')
+    implementation group: 'org.apache.calcite', name: 'calcite-core', version: calciteVersion
+    implementation group: 'org.apache.calcite', name: 'calcite-linq4j', version: calciteVersion
+    implementation group: 'com.redis', name: 'lettucemod', version: lettucemodVersion
+    implementation group: 'com.google.guava', name: 'guava', version: guavaVersion
+    implementation group: 'com.googlecode.json-simple', name: 'json-simple', version: jsonSimpleVersion
+    implementation group: 'commons-cli', name: 'commons-cli', version: commonsCliVersion
+    implementation group: 'org.postgresql', name: 'postgresql', version: postgresqlVersion
+    testImplementation group: 'org.mockito', name: 'mockito-core', version: mockitoVersion
+    testImplementation group: 'com.redis', name: 'lettucemod', version: lettucemodVersion, classifier: 'tests'
+}

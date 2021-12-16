@@ -14,14 +14,14 @@ buildscript {
 
 apply plugin: 'org.kordamp.gradle.kordamp-parentbuild'
 
-rootProject.name = 'calcite-redisearch'
+rootProject.name = 'sql-redis'
 
 projects {
     directories = ['subprojects']
 
     plugins {
         all {
-            id 'idea'
+            id 'eclipse'
         }
         path(':') {
             id 'org.kordamp.gradle.java-project'

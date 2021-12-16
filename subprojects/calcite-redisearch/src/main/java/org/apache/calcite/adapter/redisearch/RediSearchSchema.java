@@ -23,14 +23,10 @@ public class RediSearchSchema extends AbstractSchema {
     public RediSearchSchema(StatefulRedisModulesConnection<String, String> connection, String index) {
         this.connection = connection;
         if (index == null) {
-            this.tableMap = this.createTables(this.indicesFromRediSearch());
+            this.tableMap = this.createTables(connection.sync().list());
         } else {
             this.tableMap = this.createTables(Collections.singletonList(index));
         }
-    }
-
-    private List<String> indicesFromRediSearch() {
-        return connection.sync().list();
     }
 
     private Map<String, Table> createTables(List<String> indices) {
