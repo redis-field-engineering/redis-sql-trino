@@ -184,7 +184,8 @@ public class RediSearchSession {
 		String index = tableHandle.getSchemaTableName().getTableName();
 		String query = buildQuery(tableHandle.getConstraint());
 		Builder<String, String> options = SearchOptions.<String, String>builder();
-		options.limit(Limit.of(0, tableHandle.getLimit().isPresent() ? tableHandle.getLimit().getAsInt() : 1000));
+		options.limit(Limit.of(0,
+				tableHandle.getLimit().isPresent() ? tableHandle.getLimit().getAsInt() : config.getDefaultLimit()));
 		log.debug("Find documents: index: %s, query: %s", index, query);
 		return connection.sync().search(index, query, options.build());
 	}
@@ -352,7 +353,7 @@ public class RediSearchSession {
 			return Field.Type.NUMERIC;
 		}
 		if (type instanceof VarcharType) {
-			return Field.Type.TEXT;
+			return Field.Type.TAG;
 		}
 		if (type.equals(DateType.DATE)) {
 			return Field.Type.TAG;

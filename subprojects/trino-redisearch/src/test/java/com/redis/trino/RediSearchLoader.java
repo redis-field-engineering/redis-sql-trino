@@ -1,16 +1,3 @@
-/*
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package com.redis.trino;
 
 import static com.google.common.base.Preconditions.checkState;
@@ -21,8 +8,6 @@ import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.IntegerType.INTEGER;
 import static java.util.Objects.requireNonNull;
 
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -116,7 +101,7 @@ public class RediSearchLoader extends AbstractTestingTrinoClient<Void> {
 
 		private Field field(String name, Type type) {
 			if (type instanceof VarcharType) {
-				return Field.text(name).build();
+				return Field.tag(name).build();
 			}
 			if (type == BOOLEAN || type == DATE) {
 				return Field.tag(name).build();
@@ -140,7 +125,7 @@ public class RediSearchLoader extends AbstractTestingTrinoClient<Void> {
 				return String.valueOf(value);
 			}
 			if (type == DATE) {
-				return String.valueOf(LocalDate.from(DateTimeFormatter.ISO_DATE.parse((String) value)).toEpochDay());
+				return (String) value;
 			}
 			if (type == BIGINT) {
 				return String.valueOf(((Number) value).longValue());

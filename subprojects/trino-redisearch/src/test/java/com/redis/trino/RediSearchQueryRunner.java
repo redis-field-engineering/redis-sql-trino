@@ -12,7 +12,6 @@ import java.util.Map;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.redis.lettucemod.test.Beers;
 
 import io.airlift.log.Logger;
 import io.airlift.log.Logging;
@@ -20,6 +19,7 @@ import io.trino.Session;
 import io.trino.metadata.QualifiedObjectName;
 import io.trino.plugin.tpch.TpchPlugin;
 import io.trino.testing.DistributedQueryRunner;
+import io.trino.testing.QueryRunner;
 import io.trino.testing.TestingTrinoClient;
 import io.trino.tpch.TpchTable;
 
@@ -33,11 +33,12 @@ public final class RediSearchQueryRunner {
 
 	public static DistributedQueryRunner createRediSearchQueryRunner(RediSearchServer server, TpchTable<?>... tables)
 			throws Exception {
-		return createRediSearchQueryRunner(server, ImmutableMap.of(), ImmutableList.copyOf(tables));
+		return createRediSearchQueryRunner(server, ImmutableList.copyOf(tables), ImmutableMap.of(), ImmutableMap.of());
 	}
 
 	public static DistributedQueryRunner createRediSearchQueryRunner(RediSearchServer server,
-			Map<String, String> extraProperties, Iterable<TpchTable<?>> tables) throws Exception {
+			Iterable<TpchTable<?>> tables, Map<String, String> extraProperties,
+			Map<String, String> extraConnectorProperties) throws Exception {
 		DistributedQueryRunner queryRunner = null;
 		try {
 			queryRunner = DistributedQueryRunner.builder(createSession()).setExtraProperties(extraProperties).build();
@@ -45,28 +46,33 @@ public final class RediSearchQueryRunner {
 			queryRunner.installPlugin(new TpchPlugin());
 			queryRunner.createCatalog("tpch", "tpch");
 
-			Map<String, String> properties = ImmutableMap.<String, String>builder()
-					.put("redisearch.uri", server.getTestContext().getRedisURI())
-					.put("redisearch.default-schema-name", TPCH_SCHEMA).build();
-
-			queryRunner.installPlugin(new RediSearchPlugin());
-			queryRunner.createCatalog("redisearch", "redisearch", properties);
+			RediSearchConnectorFactory testFactory = new RediSearchConnectorFactory();
+			installRediSearchPlugin(server, queryRunner, testFactory, extraConnectorProperties);
 
 			TestingTrinoClient trinoClient = queryRunner.getClient();
 
 			LOG.info("Loading data...");
 
 			long startTime = System.nanoTime();
-			Beers.populateIndex(server.getTestContext().getConnection());
-//			for (TpchTable<?> table : tables) {
-//				loadTpchTopic(server, trinoClient, table);
-//			}
+//			Beers.populateIndex(server.getTestContext().getConnection());
+			for (TpchTable<?> table : tables) {
+				loadTpchTopic(server, trinoClient, table);
+			}
 			LOG.info("Loading complete in %s", nanosSince(startTime).toString(SECONDS));
 			return queryRunner;
 		} catch (Throwable e) {
 			closeAllSuppress(e, queryRunner);
 			throw e;
 		}
+	}
+
+	private static void installRediSearchPlugin(RediSearchServer server, QueryRunner queryRunner,
+			RediSearchConnectorFactory factory, Map<String, String> extraConnectorProperties) {
+		queryRunner.installPlugin(new RediSearchPlugin(factory));
+		Map<String, String> config = ImmutableMap.<String, String>builder()
+				.put("redisearch.uri", server.getTestContext().getRedisURI()).put("redisearch.default-limit", "100000")
+				.put("redisearch.default-schema-name", TPCH_SCHEMA).putAll(extraConnectorProperties).build();
+		queryRunner.createCatalog("redisearch", "redisearch", config);
 	}
 
 	private static void loadTpchTopic(RediSearchServer server, TestingTrinoClient trinoClient, TpchTable<?> table) {
@@ -85,9 +91,9 @@ public final class RediSearchQueryRunner {
 
 	public static void main(String[] args) throws Exception {
 		Logging.initialize();
-		DistributedQueryRunner queryRunner = createRediSearchQueryRunner(new RediSearchServer(),
-				ImmutableMap.of("http-server.http.port", "8080"), TpchTable.getTables());
-		Thread.sleep(10);
+		DistributedQueryRunner queryRunner = createRediSearchQueryRunner(new RediSearchServer(), TpchTable.getTables(),
+				ImmutableMap.of("http-server.http.port", "8080"), ImmutableMap.of());
+
 		Logger log = Logger.get(RediSearchQueryRunner.class);
 		log.info("======== SERVER STARTED ========");
 		log.info("\n====\n%s\n====", queryRunner.getCoordinator().getBaseUrl());

@@ -12,9 +12,22 @@ import io.airlift.configuration.ConfigSecuritySensitive;
 public class RediSearchConfig {
 
 	public static final String DEFAULT_SCHEMA = "default";
+	private static final long DEFAULT_LIMIT = 10000;
 	
 	private String defaultSchema = DEFAULT_SCHEMA;
 	private Optional<String> uri = Optional.empty();
+	private long defaultLimit = DEFAULT_LIMIT;
+	
+	public long getDefaultLimit() {
+		return defaultLimit;
+	}
+
+	@Config("redisearch.default-limit")
+	@ConfigDescription("Default search limit number to use")
+	public RediSearchConfig setDefaultLimit(long defaultLimit) {
+		this.defaultLimit = defaultLimit;
+		return this;
+	}
 
 	@NotNull
 	public String getDefaultSchema() {

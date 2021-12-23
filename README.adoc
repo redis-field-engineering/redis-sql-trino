@@ -1,7 +1,7 @@
-= Calcite Adapter for RediSearch
+= SQL Redis
 :linkattrs:
 :project-owner:   redis-field-engineering
-:project-name:    calcite-redisearch
+:project-name:    sql-redis
 :project-group:   com.redis
 :project-version: 1.28.0
 
@@ -10,32 +10,4 @@ image:https://img.shields.io/maven-central/v/{project-group}/{project-name}[Down
 image:https://img.shields.io/nexus/s/{project-group}/{project-name}?server=https%3A%2F%2Fs01.oss.sonatype.org[Snapshot,link="https://s01.oss.sonatype.org/#nexus-search;quick~{project-name}"]
 image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg?token=9I4H9NOBRQ["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
 
-https://calcite.apache.org[Apache Calcite] adapter for RediSearch.
-
-== Getting Started
-
-=== Maven
-Add {project-name} dependency to your POM file:
-
-[source,xml]
-[subs="verbatim,attributes"]
-.pom.xml
-----
-<dependency>
-    <groupId>{project-group}</groupId>
-    <artifactId>{project-name}</artifactId>
-    <version>{project-version}</version>
-</dependency>
-----
-
-=== Gradle
-Add {project-name} dependency to your `build.gradle` file
-
-[source,groovy]
-[subs="attributes"]
-.build.gradle
-----
-dependencies {
-    implementation '{project-group}:{project-name}:{project-version}'
-}
-----
+SQL Redis is a SQL interface to RediSearch implemented as a https://trino.io[Trino] connector.

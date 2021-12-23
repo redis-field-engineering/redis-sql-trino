@@ -1,8 +1,8 @@
 project:
-  name: calcite-redisearch
-  description: Calcite adapter for RediSearch
-  longDescription: Calcite adapter for RediSearch
-  website: https://github.com/redis-field-engineering/calcite-redisearch
+  name: sql-redis
+  description: SQL interface for RediSearch
+  longDescription: SQL interface and JDBC driver for RediSearch
+  website: https://github.com/redis-field-engineering/sql-redis
   authors:
     - Julien Ruaux
   license: Apache-2.0
@@ -94,7 +94,7 @@ checksum:
   files: false
 
 distributions:
-  calcite-redisearch:
+  trino-redisearch:
     artifacts:
       - path: subprojects/{{distributionName}}/build/distributions/{{distributionName}}-{{projectVersion}}.zip
         transform: '{{distributionName}}/{{distributionName}}-{{projectEffectiveVersion}}.zip'

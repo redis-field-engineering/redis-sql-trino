@@ -1,6 +1,6 @@
 config {
 	info {
-		description = 'SQL interface for Redis'
+		description = 'SQL interface for RediSearch'
 		inceptionYear = '2021'
 		tags = ['redis', 'sql']
 
