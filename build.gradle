@@ -68,7 +68,6 @@ subprojects {
 	}
 	test {
 	    maxHeapSize = "1024m"
-    	jvmArgs "-XX:MaxPermSize=256m"
 	}
 	bootJar {
 		enabled = false
