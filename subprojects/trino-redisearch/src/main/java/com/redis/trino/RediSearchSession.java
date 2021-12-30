@@ -1,36 +1,23 @@
 package com.redis.trino;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Throwables.throwIfInstanceOf;
-import static com.google.common.base.Verify.verify;
-import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.DoubleType.DOUBLE;
-import static io.trino.spi.type.SmallintType.SMALLINT;
-import static io.trino.spi.type.TinyintType.TINYINT;
 import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
-import static java.lang.Math.toIntExact;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.HOURS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.primitives.Primitives;
-import com.google.common.primitives.Shorts;
-import com.google.common.primitives.SignedBytes;
 import com.google.common.util.concurrent.UncheckedExecutionException;
 import com.redis.lettucemod.RedisModulesUtils;
 import com.redis.lettucemod.api.StatefulRedisModulesConnection;
@@ -43,22 +30,13 @@ import com.redis.lettucemod.search.SearchOptions.Limit;
 import com.redis.lettucemod.search.SearchResults;
 
 import io.airlift.log.Logger;
-import io.airlift.slice.Slice;
 import io.lettuce.core.RedisURI;
-import io.redisearch.querybuilder.Node;
-import io.redisearch.querybuilder.QueryBuilder;
-import io.redisearch.querybuilder.Value;
-import io.redisearch.querybuilder.Values;
 import io.trino.spi.HostAddress;
 import io.trino.spi.TrinoException;
-import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ColumnMetadata;
 import io.trino.spi.connector.SchemaNotFoundException;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.TableNotFoundException;
-import io.trino.spi.predicate.Domain;
-import io.trino.spi.predicate.Range;
-import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.type.BigintType;
 import io.trino.spi.type.BooleanType;
 import io.trino.spi.type.DateType;
@@ -133,15 +111,13 @@ public class RediSearchSession {
 
 	public void dropTable(SchemaTableName tableName) {
 		throw new UnsupportedOperationException("dropTable not implemented");
-		// TODO
 	}
 
 	public void addColumn(SchemaTableName schemaTableName, ColumnMetadata columnMetadata) {
-		throw new UnsupportedOperationException("addColumn not implemented");
-		// TODO
+		throw new UnsupportedOperationException("This connector does not support adding columns");
 	}
 
-	private RediSearchTable loadTableSchema(SchemaTableName schemaTableName) throws TableNotFoundException {
+	private RediSearchTable loadTableSchema(SchemaTableName schemaTableName) {
 		IndexInfo indexInfo = getIndexInfo(schemaTableName.getSchemaName(), schemaTableName.getTableName());
 
 		ImmutableList.Builder<RediSearchColumnHandle> columnHandles = ImmutableList.builder();
@@ -156,11 +132,11 @@ public class RediSearchSession {
 	}
 
 	private IndexInfo getIndexInfo(String schemaName, String tableName) throws TableNotFoundException {
-		if (!connection.sync().list().contains(tableName)) {
-			throw new TableNotFoundException(new SchemaTableName(schemaName, tableName),
-					format("Index '%s' not found", tableName), null);
+		if (connection.sync().list().contains(tableName)) {
+			return RedisModulesUtils.indexInfo(connection.sync().indexInfo(tableName));
 		}
-		return RedisModulesUtils.indexInfo(connection.sync().indexInfo(tableName));
+		throw new TableNotFoundException(new SchemaTableName(schemaName, tableName),
+				format("Index '%s' not found", tableName), null);
 	}
 
 	private RediSearchColumnHandle buildColumnHandle(Field field) {
@@ -182,137 +158,12 @@ public class RediSearchSession {
 	public SearchResults<String, String> execute(RediSearchTableHandle tableHandle,
 			List<RediSearchColumnHandle> columns) {
 		String index = tableHandle.getSchemaTableName().getTableName();
-		String query = buildQuery(tableHandle.getConstraint());
+		String query = RediSearchQueryBuilder.buildQuery(tableHandle.getConstraint());
 		Builder<String, String> options = SearchOptions.<String, String>builder();
 		options.limit(Limit.of(0,
 				tableHandle.getLimit().isPresent() ? tableHandle.getLimit().getAsInt() : config.getDefaultLimit()));
 		log.debug("Find documents: index: %s, query: %s", index, query);
 		return connection.sync().search(index, query, options.build());
-	}
-
-	@VisibleForTesting
-	static String buildQuery(TupleDomain<ColumnHandle> tupleDomain) {
-		List<Node> nodes = new ArrayList<>();
-		if (tupleDomain.getDomains().isPresent()) {
-			for (Map.Entry<ColumnHandle, Domain> entry : tupleDomain.getDomains().get().entrySet()) {
-				RediSearchColumnHandle column = (RediSearchColumnHandle) entry.getKey();
-				Optional<Node> predicate = buildPredicate(column, entry.getValue());
-				predicate.ifPresent(nodes::add);
-			}
-		}
-		if (nodes.isEmpty()) {
-			return "*";
-		}
-		return QueryBuilder.intersect(nodes.toArray(new Node[0])).toString();
-	}
-
-	private static Optional<Node> buildPredicate(RediSearchColumnHandle column, Domain domain) {
-		String name = column.getName();
-		Type type = column.getType();
-		List<Object> singleValues = new ArrayList<>();
-		List<Node> disjuncts = new ArrayList<>();
-		for (Range range : domain.getValues().getRanges().getOrderedRanges()) {
-			if (range.isSingleValue()) {
-				Optional<Object> translated = translateValue(range.getSingleValue(), type);
-				if (translated.isEmpty()) {
-					return Optional.empty();
-				}
-				singleValues.add(translated.get());
-			} else {
-				List<Value> rangeConjuncts = new ArrayList<>();
-				if (!range.isLowUnbounded()) {
-					Optional<Object> translated = translateValue(range.getLowBoundedValue(), type);
-					if (translated.isEmpty()) {
-						return Optional.empty();
-					}
-					double number = ((Number) translated.get()).doubleValue();
-					rangeConjuncts.add(range.isLowInclusive() ? Values.ge(number) : Values.gt(number));
-				}
-				if (!range.isHighUnbounded()) {
-					Optional<Object> translated = translateValue(range.getHighBoundedValue(), type);
-					if (translated.isEmpty()) {
-						return Optional.empty();
-					}
-					double number = ((Number) translated.get()).doubleValue();
-					rangeConjuncts.add(range.isHighInclusive() ? Values.le(number) : Values.lt(number));
-				}
-				// If rangeConjuncts is null, then the range was ALL, which should already have
-				// been checked for
-				verify(!rangeConjuncts.isEmpty());
-				disjuncts.add(QueryBuilder.intersect(name, rangeConjuncts.toArray(new Value[0])));
-			}
-		}
-
-		// Add back all of the possible single values either as an equality or an IN
-		// predicate
-
-		if (singleValues.size() == 1) {
-			disjuncts.add(QueryBuilder.intersect(name, value(singleValues.get(0), type)));
-		} else {
-			List<Value> values = new ArrayList<>();
-			for (Object trinoNativeValue : singleValues) {
-				checkArgument(Primitives.wrap(type.getJavaType()).isInstance(trinoNativeValue),
-						"%s (%s) is not a valid representation for %s", trinoNativeValue, trinoNativeValue.getClass(),
-						type);
-				values.add(value(trinoNativeValue, type));
-			}
-			disjuncts.add(QueryBuilder.intersect(name, values.toArray(new Value[0])));
-		}
-
-		return Optional.of(QueryBuilder.union(disjuncts.toArray(new Node[0])));
-	}
-
-	private static Value value(Object trinoNativeValue, Type type) {
-		requireNonNull(trinoNativeValue, "trinoNativeValue is null");
-		requireNonNull(type, "type is null");
-		if (type == TINYINT) {
-			return Values.eq((long) SignedBytes.checkedCast(((Long) trinoNativeValue)));
-		}
-
-		if (type == SMALLINT) {
-			return Values.eq((long) Shorts.checkedCast(((Long) trinoNativeValue)));
-		}
-
-		if (type == IntegerType.INTEGER) {
-			return Values.eq((long) toIntExact(((Long) trinoNativeValue)));
-		}
-
-		if (type == BIGINT) {
-			return Values.eq((Long) trinoNativeValue);
-		}
-		if (type instanceof VarcharType) {
-			return Values.tags((String) trinoNativeValue);
-
-		}
-		throw new UnsupportedOperationException("Type " + type + " not supported");
-	}
-
-	private static Optional<Object> translateValue(Object trinoNativeValue, Type type) {
-		requireNonNull(trinoNativeValue, "trinoNativeValue is null");
-		requireNonNull(type, "type is null");
-		checkArgument(Primitives.wrap(type.getJavaType()).isInstance(trinoNativeValue),
-				"%s (%s) is not a valid representation for %s", trinoNativeValue, trinoNativeValue.getClass(), type);
-
-		if (type == TINYINT) {
-			return Optional.of((long) SignedBytes.checkedCast(((Long) trinoNativeValue)));
-		}
-
-		if (type == SMALLINT) {
-			return Optional.of((long) Shorts.checkedCast(((Long) trinoNativeValue)));
-		}
-
-		if (type == IntegerType.INTEGER) {
-			return Optional.of((long) toIntExact(((Long) trinoNativeValue)));
-		}
-
-		if (type == BIGINT) {
-			return Optional.of(trinoNativeValue);
-		}
-		if (type instanceof VarcharType) {
-			return Optional.of(((Slice) trinoNativeValue).toStringUtf8());
-		}
-
-		return Optional.empty();
 	}
 
 	private Field buildField(RediSearchColumnHandle column) {

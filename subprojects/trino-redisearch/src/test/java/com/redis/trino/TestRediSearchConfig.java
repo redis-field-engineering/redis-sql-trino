@@ -16,8 +16,8 @@ public class TestRediSearchConfig {
 
 	@Test
 	public void testDefaults() {
-		assertRecordedDefaults(
-				recordDefaults(RediSearchConfig.class).setUri(null).setDefaultSchema(RediSearchConfig.DEFAULT_SCHEMA));
+		assertRecordedDefaults(recordDefaults(RediSearchConfig.class).setUri(null)
+				.setDefaultSchema(RediSearchConfig.DEFAULT_SCHEMA).setDefaultLimit(RediSearchConfig.DEFAULT_LIMIT));
 	}
 
 	@Test

@@ -84,7 +84,7 @@ release:
         - search: '\[deps\] '
         - search: '\[translation\] '
         - search: '\[build\] '
-
+        
 signing:
   active: always
   armored: true
@@ -92,6 +92,12 @@ signing:
 
 checksum:
   files: false
+  
+announce:
+  slack:
+    active: release
+    channel: '#field-engineering-announcements'
+    message: '🚀 SQL Redis {{projectVersion}} has been released! {{releaseNotesUrl}}'
 
 distributions:
   trino-redisearch:

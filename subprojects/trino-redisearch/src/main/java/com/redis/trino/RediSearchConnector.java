@@ -61,12 +61,12 @@ public class RediSearchConnector implements Connector {
 		checkTransaction(transactions.remove(transaction), transaction);
 	}
 
-	@Override
-	public void rollback(ConnectorTransactionHandle transaction) {
-		RediSearchMetadata metadata = transactions.remove(transaction);
-		checkTransaction(metadata, transaction);
-		metadata.rollback();
-	}
+//	@Override
+//	public void rollback(ConnectorTransactionHandle transaction) {
+//		RediSearchMetadata metadata = transactions.remove(transaction);
+//		checkTransaction(metadata, transaction);
+//		metadata.rollback();
+//	}
 
 	@Override
 	public ConnectorSplitManager getSplitManager() {

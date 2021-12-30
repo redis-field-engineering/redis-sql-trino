@@ -12,7 +12,7 @@ import io.airlift.configuration.ConfigSecuritySensitive;
 public class RediSearchConfig {
 
 	public static final String DEFAULT_SCHEMA = "default";
-	private static final long DEFAULT_LIMIT = 10000;
+	public static final long DEFAULT_LIMIT = 10000;
 	
 	private String defaultSchema = DEFAULT_SCHEMA;
 	private Optional<String> uri = Optional.empty();

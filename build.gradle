@@ -67,7 +67,8 @@ subprojects {
 		}
 	}
 	test {
-		useJUnitPlatform()
+	    maxHeapSize = "1024m"
+    	jvmArgs "-XX:MaxPermSize=256m"
 	}
 	bootJar {
 		enabled = false
@@ -79,5 +80,4 @@ subprojects {
 
 	sourceCompatibility = 8
     targetCompatibility = 8
-
 }
