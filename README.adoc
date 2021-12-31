@@ -24,14 +24,14 @@ For macOS: `brew install trino`
 
 1. Download latest `trino-redisearch-*.zip` release from https://github.com/redis-field-engineering/sql-redis/releases
 
-2. Unzip the release without any directory structure under `plugin/redisearch` in the Trino home directory:
+2. Unzip the release without any directory structure under `<trino>/plugin/redisearch`:
 +
 [source,bash]
 ----
 unzip -j trino-redisearch-early-access.zip -d /opt/trino/plugin/redisearch
 ----
 
-3. Create a `redisearch.properties` file under the Trino `etc/catalog` directory:
+3. Create a `redisearch.properties` file under `<trino>/etc/catalog` directory:
 +
 .redisearch.properties
 [source,properties]
