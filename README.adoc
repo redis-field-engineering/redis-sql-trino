@@ -11,3 +11,60 @@ image:https://img.shields.io/nexus/s/{project-group}/{project-name}?server=https
 image:https://codecov.io/gh/{project-owner}/sql-redis/branch/master/graph/badge.svg?token=9I4H9NOBRQ["Coverage", link="https://codecov.io/gh/{project-owner}/sql-redis"]
 
 SQL Redis is a SQL interface to RediSearch implemented as a https://trino.io[Trino] connector.
+
+== Getting Started
+
+=== Install Trino
+
+https://trino.io/docs/current/installation.html
+
+For macOS: `brew install trino`
+
+=== Install the connector
+
+1. Download latest `trino-redisearch-*.zip` release from https://github.com/redis-field-engineering/sql-redis/releases
+
+2. Unzip the release without any directory structure under `plugin/redisearch` in the Trino home directory:
++
+[source,bash]
+----
+unzip -j trino-redisearch-early-access.zip -d /opt/trino/plugin/redisearch
+----
+
+3. Create a `redisearch.properties` file under the Trino `etc/catalog` directory:
++
+.redisearch.properties
+[source,properties]
+----
+connector.name=redisearch
+redisearch.uri=redis://localhost:6379
+----
+
+=== Run
+
+1. Start Trino server:
++
+[source,bash]
+----
+`trino-server start`
+----
+2. Connect to Trino using the CLI:
++
+[source,bash]
+----
+`trino --catalog redisearch --schema default`
+----
+3. Run a SQL query:
++
+[source,bash]
+----
+trino:default> select count(*) from myIdx;
+ _col0
+ ------
+  4431
+(1 row)
+
+Query 20211231_021841_00009_gexvh, FINISHED, 1 node
+Splits: 10 total, 10 done (100.00%)
+0.45 [4.43K rows, 335B] [9.89K rows/s, 748B/s]
+----
