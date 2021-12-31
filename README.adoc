@@ -68,3 +68,7 @@ Query 20211231_021841_00009_gexvh, FINISHED, 1 node
 Splits: 10 total, 10 done (100.00%)
 0.45 [4.43K rows, 335B] [9.89K rows/s, 748B/s]
 ----
+
+=== Tableau
+
+Follow these steps to connect Tableau: https://help.tableau.com/current/pro/desktop/en-us/examples_presto.htm
