@@ -54,7 +54,6 @@ public final class RediSearchQueryRunner {
 			LOG.info("Loading data...");
 
 			long startTime = System.nanoTime();
-//			Beers.populateIndex(server.getTestContext().getConnection());
 			for (TpchTable<?> table : tables) {
 				loadTpchTopic(server, trinoClient, table);
 			}

@@ -72,3 +72,14 @@ Splits: 10 total, 10 done (100.00%)
 === Tableau
 
 Follow these steps to connect Tableau: https://help.tableau.com/current/pro/desktop/en-us/examples_presto.htm
+
+== Build
+
+Run these commands to build the Trino connector for RediSearch from source:
+
+[source,bash]
+----
+git clone https://github.com/redis-field-engineering/sql-redis.git
+cd sql-redis
+./gradlew clean build
+----
