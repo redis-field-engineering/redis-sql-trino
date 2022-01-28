@@ -1,0 +1,28 @@
+version: '3.6'
+services:
+  trino:
+    image: trinodb/trino
+    hostname: trino
+    container_name: trino
+    ports:
+      - "8080:8080"
+    networks:
+      - localnet
+    volumes:
+      - ../subprojects/trino-redisearch/build/distributions/trino-redisearch:/usr/lib/trino/plugin/redisearch
+      - ./redisearch.properties:/etc/trino/catalog/redisearch.properties
+
+  # Redis Modules
+  redismod:
+    image: "redislabs/redismod"
+    hostname: redismod
+    container_name: redismod
+    networks:
+      - localnet
+    ports:
+      - "6379:6379"
+    restart: always
+
+networks:
+  localnet:
+    attachable: true

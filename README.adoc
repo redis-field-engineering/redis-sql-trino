@@ -26,7 +26,7 @@ For macOS: `brew install trino`
 
 2. Unzip the release without any directory structure under `<trino>/plugin/redisearch`:
 +
-[source,bash,subs="verbatim,attributes"]
+[source,console,subs="verbatim,attributes"]
 ----
 unzip -j trino-redisearch-{project-version}.zip -d /opt/trino/plugin/redisearch
 ----
@@ -44,19 +44,19 @@ redisearch.uri=redis://localhost:6379
 
 1. Start Trino server:
 +
-[source,bash]
+[source,console]
 ----
 `trino-server start`
 ----
 2. Connect to Trino using the CLI:
 +
-[source,bash]
+[source,console]
 ----
 `trino --catalog redisearch --schema default`
 ----
 3. Run a SQL query:
 +
-[source,bash]
+[source,console]
 ----
 trino:default> select count(*) from myIdx;
  _col0
@@ -77,7 +77,7 @@ Follow these steps to connect Tableau: https://help.tableau.com/current/pro/desk
 
 Run these commands to build the Trino connector for RediSearch from source:
 
-[source,bash]
+[source,console]
 ----
 git clone https://github.com/redis-field-engineering/sql-redis.git
 cd sql-redis
