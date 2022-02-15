@@ -11,7 +11,6 @@ import io.airlift.json.JsonModule;
 import io.trino.spi.connector.Connector;
 import io.trino.spi.connector.ConnectorContext;
 import io.trino.spi.connector.ConnectorFactory;
-import io.trino.spi.connector.ConnectorHandleResolver;
 import io.trino.spi.type.TypeManager;
 
 public class RediSearchConnectorFactory implements ConnectorFactory {
@@ -19,11 +18,6 @@ public class RediSearchConnectorFactory implements ConnectorFactory {
 	@Override
 	public String getName() {
 		return "redisearch";
-	}
-
-	@Override
-	public ConnectorHandleResolver getHandleResolver() {
-		return new RediSearchHandleResolver();
 	}
 
 	@Override

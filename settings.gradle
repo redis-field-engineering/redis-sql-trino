@@ -9,6 +9,7 @@ buildscript {
         classpath "org.kordamp.gradle:java-project-gradle-plugin:$kordampPluginVersion"
         classpath "org.springframework.boot:spring-boot-gradle-plugin:$bootPluginVersion"
         classpath "io.spring.gradle:dependency-management-plugin:$dependencyPluginVersion"
+        classpath "com.palantir.gradle.docker:gradle-docker:$dockerPluginVersion"
     }
 }
 

@@ -1,42 +1,48 @@
 package com.redis.trino;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.google.common.collect.ImmutableList;
-import io.trino.spi.HostAddress;
-import io.trino.spi.connector.ConnectorSplit;
+import static java.util.Objects.requireNonNull;
 
 import java.util.List;
 
-import static java.util.Objects.requireNonNull;
+import org.openjdk.jol.info.ClassLayout;
 
-public class RediSearchSplit
-        implements ConnectorSplit
-{
-    private final List<HostAddress> addresses;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.common.collect.ImmutableList;
 
-    @JsonCreator
-    public RediSearchSplit(@JsonProperty("addresses") List<HostAddress> addresses)
-    {
-        this.addresses = ImmutableList.copyOf(requireNonNull(addresses, "addresses is null"));
-    }
+import io.airlift.slice.SizeOf;
+import io.trino.spi.HostAddress;
+import io.trino.spi.connector.ConnectorSplit;
 
-    @Override
-    public boolean isRemotelyAccessible()
-    {
-        return true;
-    }
+public class RediSearchSplit implements ConnectorSplit {
 
-    @Override
-    @JsonProperty
-    public List<HostAddress> getAddresses()
-    {
-        return addresses;
-    }
+	private static final int INSTANCE_SIZE = ClassLayout.parseClass(RediSearchSplit.class).instanceSize();
 
-    @Override
-    public Object getInfo()
-    {
-        return this;
-    }
+	private final List<HostAddress> addresses;
+
+	@JsonCreator
+	public RediSearchSplit(@JsonProperty("addresses") List<HostAddress> addresses) {
+		this.addresses = ImmutableList.copyOf(requireNonNull(addresses, "addresses is null"));
+	}
+
+	@Override
+	public boolean isRemotelyAccessible() {
+		return true;
+	}
+
+	@Override
+	@JsonProperty
+	public List<HostAddress> getAddresses() {
+		return addresses;
+	}
+
+	@Override
+	public Object getInfo() {
+		return this;
+	}
+
+	@Override
+	public long getRetainedSizeInBytes() {
+		return INSTANCE_SIZE + SizeOf.estimatedSizeOf(addresses, HostAddress::getRetainedSizeInBytes);
+	}
 }

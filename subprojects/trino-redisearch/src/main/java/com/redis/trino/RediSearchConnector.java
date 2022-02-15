@@ -51,7 +51,7 @@ public class RediSearchConnector implements Connector {
 		checkTransaction(metadata, transaction);
 		return metadata;
 	}
-
+	
 	private void checkTransaction(Object object, ConnectorTransactionHandle transaction) {
 		checkArgument(object != null, "no such transaction: %s", transaction);
 	}

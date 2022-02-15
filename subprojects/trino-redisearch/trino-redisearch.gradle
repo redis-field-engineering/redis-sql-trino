@@ -1,3 +1,7 @@
+plugins {
+    id 'com.palantir.docker' 
+}
+
 dependencies {
     implementation group: 'io.trino', name: 'trino-plugin-toolkit', version: trinoVersion
     compileOnly group: 'io.trino', name: 'trino-spi', version: trinoVersion
@@ -14,4 +18,13 @@ dependencies {
 
 test {
     useTestNG()
+}
+
+docker {
+    name 'jruaux/trino-redisearch:version'
+    tags 'latest'
+    files tasks.distTar.outputs
+    copySpec.from("src/main/docker/setup").into("setup")
+    dockerfile file('src/main/docker/Dockerfile')
+    buildArgs([TRINO_VERSION: trinoVersion, BUILD_VERSION: project.version])
 }

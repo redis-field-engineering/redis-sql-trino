@@ -84,7 +84,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	}
 
 	@Override
-	public long getSystemMemoryUsage() {
+	public long getMemoryUsage() {
 		return 0L;
 	}
 
@@ -160,7 +160,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 		} else if (type instanceof CharType) {
 			type.writeSlice(output, truncateToLengthAndTrimSpaces(utf8Slice(value), ((CharType) type)));
 		} else if (type instanceof DecimalType) {
-			type.writeSlice(output, encodeScaledValue(new BigDecimal(value), ((DecimalType) type).getScale()));
+			type.writeObject(output, encodeScaledValue(new BigDecimal(value), ((DecimalType) type).getScale()));
 		} else if (isJsonType(type)) {
 			type.writeSlice(output, jsonParse(utf8Slice(value)));
 		} else {

@@ -1,20 +1,8 @@
 version: '3.6'
 services:
-  trino:
-    image: trinodb/trino
-    hostname: trino
-    container_name: trino
-    ports:
-      - "8080:8080"
-    networks:
-      - localnet
-    volumes:
-      - ../subprojects/trino-redisearch/build/distributions/trino-redisearch:/usr/lib/trino/plugin/redisearch
-      - ./redisearch.properties:/etc/trino/catalog/redisearch.properties
 
-  # Redis Modules
   redismod:
-    image: "redislabs/redismod"
+    image: redislabs/redismod
     hostname: redismod
     container_name: redismod
     networks:
@@ -22,6 +10,27 @@ services:
     ports:
       - "6379:6379"
     restart: always
+
+  trino:
+    image: jruaux/trino-redisearch
+    hostname: trino
+    container_name: trino
+    ports:
+      - "8080:8080"
+    networks:
+      - localnet
+    depends_on:
+      - redismod
+    environment:
+      REDISEARCH_URI: 'redis://redismod:6379'
+    
+  riot-file:
+    image: jruaux/riot-file
+    networks:
+      - localnet
+    command: -h redismod import http://developer.redis.com/riot/beers.json hset --keyspace beer --keys id
+    depends_on:
+      - redismod
 
 networks:
   localnet:

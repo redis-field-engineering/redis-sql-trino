@@ -98,7 +98,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 				// table disappeared during listing operation
 			}
 		}
-		return columns.build();
+		return columns.buildOrThrow();
 	}
 
 	private List<SchemaTableName> listTables(ConnectorSession session, SchemaTablePrefix prefix) {
@@ -163,11 +163,6 @@ public class RediSearchMetadata implements ConnectorMetadata {
 //			Collection<ComputedStatistics> computedStatistics) {
 //		return Optional.empty();
 //	}
-
-	@Override
-	public boolean usesLegacyTableLayouts() {
-		return false;
-	}
 
 	@Override
 	public ConnectorTableProperties getTableProperties(ConnectorSession session, ConnectorTableHandle table) {

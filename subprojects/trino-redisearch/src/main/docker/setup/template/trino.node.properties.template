@@ -1,0 +1,3 @@
+node.environment=docker
+node.data-dir=/data/trino
+node.id=${TRINO_NODE_ID}
