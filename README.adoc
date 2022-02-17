@@ -12,7 +12,44 @@ image:https://codecov.io/gh/{project-owner}/sql-redis/branch/master/graph/badge.
 
 SQL Redis is a SQL interface to https://oss.redislabs.com/redisearch/[RediSearch] implemented as a https://trino.io[Trino] connector.
 
-== Getting Started
+== Docker Example
+
+1. Launch the containers
++
+[source,console]
+----
+docker-compose up
+----
+
+2. Create a RediSearch index
++
+[source,console]
+----
+docker exec redismod /usr/local/bin/redis-cli FT.CREATE beers ON HASH PREFIX 1 beer: SCHEMA id TAG SORTABLE brewery_id TAG SORTABLE name TEXT SORTABLE abv NUMERIC SORTABLE descript TEXT style_name TAG SORTABLE cat_name TAG SORTABLE
+----
+
+3. Add documents to the index
++
+[source,console]
+----
+docker exec jruaux/riot-file -h host.docker.internal import http://developer.redis.com/riot/beers.json hset --keyspace beer --keys id
+----
+
+4. Run the Trino CLI
++
+[source,console]
+----
+docker exec -it trino trino --catalog redisearch --schema default
+----
+
+5. Run a SQL query
++
+[source,console]
+----
+trino:default> select * from beers;
+----
+
+== Install and Run
 
 === Install Trino
 
@@ -48,28 +85,22 @@ redisearch.uri=redis://localhost:6379
 ----
 `trino-server start`
 ----
+
 2. Connect to Trino using the CLI:
 +
 [source,console]
 ----
 `trino --catalog redisearch --schema default`
 ----
+
 3. Run a SQL query:
 +
 [source,console]
 ----
 trino:default> select count(*) from myIdx;
- _col0
- ------
-  4431
-(1 row)
-
-Query 20211231_021841_00009_gexvh, FINISHED, 1 node
-Splits: 10 total, 10 done (100.00%)
-0.45 [4.43K rows, 335B] [9.89K rows/s, 748B/s]
 ----
 
-=== Tableau
+== Tableau
 
 Follow these steps to connect Tableau: https://help.tableau.com/current/pro/desktop/en-us/examples_presto.htm
 
