@@ -1,22 +1,31 @@
 package com.redis.trino;
 
+import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
+import io.airlift.slice.Slice;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ColumnMetadata;
+import io.trino.spi.connector.ConnectorInsertTableHandle;
 import io.trino.spi.connector.ConnectorMetadata;
+import io.trino.spi.connector.ConnectorOutputMetadata;
+import io.trino.spi.connector.ConnectorOutputTableHandle;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.ConnectorTableHandle;
+import io.trino.spi.connector.ConnectorTableLayout;
 import io.trino.spi.connector.ConnectorTableMetadata;
 import io.trino.spi.connector.ConnectorTableProperties;
 import io.trino.spi.connector.Constraint;
@@ -27,12 +36,13 @@ import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.SchemaTablePrefix;
 import io.trino.spi.connector.TableNotFoundException;
 import io.trino.spi.predicate.TupleDomain;
+import io.trino.spi.statistics.ComputedStatistics;
 
 public class RediSearchMetadata implements ConnectorMetadata {
 
 	private final RediSearchSession rediSearchSession;
-//	private final AtomicReference<Runnable> rollbackAction = new AtomicReference<>();
 	private final String schemaName;
+	private final AtomicReference<Runnable> rollbackAction = new AtomicReference<>();
 
 	public RediSearchMetadata(RediSearchSession rediSearchSession) {
 		this.rediSearchSession = requireNonNull(rediSearchSession, "rediSearchSession is null");
@@ -114,61 +124,69 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		return ((RediSearchColumnHandle) columnHandle).toColumnMetadata();
 	}
 
-//	@Override
-//	public void createTable(ConnectorSession session, ConnectorTableMetadata tableMetadata, boolean ignoreExisting) {
-//		rediSearchSession.createTable(tableMetadata.getTable(), buildColumnHandles(tableMetadata));
-//	}
-//
-//	@Override
-//	public void dropTable(ConnectorSession session, ConnectorTableHandle tableHandle) {
-//		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
-//
-//		rediSearchSession.dropTable(table.getSchemaTableName());
-//	}
-//
-//	@Override
-//	public ConnectorOutputTableHandle beginCreateTable(ConnectorSession session, ConnectorTableMetadata tableMetadata,
-//			Optional<ConnectorNewTableLayout> layout) {
-//		List<RediSearchColumnHandle> columns = buildColumnHandles(tableMetadata);
-//
-//		rediSearchSession.createTable(tableMetadata.getTable(), columns);
-//
-//		setRollback(() -> rediSearchSession.dropTable(tableMetadata.getTable()));
-//
-//		return new RediSearchOutputTableHandle(tableMetadata.getTable(),
-//				columns.stream().filter(c -> !c.isHidden()).collect(toList()));
-//	}
+	@Override
+	public void createTable(ConnectorSession session, ConnectorTableMetadata tableMetadata, boolean ignoreExisting) {
+		rediSearchSession.createTable(tableMetadata.getTable(), buildColumnHandles(tableMetadata));
+	}
 
-//	@Override
-//	public Optional<ConnectorOutputMetadata> finishCreateTable(ConnectorSession session,
-//			ConnectorOutputTableHandle tableHandle, Collection<Slice> fragments,
-//			Collection<ComputedStatistics> computedStatistics) {
-//		clearRollback();
-//		return Optional.empty();
-//	}
+	@Override
+	public void dropTable(ConnectorSession session, ConnectorTableHandle tableHandle) {
+		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
+		rediSearchSession.dropTable(table.getSchemaTableName());
+	}
 
-//	@Override
-//	public ConnectorInsertTableHandle beginInsert(ConnectorSession session, ConnectorTableHandle tableHandle) {
-//		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
-//		List<RediSearchColumnHandle> columns = rediSearchSession.getTable(table.getSchemaTableName()).getColumns();
-//
-//		return new RediSearchInsertTableHandle(table.getSchemaTableName(),
-//				columns.stream().filter(column -> !column.isHidden())
-//						.peek(column -> validateColumnNameForInsert(column.getName())).collect(toImmutableList()));
-//	}
-//
-//	@Override
-//	public Optional<ConnectorOutputMetadata> finishInsert(ConnectorSession session,
-//			ConnectorInsertTableHandle insertHandle, Collection<Slice> fragments,
-//			Collection<ComputedStatistics> computedStatistics) {
-//		return Optional.empty();
-//	}
+	@Override
+	public void addColumn(ConnectorSession session, ConnectorTableHandle tableHandle, ColumnMetadata column) {
+		rediSearchSession.addColumn(((RediSearchTableHandle) tableHandle).getSchemaTableName(), column);
+	}
+
+	@Override
+	public void dropColumn(ConnectorSession session, ConnectorTableHandle tableHandle, ColumnHandle column) {
+		rediSearchSession.dropColumn(((RediSearchTableHandle) tableHandle).getSchemaTableName(),
+				((RediSearchColumnHandle) column).getName());
+	}
+
+	@Override
+	public ConnectorOutputTableHandle beginCreateTable(ConnectorSession session, ConnectorTableMetadata tableMetadata,
+			Optional<ConnectorTableLayout> layout) {
+		List<RediSearchColumnHandle> columns = buildColumnHandles(tableMetadata);
+
+		rediSearchSession.createTable(tableMetadata.getTable(), columns);
+
+		setRollback(() -> rediSearchSession.dropTable(tableMetadata.getTable()));
+
+		return new RediSearchOutputTableHandle(tableMetadata.getTable(),
+				columns.stream().filter(c -> !c.isHidden()).collect(toList()));
+	}
+
+	@Override
+	public Optional<ConnectorOutputMetadata> finishCreateTable(ConnectorSession session,
+			ConnectorOutputTableHandle tableHandle, Collection<Slice> fragments,
+			Collection<ComputedStatistics> computedStatistics) {
+		clearRollback();
+		return Optional.empty();
+	}
+
+	@Override
+	public ConnectorInsertTableHandle beginInsert(ConnectorSession session, ConnectorTableHandle tableHandle) {
+		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
+		List<RediSearchColumnHandle> columns = rediSearchSession.getTable(table.getSchemaTableName()).getColumns();
+
+		return new RediSearchInsertTableHandle(table.getSchemaTableName(),
+				columns.stream().filter(column -> !column.isHidden()).collect(toImmutableList()));
+	}
+
+	@Override
+	public Optional<ConnectorOutputMetadata> finishInsert(ConnectorSession session,
+			ConnectorInsertTableHandle insertHandle, Collection<Slice> fragments,
+			Collection<ComputedStatistics> computedStatistics) {
+		return Optional.empty();
+	}
 
 	@Override
 	public ConnectorTableProperties getTableProperties(ConnectorSession session, ConnectorTableHandle table) {
-		RediSearchTableHandle tableHandle = (RediSearchTableHandle) table;
-
-		return new ConnectorTableProperties(tableHandle.getConstraint(), Optional.empty(), Optional.empty(),
+		RediSearchTableHandle handle = (RediSearchTableHandle) table;
+		return new ConnectorTableProperties(handle.getConstraint(), Optional.empty(), Optional.empty(),
 				Optional.empty(), ImmutableList.of());
 	}
 
@@ -205,17 +223,17 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		return Optional.of(new ConstraintApplicationResult<>(handle, constraint.getSummary(), false));
 	}
 
-//	private void setRollback(Runnable action) {
-//		checkState(rollbackAction.compareAndSet(null, action), "rollback action is already set");
-//	}
-//
-//	private void clearRollback() {
-//		rollbackAction.set(null);
-//	}
+	private void setRollback(Runnable action) {
+		checkState(rollbackAction.compareAndSet(null, action), "rollback action is already set");
+	}
 
-//	public void rollback() {
-//		Optional.ofNullable(rollbackAction.getAndSet(null)).ifPresent(Runnable::run);
-//	}
+	private void clearRollback() {
+		rollbackAction.set(null);
+	}
+
+	public void rollback() {
+		Optional.ofNullable(rollbackAction.getAndSet(null)).ifPresent(Runnable::run);
+	}
 
 	private static SchemaTableName getTableName(ConnectorTableHandle tableHandle) {
 		return ((RediSearchTableHandle) tableHandle).getSchemaTableName();
@@ -231,14 +249,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		return new ConnectorTableMetadata(tableName, columns);
 	}
 
-//	private static List<RediSearchColumnHandle> buildColumnHandles(ConnectorTableMetadata tableMetadata) {
-//		return tableMetadata.getColumns().stream()
-//				.map(m -> new RediSearchColumnHandle(m.getName(), m.getType(), m.isHidden())).collect(toList());
-//	}
-
-//	private static void validateColumnNameForInsert(String columnName) {
-//		if (columnName.contains("$") || columnName.contains(".")) {
-//			throw new IllegalArgumentException("Column name must not contain '$' or '.' for INSERT: " + columnName);
-//		}
-//	}
+	private static List<RediSearchColumnHandle> buildColumnHandles(ConnectorTableMetadata tableMetadata) {
+		return tableMetadata.getColumns().stream()
+				.map(m -> new RediSearchColumnHandle(m.getName(), m.getType(), m.isHidden())).collect(toList());
+	}
 }

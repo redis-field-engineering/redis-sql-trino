@@ -51,6 +51,7 @@ import io.trino.spi.type.TimeType;
 import io.trino.spi.type.TimestampWithTimeZoneType;
 import io.trino.spi.type.TinyintType;
 import io.trino.spi.type.Type;
+import io.trino.spi.type.VarbinaryType;
 import io.trino.spi.type.VarcharType;
 
 public class RediSearchPageSink implements ConnectorPageSink {
@@ -78,7 +79,11 @@ public class RediSearchPageSink implements ConnectorPageSink {
 			String key = schemaTableName.getTableName() + ":" + factory.create().toString();
 			for (int channel = 0; channel < page.getChannelCount(); channel++) {
 				RediSearchColumnHandle column = columns.get(channel);
-				map.put(column.getName(), getValue(columns.get(channel).getType(), page.getBlock(channel), position));
+				Block block = page.getBlock(channel);
+				if (block.isNull(position)) {
+					continue;
+				}
+				map.put(column.getName(), getObjectValue(columns.get(channel).getType(), block, position));
 			}
 			RedisFuture<Long> future = async.hset(key, map);
 			futures.add(future);
@@ -89,11 +94,7 @@ public class RediSearchPageSink implements ConnectorPageSink {
 		return NOT_BLOCKED;
 	}
 
-	@SuppressWarnings("deprecation")
-	private String getValue(Type type, Block block, int position) {
-		if (block.isNull(position)) {
-			return null;
-		}
+	private String getObjectValue(Type type, Block block, int position) {
 		if (type.equals(BooleanType.BOOLEAN)) {
 			return String.valueOf(type.getBoolean(block, position));
 		}
@@ -121,13 +122,16 @@ public class RediSearchPageSink implements ConnectorPageSink {
 		if (type instanceof CharType) {
 			return padSpaces(type.getSlice(block, position), ((CharType) type)).toStringUtf8();
 		}
+		if (type.equals(VarbinaryType.VARBINARY)) {
+			return new String(type.getSlice(block, position).getBytes());
+		}
 		if (type.equals(DateType.DATE)) {
 			long days = type.getLong(block, position);
 			return DateTimeFormatter.ISO_DATE.format(LocalDate.ofEpochDay(days));
 		}
-		if (type.equals(TimeType.TIME)) {
+		if (type.equals(TimeType.TIME_MILLIS)) {
 			long picos = type.getLong(block, position);
-			return String.valueOf((roundDiv(picos, PICOSECONDS_PER_MILLISECOND)));
+			return String.valueOf(roundDiv(picos, PICOSECONDS_PER_MILLISECOND));
 		}
 		if (type.equals(TIMESTAMP_MILLIS)) {
 			long millisUtc = floorDiv(type.getLong(block, position), MICROSECONDS_PER_MILLISECOND);

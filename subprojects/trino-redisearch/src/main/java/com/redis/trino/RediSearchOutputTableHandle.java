@@ -10,30 +10,24 @@ import java.util.List;
 
 import static java.util.Objects.requireNonNull;
 
-public class RediSearchOutputTableHandle
-        implements ConnectorOutputTableHandle
-{
-    private final SchemaTableName schemaTableName;
-    private final List<RediSearchColumnHandle> columns;
+public class RediSearchOutputTableHandle implements ConnectorOutputTableHandle {
+	private final SchemaTableName schemaTableName;
+	private final List<RediSearchColumnHandle> columns;
 
-    @JsonCreator
-    public RediSearchOutputTableHandle(
-            @JsonProperty("schemaTableName") SchemaTableName schemaTableName,
-            @JsonProperty("columns") List<RediSearchColumnHandle> columns)
-    {
-        this.schemaTableName = requireNonNull(schemaTableName, "schemaTableName is null");
-        this.columns = ImmutableList.copyOf(requireNonNull(columns, "columns is null"));
-    }
+	@JsonCreator
+	public RediSearchOutputTableHandle(@JsonProperty("schemaTableName") SchemaTableName schemaTableName,
+			@JsonProperty("columns") List<RediSearchColumnHandle> columns) {
+		this.schemaTableName = requireNonNull(schemaTableName, "schemaTableName is null");
+		this.columns = ImmutableList.copyOf(requireNonNull(columns, "columns is null"));
+	}
 
-    @JsonProperty
-    public SchemaTableName getSchemaTableName()
-    {
-        return schemaTableName;
-    }
+	@JsonProperty
+	public SchemaTableName getSchemaTableName() {
+		return schemaTableName;
+	}
 
-    @JsonProperty
-    public List<RediSearchColumnHandle> getColumns()
-    {
-        return columns;
-    }
+	@JsonProperty
+	public List<RediSearchColumnHandle> getColumns() {
+		return columns;
+	}
 }

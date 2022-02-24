@@ -1,7 +1,7 @@
 package com.redis.trino;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.base.Verify.verify;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.SmallintType.SMALLINT;
@@ -38,21 +38,19 @@ import io.trino.spi.type.VarcharType;
 public class RediSearchQueryBuilder {
 
 	private RediSearchQueryBuilder() {
-
 	}
 
 	public static String buildQuery(TupleDomain<ColumnHandle> tupleDomain) {
 		List<Node> nodes = new ArrayList<>();
-		Optional<Map<ColumnHandle, Domain>> domains = tupleDomain.getDomains();
-		if (domains.isPresent()) {
-			for (Map.Entry<ColumnHandle, Domain> entry : domains.get().entrySet()) {
+		if (tupleDomain.getDomains().isPresent()) {
+			for (Map.Entry<ColumnHandle, Domain> entry : tupleDomain.getDomains().get().entrySet()) {
 				RediSearchColumnHandle column = (RediSearchColumnHandle) entry.getKey();
 				Domain domain = entry.getValue();
-
 				checkArgument(!domain.isNone(), "Unexpected NONE domain for %s", column.getName());
-				if (!domain.isAll()) {
-					buildPredicate(column.getName(), domain, column.getType()).ifPresent(nodes::add);
+				if (domain.isAll()) {
+					continue;
 				}
+				buildPredicate(column.getName(), domain, column.getType()).ifPresent(nodes::add);
 			}
 		}
 		if (nodes.isEmpty()) {
@@ -61,57 +59,59 @@ public class RediSearchQueryBuilder {
 		return QueryBuilder.intersect(nodes.toArray(new Node[0])).toString();
 	}
 
-	private static Optional<Node> buildPredicate(String columnName, Domain domain, Type type) {
-		List<Node> nodes = new ArrayList<>();
+	private static Optional<Node> buildPredicate(String name, Domain domain, Type type) {
+		String columnName = RedisModulesUtils.escapeTag(name);
 		checkArgument(domain.getType().isOrderable(), "Domain type must be orderable");
 		if (domain.getValues().isNone()) {
 			return Optional.empty();
 		}
-
 		if (domain.getValues().isAll()) {
 			return Optional.empty();
 		}
-
+		Set<Object> singleValues = new HashSet<>();
+		List<Node> disjuncts = new ArrayList<>();
 		for (Range range : domain.getValues().getRanges().getOrderedRanges()) {
-			Set<Object> valuesToInclude = new HashSet<>();
-			List<Value> rangeConjuncts = new ArrayList<>();
-			checkState(!range.isAll(), "Invalid range for column: %s", columnName);
 			if (range.isSingleValue()) {
-				Optional<Object> value = translateValue(range.getSingleValue(), type);
-				value.ifPresent(valuesToInclude::add);
+				Optional<Object> translated = translateValue(range.getSingleValue(), type);
+				if (translated.isEmpty()) {
+					return Optional.empty();
+				}
+				singleValues.add(translated.get());
 			} else {
+				List<Value> rangeConjuncts = new ArrayList<>();
 				if (!range.isLowUnbounded()) {
-					Optional<Object> lowBound = translateValue(range.getLowBoundedValue(), type);
-					if (lowBound.isPresent()) {
-						double value = ((Number) lowBound.get()).doubleValue();
-						if (range.isLowInclusive()) {
-							rangeConjuncts.add(Values.ge(value));
-						} else {
-							rangeConjuncts.add(Values.gt(value));
-						}
+					Optional<Object> translated = translateValue(range.getLowBoundedValue(), type);
+					if (translated.isEmpty()) {
+						return Optional.empty();
 					}
+					double value = ((Number) translated.get()).doubleValue();
+					rangeConjuncts.add(range.isLowInclusive() ? Values.ge(value) : Values.gt(value));
 				}
 				if (!range.isHighUnbounded()) {
-					Optional<Object> highBound = translateValue(range.getHighBoundedValue(), type);
-					if (highBound.isPresent()) {
-						double value = ((Number) highBound.get()).doubleValue();
-						if (range.isLowInclusive()) {
-							rangeConjuncts.add(Values.le(value));
-						} else {
-							rangeConjuncts.add(Values.lt(value));
-						}
+					Optional<Object> translated = translateValue(range.getHighBoundedValue(), type);
+					if (translated.isEmpty()) {
+						return Optional.empty();
 					}
+					if (type instanceof VarcharType) {
+						String value = (String) translated.get();
+						return Optional.of(QueryBuilder.disjunct(columnName, Values.tags(value)));
+					}
+					double value = ((Number) translated.get()).doubleValue();
+					rangeConjuncts.add(range.isHighInclusive() ? Values.le(value) : Values.lt(value));
 				}
-			}
-
-			if (valuesToInclude.size() == 1) {
-				nodes.add(QueryBuilder.intersect(columnName, value(Iterables.getOnlyElement(valuesToInclude), type)));
-			}
-			if (!rangeConjuncts.isEmpty()) {
-				nodes.add(QueryBuilder.intersect(columnName, rangeConjuncts.toArray(new Value[0])));
+				// If conjuncts is null, then the range was ALL, which should already have been
+				// checked for
+				verify(!rangeConjuncts.isEmpty());
+				disjuncts.add(QueryBuilder.intersect(columnName, rangeConjuncts.toArray(Value[]::new)));
 			}
 		}
-		return Optional.of(QueryBuilder.union(nodes.toArray(new Node[0])));
+		if (singleValues.size() == 1) {
+			disjuncts.add(QueryBuilder.intersect(columnName, value(Iterables.getOnlyElement(singleValues), type)));
+		} else if (singleValues.size() > 1) {
+			disjuncts.add(QueryBuilder.union(columnName,
+					singleValues.stream().map(v -> value(v, type)).toArray(Value[]::new)));
+		}
+		return Optional.of(QueryBuilder.union(disjuncts.toArray(Node[]::new)));
 	}
 
 	private static Value value(Object trinoNativeValue, Type type) {
@@ -165,7 +165,6 @@ public class RediSearchQueryBuilder {
 		if (type instanceof VarcharType) {
 			return Optional.of(((Slice) trinoNativeValue).toStringUtf8());
 		}
-
 		return Optional.empty();
 	}
 }

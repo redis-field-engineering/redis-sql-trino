@@ -1,9 +1,12 @@
 package com.redis.trino;
 
 import static com.google.common.base.Throwables.throwIfInstanceOf;
+import static com.google.common.base.Verify.verify;
+import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static java.lang.String.format;
+import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.HOURS;
 import static java.util.concurrent.TimeUnit.MINUTES;
@@ -39,11 +42,14 @@ import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.TableNotFoundException;
 import io.trino.spi.type.BigintType;
 import io.trino.spi.type.BooleanType;
+import io.trino.spi.type.CharType;
 import io.trino.spi.type.DateType;
+import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.DoubleType;
 import io.trino.spi.type.IntegerType;
 import io.trino.spi.type.RealType;
 import io.trino.spi.type.SmallintType;
+import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.TimestampWithTimeZoneType;
 import io.trino.spi.type.TinyintType;
 import io.trino.spi.type.Type;
@@ -105,16 +111,44 @@ public class RediSearchSession {
 		}
 	}
 
-	public void createTable(SchemaTableName name, List<RediSearchColumnHandle> columns) {
-		createTableMetadata(name, columns);
+	public void createTable(SchemaTableName schemaTableName, List<RediSearchColumnHandle> columns) {
+		String tableName = schemaTableName.getTableName();
+		if (!connection.sync().list().contains(tableName)) {
+			List<Field> fields = columns.stream().filter(c -> !c.getName().equals("_id"))
+					.map(c -> buildField(c.getName(), c.getType())).collect(Collectors.toList());
+			CreateOptions.Builder<String, String> options = CreateOptions.<String, String>builder();
+			options.prefix(tableName + ":");
+			connection.sync().create(tableName, options.build(), fields.toArray(new Field[0]));
+		}
 	}
 
 	public void dropTable(SchemaTableName tableName) {
-		throw new UnsupportedOperationException("dropTable not implemented");
+		connection.sync().dropindexDeleteDocs(toRemoteTableName(tableName.getSchemaName(), tableName.getTableName()));
+		tableCache.invalidate(tableName);
 	}
 
 	public void addColumn(SchemaTableName schemaTableName, ColumnMetadata columnMetadata) {
-		throw new UnsupportedOperationException("This connector does not support adding columns");
+		String schemaName = schemaTableName.getSchemaName();
+		String tableName = toRemoteTableName(schemaName, schemaTableName.getTableName());
+		connection.sync().alter(tableName, buildField(columnMetadata.getName(), columnMetadata.getType()));
+		tableCache.invalidate(schemaTableName);
+	}
+
+	private String toRemoteTableName(String schemaName, String tableName) {
+		verify(tableName.equals(tableName.toLowerCase(ENGLISH)), "tableName not in lower-case: %s", tableName);
+		if (!config.isCaseInsensitiveNameMatching()) {
+			return tableName;
+		}
+		for (String remoteTableName : getAllTables()) {
+			if (tableName.equals(remoteTableName.toLowerCase(ENGLISH))) {
+				return remoteTableName;
+			}
+		}
+		return tableName;
+	}
+
+	public void dropColumn(SchemaTableName schemaTableName, String columnName) {
+		throw new TrinoException(NOT_SUPPORTED, "This connector does not support dropping columns");
 	}
 
 	private RediSearchTable loadTableSchema(SchemaTableName schemaTableName) {
@@ -162,28 +196,28 @@ public class RediSearchSession {
 		Builder<String, String> options = SearchOptions.<String, String>builder();
 		options.limit(Limit.of(0,
 				tableHandle.getLimit().isPresent() ? tableHandle.getLimit().getAsInt() : config.getDefaultLimit()));
-		log.debug("Find documents: index: %s, query: %s", index, query);
+		log.info("Find documents: index: %s, query: %s", index, query);
 		return connection.sync().search(index, query, options.build());
 	}
 
-	private Field buildField(RediSearchColumnHandle column) {
-		Field.Type fieldType = toFieldType(column.getType());
+	private Field buildField(String columnName, Type columnType) {
+		Field.Type fieldType = toFieldType(columnType);
 		switch (fieldType) {
 		case GEO:
-			return Field.geo(column.getName()).build();
+			return Field.geo(columnName).build();
 		case NUMERIC:
-			return Field.numeric(column.getName()).build();
+			return Field.numeric(columnName).build();
 		case TAG:
-			return Field.tag(column.getName()).build();
+			return Field.tag(columnName).build();
 		case TEXT:
-			return Field.text(column.getName()).build();
+			return Field.text(columnName).build();
 		}
 		throw new IllegalArgumentException(String.format("Field type %s not supported", fieldType));
 	}
 
 	private static Field.Type toFieldType(Type type) {
 		if (type.equals(BooleanType.BOOLEAN)) {
-			return Field.Type.TAG;
+			return Field.Type.NUMERIC;
 		}
 		if (type.equals(BigintType.BIGINT)) {
 			return Field.Type.NUMERIC;
@@ -203,11 +237,20 @@ public class RediSearchSession {
 		if (type.equals(RealType.REAL)) {
 			return Field.Type.NUMERIC;
 		}
+		if (type instanceof DecimalType) {
+			return Field.Type.NUMERIC;
+		}
 		if (type instanceof VarcharType) {
 			return Field.Type.TAG;
 		}
-		if (type.equals(DateType.DATE)) {
+		if (type instanceof CharType) {
 			return Field.Type.TAG;
+		}
+		if (type.equals(DateType.DATE)) {
+			return Field.Type.NUMERIC;
+		}
+		if (type.equals(TimestampType.TIMESTAMP_MILLIS)) {
+			return Field.Type.NUMERIC;
 		}
 		if (type.equals(TimestampWithTimeZoneType.TIMESTAMP_TZ_MILLIS)) {
 			return Field.Type.NUMERIC;
@@ -231,17 +274,6 @@ public class RediSearchSession {
 
 	private TypeSignature varcharType() {
 		return createUnboundedVarcharType().getTypeSignature();
-	}
-
-	private void createTableMetadata(SchemaTableName schemaTableName, List<RediSearchColumnHandle> columns) {
-		String tableName = schemaTableName.getTableName();
-		if (!connection.sync().list().contains(tableName)) {
-			List<Field> fields = columns.stream().filter(c -> !c.getName().equals("_id")).map(this::buildField)
-					.collect(Collectors.toList());
-			CreateOptions.Builder<String, String> options = CreateOptions.<String, String>builder();
-			options.prefix(tableName + ":");
-			connection.sync().create(tableName, options.build(), fields.toArray(new Field[0]));
-		}
 	}
 
 }

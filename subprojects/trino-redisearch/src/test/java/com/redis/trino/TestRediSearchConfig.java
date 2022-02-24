@@ -9,6 +9,7 @@ import java.util.Map;
 import org.testng.annotations.Test;
 
 import com.google.common.collect.ImmutableMap;
+import com.redis.trino.RediSearchConfig;
 
 import io.airlift.configuration.ConfigurationFactory;
 
@@ -16,8 +17,9 @@ public class TestRediSearchConfig {
 
 	@Test
 	public void testDefaults() {
-		assertRecordedDefaults(recordDefaults(RediSearchConfig.class).setUri(null)
-				.setDefaultSchema(RediSearchConfig.DEFAULT_SCHEMA).setDefaultLimit(RediSearchConfig.DEFAULT_LIMIT));
+		assertRecordedDefaults(
+				recordDefaults(RediSearchConfig.class).setUri(null).setDefaultSchema(RediSearchConfig.DEFAULT_SCHEMA)
+						.setDefaultLimit(RediSearchConfig.DEFAULT_LIMIT).setCaseInsensitiveNameMatching(false));
 	}
 
 	@Test

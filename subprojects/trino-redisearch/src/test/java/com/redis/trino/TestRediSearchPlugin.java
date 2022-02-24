@@ -8,6 +8,7 @@ import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
 import com.google.common.collect.ImmutableMap;
+import com.redis.trino.RediSearchPlugin;
 
 import io.trino.spi.connector.Connector;
 import io.trino.spi.connector.ConnectorFactory;

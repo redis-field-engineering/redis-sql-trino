@@ -17,7 +17,7 @@ public class RediSearchPlugin implements Plugin {
 	}
 
 	@VisibleForTesting
-	RediSearchPlugin(RediSearchConnectorFactory factory) {
+	public RediSearchPlugin(RediSearchConnectorFactory factory) {
 		connectorFactory = requireNonNull(factory, "factory is null");
 	}
 

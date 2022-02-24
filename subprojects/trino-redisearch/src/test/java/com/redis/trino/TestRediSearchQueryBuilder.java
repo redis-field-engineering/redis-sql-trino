@@ -12,6 +12,8 @@ import static org.testng.Assert.assertEquals;
 import org.testng.annotations.Test;
 
 import com.google.common.collect.ImmutableMap;
+import com.redis.trino.RediSearchColumnHandle;
+import com.redis.trino.RediSearchQueryBuilder;
 
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.predicate.Domain;
@@ -32,7 +34,7 @@ public class TestRediSearchQueryBuilder {
 						COL2, Domain.singleValue(createUnboundedVarcharType(), utf8Slice("a value"))));
 
 		String query = RediSearchQueryBuilder.buildQuery(tupleDomain);
-		String expected = "((@col1:[(100.0 inf] @col1:[-inf (200.0]) @col2:{a\\ value})";
+		String expected = "((@col1:[(100.0 inf] @col1:[-inf 200.0]) @col2:{a\\ value})";
 		assertEquals(query, expected);
 	}
 
@@ -42,7 +44,7 @@ public class TestRediSearchQueryBuilder {
 				Domain.create(ValueSet.ofRanges(equal(createUnboundedVarcharType(), utf8Slice("hello")),
 						equal(createUnboundedVarcharType(), utf8Slice("world"))), false)));
 		String query = RediSearchQueryBuilder.buildQuery(tupleDomain);
-		String expected = "(@col2:{hello}|@col2:{world})";
+		String expected = "(@col2:{world}|@col2:{hello})";
 		assertEquals(query, expected);
 
 	}

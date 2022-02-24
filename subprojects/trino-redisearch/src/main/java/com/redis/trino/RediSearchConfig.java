@@ -13,11 +13,12 @@ public class RediSearchConfig {
 
 	public static final String DEFAULT_SCHEMA = "default";
 	public static final long DEFAULT_LIMIT = 10000;
-	
+
 	private String defaultSchema = DEFAULT_SCHEMA;
 	private Optional<String> uri = Optional.empty();
+	private boolean caseInsensitiveNameMatching;
 	private long defaultLimit = DEFAULT_LIMIT;
-	
+
 	public long getDefaultLimit() {
 		return defaultLimit;
 	}
@@ -51,6 +52,17 @@ public class RediSearchConfig {
 	@ConfigSecuritySensitive
 	public RediSearchConfig setUri(String uri) {
 		this.uri = Optional.ofNullable(uri);
+		return this;
+	}
+
+	public boolean isCaseInsensitiveNameMatching() {
+		return caseInsensitiveNameMatching;
+	}
+
+	@Config("redisearch.case-insensitive-name-matching")
+	@ConfigDescription("Case-insensitive name-matching")
+	public RediSearchConfig setCaseInsensitiveNameMatching(boolean caseInsensitiveNameMatching) {
+		this.caseInsensitiveNameMatching = caseInsensitiveNameMatching;
 		return this;
 	}
 

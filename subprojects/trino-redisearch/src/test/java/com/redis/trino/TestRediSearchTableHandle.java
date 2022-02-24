@@ -4,6 +4,8 @@ import io.airlift.json.JsonCodec;
 import io.trino.spi.connector.SchemaTableName;
 import org.testng.annotations.Test;
 
+import com.redis.trino.RediSearchTableHandle;
+
 import static org.testng.Assert.assertEquals;
 
 public class TestRediSearchTableHandle
