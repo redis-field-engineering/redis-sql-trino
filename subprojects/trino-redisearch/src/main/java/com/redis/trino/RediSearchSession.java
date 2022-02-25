@@ -189,8 +189,7 @@ public class RediSearchSession {
 		return typeManager.fromSqlType(typeSignature.toString());
 	}
 
-	public SearchResults<String, String> execute(RediSearchTableHandle tableHandle,
-			List<RediSearchColumnHandle> columns) {
+	public SearchResults<String, String> execute(RediSearchTableHandle tableHandle) {
 		String index = tableHandle.getSchemaTableName().getTableName();
 		String query = RediSearchQueryBuilder.buildQuery(tableHandle.getConstraint());
 		Builder<String, String> options = SearchOptions.<String, String>builder();

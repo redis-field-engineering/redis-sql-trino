@@ -81,7 +81,7 @@ public class TestRediSearchConnectorTest extends BaseConnectorTest {
 			return true;
 
 		case SUPPORTS_LIMIT_PUSHDOWN:
-			return false;
+			return true;
 
 		case SUPPORTS_PREDICATE_PUSHDOWN_WITH_VARCHAR_INEQUALITY:
 			return false;
@@ -102,14 +102,20 @@ public class TestRediSearchConnectorTest extends BaseConnectorTest {
 		throw new SkipException("test disabled for RediSearch");
 	}
 
-	@Override
-	public void testLimit() {
-		// ignore
-	}
-
-	@Override
+	@Test
 	public void testLimitMax() {
-		// ignore
+		int maxLimit = 1000000;
+		// max int
+		assertQuery("SELECT orderkey FROM orders LIMIT " + maxLimit);
+		assertQuery("SELECT orderkey FROM orders ORDER BY orderkey LIMIT " + maxLimit);
+
+		// max long; a connector may attempt a pushdown while remote system may not
+		// accept such high limit values
+		assertQuery("SELECT nationkey FROM nation LIMIT " + maxLimit, "SELECT nationkey FROM nation");
+		// Currently this is not supported but once it's supported, it should be tested
+		// with connectors as well
+		assertQueryFails("SELECT nationkey FROM nation ORDER BY nationkey LIMIT " + Long.MAX_VALUE,
+				"ORDER BY LIMIT > 2147483647 is not supported");
 	}
 
 	@Override

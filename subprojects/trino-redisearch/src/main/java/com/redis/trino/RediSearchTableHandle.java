@@ -1,18 +1,20 @@
 package com.redis.trino;
 
+import static java.util.Objects.requireNonNull;
+
+import java.util.Objects;
+import java.util.OptionalInt;
+
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.predicate.TupleDomain;
 
-import java.util.Objects;
-import java.util.OptionalInt;
-
-import static java.util.Objects.requireNonNull;
-
 public class RediSearchTableHandle implements ConnectorTableHandle {
+
 	private final SchemaTableName schemaTableName;
 	private final TupleDomain<ColumnHandle> constraint;
 	private final OptionalInt limit;

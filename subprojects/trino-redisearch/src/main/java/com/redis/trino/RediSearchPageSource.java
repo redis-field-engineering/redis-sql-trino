@@ -63,7 +63,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 			List<RediSearchColumnHandle> columns) {
 		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).collect(toList());
 		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType).collect(toList());
-		this.cursor = rediSearchSession.execute(tableHandle, columns).iterator();
+		this.cursor = rediSearchSession.execute(tableHandle).iterator();
 		this.currentDoc = null;
 		this.pageBuilder = new PageBuilder(columnTypes);
 	}
@@ -117,7 +117,6 @@ public class RediSearchPageSource implements ConnectorPageSource {
 			output.appendNull();
 			return;
 		}
-
 		Class<?> javaType = type.getJavaType();
 		if (javaType == boolean.class) {
 			type.writeBoolean(output, Boolean.parseBoolean(value));
