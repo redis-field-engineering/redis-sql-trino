@@ -1,12 +1,11 @@
 package com.redis.trino;
 
-import io.airlift.json.JsonCodec;
-import io.trino.spi.connector.SchemaTableName;
+import static org.testng.Assert.assertEquals;
+
 import org.testng.annotations.Test;
 
-import com.redis.trino.RediSearchTableHandle;
-
-import static org.testng.Assert.assertEquals;
+import io.airlift.json.JsonCodec;
+import io.trino.spi.connector.SchemaTableName;
 
 public class TestRediSearchTableHandle
 {

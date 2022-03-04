@@ -9,7 +9,6 @@ import java.util.Map;
 import org.testng.annotations.Test;
 
 import com.google.common.collect.ImmutableMap;
-import com.redis.trino.RediSearchConfig;
 
 import io.airlift.configuration.ConfigurationFactory;
 

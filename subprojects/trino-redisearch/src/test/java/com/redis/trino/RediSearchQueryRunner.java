@@ -12,8 +12,6 @@ import java.util.Map;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.redis.trino.RediSearchConnectorFactory;
-import com.redis.trino.RediSearchPlugin;
 
 import io.airlift.log.Logger;
 import io.airlift.log.Logging;

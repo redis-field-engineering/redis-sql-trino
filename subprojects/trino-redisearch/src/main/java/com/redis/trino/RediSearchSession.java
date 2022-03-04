@@ -13,6 +13,7 @@ import static java.util.concurrent.TimeUnit.MINUTES;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -89,8 +90,9 @@ public class RediSearchSession {
 	}
 
 	public List<HostAddress> getAddresses() {
-		if (config.getUri().isPresent()) {
-			RedisURI redisURI = RedisURI.create(config.getUri().get());
+		Optional<String> uri = config.getUri();
+		if (uri.isPresent()) {
+			RedisURI redisURI = RedisURI.create(uri.get());
 			return Collections.singletonList(HostAddress.fromParts(redisURI.getHost(), redisURI.getPort()));
 		}
 		return Collections.emptyList();

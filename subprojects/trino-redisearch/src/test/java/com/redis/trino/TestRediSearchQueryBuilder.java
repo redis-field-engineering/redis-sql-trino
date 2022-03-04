@@ -12,8 +12,6 @@ import static org.testng.Assert.assertEquals;
 import org.testng.annotations.Test;
 
 import com.google.common.collect.ImmutableMap;
-import com.redis.trino.RediSearchColumnHandle;
-import com.redis.trino.RediSearchQueryBuilder;
 
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.predicate.Domain;

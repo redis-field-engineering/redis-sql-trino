@@ -3,6 +3,7 @@ package com.redis.trino;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static io.trino.testing.DataProviders.toDataProvider;
 import static io.trino.testing.MaterializedResult.resultBuilder;
+import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_CREATE_TABLE;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_INSERT;
 import static io.trino.testing.assertions.Assert.assertEquals;
 import static io.trino.tpch.TpchTable.CUSTOMER;
@@ -102,22 +103,6 @@ public class TestRediSearchConnectorTest extends BaseConnectorTest {
 		throw new SkipException("test disabled for RediSearch");
 	}
 
-	@Test
-	public void testLimitMax() {
-		int maxLimit = 1000000;
-		// max int
-		assertQuery("SELECT orderkey FROM orders LIMIT " + maxLimit);
-		assertQuery("SELECT orderkey FROM orders ORDER BY orderkey LIMIT " + maxLimit);
-
-		// max long; a connector may attempt a pushdown while remote system may not
-		// accept such high limit values
-		assertQuery("SELECT nationkey FROM nation LIMIT " + maxLimit, "SELECT nationkey FROM nation");
-		// Currently this is not supported but once it's supported, it should be tested
-		// with connectors as well
-		assertQueryFails("SELECT nationkey FROM nation ORDER BY nationkey LIMIT " + Long.MAX_VALUE,
-				"ORDER BY LIMIT > 2147483647 is not supported");
-	}
-
 	@Override
 	public void testShowSchemasLikeWithEscape() {
 		throw new SkipException("Not supported by RediSearch connector");
@@ -158,6 +143,24 @@ public class TestRediSearchConnectorTest extends BaseConnectorTest {
 		throw new SkipException("Not supported by RediSearch connector");
 	}
 
+	@Override
+	@Test
+	public void testLimitMax() {
+		int maxLimit = 1000000;
+		// max int
+		assertQuery("SELECT orderkey FROM orders LIMIT " + maxLimit);
+		assertQuery("SELECT orderkey FROM orders ORDER BY orderkey LIMIT " + maxLimit);
+
+		// max long; a connector may attempt a pushdown while remote system may not
+		// accept such high limit values
+		assertQuery("SELECT nationkey FROM nation LIMIT " + maxLimit, "SELECT nationkey FROM nation");
+		// Currently this is not supported but once it's supported, it should be tested
+		// with connectors as well
+		assertQueryFails("SELECT nationkey FROM nation ORDER BY nationkey LIMIT " + Long.MAX_VALUE,
+				"ORDER BY LIMIT > 2147483647 is not supported");
+	}
+
+	@SuppressWarnings("resource")
 	@Test
 	public void testInsert() {
 		if (!hasBehavior(SUPPORTS_INSERT)) {
@@ -167,9 +170,7 @@ public class TestRediSearchConnectorTest extends BaseConnectorTest {
 
 		String query = "SELECT phone, custkey, acctbal FROM customer";
 
-		try (QueryRunner queryRunner = getQueryRunner();
-				TestTable table = new TestTable(queryRunner::execute, "test_insert_",
-						"AS " + query + " WITH NO DATA")) {
+		try (TestTable table = new TestTable(getQueryRunner()::execute, "test_insert_", "AS " + query + " WITH NO DATA")) {
 			assertQuery("SELECT count(*) FROM " + table.getName() + "", "SELECT 0");
 
 			assertUpdate("INSERT INTO " + table.getName() + " " + query, "SELECT count(*) FROM customer");
@@ -233,17 +234,20 @@ public class TestRediSearchConnectorTest extends BaseConnectorTest {
 		assertEquals(actualColumns, expectedColumns);
 	}
 
+	@SuppressWarnings("deprecation")
 	@Test(dataProvider = "testCaseSensitiveDataMappingProvider", enabled = false)
 	public void testCaseSensitiveDataMapping(DataMappingTestSetup dataMappingTestSetup) {
 	}
 
+	@SuppressWarnings("deprecation")
 	@Test(dataProvider = "testRediSearchDataMappingSmokeTestDataProvider")
 	public void testDataMappingSmokeTest(DataMappingTestSetup dataMappingTestSetup) {
 		testDataMapping(dataMappingTestSetup);
 	}
 
+	@SuppressWarnings("deprecation")
 	private void testDataMapping(DataMappingTestSetup dataMappingTestSetup) {
-		skipTestUnless(supportsCreateTable());
+		skipTestUnless(hasBehavior(SUPPORTS_CREATE_TABLE));
 
 		String trinoTypeName = dataMappingTestSetup.getTrinoTypeName();
 		String sampleValueLiteral = dataMappingTestSetup.getSampleValueLiteral();
@@ -289,12 +293,14 @@ public class TestRediSearchConnectorTest extends BaseConnectorTest {
 		assertUpdate("DROP TABLE " + tableName);
 	}
 
+	@SuppressWarnings("deprecation")
 	@DataProvider
 	public final Object[][] testRediSearchDataMappingSmokeTestDataProvider() {
 		return testDataMappingSmokeTestData().stream().map(this::filterDataMappingSmokeTestData)
 				.flatMap(Optional::stream).collect(toDataProvider());
 	}
 
+	@SuppressWarnings("deprecation")
 	private List<DataMappingTestSetup> testDataMappingSmokeTestData() {
 		return ImmutableList.<DataMappingTestSetup>builder()
 //                .add(new DataMappingTestSetup("boolean", "false", "true"))

@@ -3,6 +3,8 @@ package com.redis.trino;
 import static io.airlift.configuration.ConfigBinder.configBinder;
 import static java.util.Objects.requireNonNull;
 
+import java.util.Optional;
+
 import javax.inject.Singleton;
 
 import com.google.inject.Binder;
@@ -29,8 +31,9 @@ public class RediSearchClientModule implements Module {
 	@Provides
 	public static RediSearchSession createRediSearchSession(TypeManager typeManager, RediSearchConfig config) {
 		requireNonNull(config, "config is null");
-		if (config.getUri().isPresent()) {
-			RedisModulesClient client = RedisModulesClient.create(config.getUri().get());
+		Optional<String> uri = config.getUri();
+		if (uri.isPresent()) {
+			RedisModulesClient client = RedisModulesClient.create(uri.get());
 			return new RediSearchSession(typeManager, client.connect(), config);
 		}
 		throw new IllegalArgumentException("No Redis URI specified");
