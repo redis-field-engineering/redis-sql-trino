@@ -20,7 +20,7 @@ import com.github.f4b6a3.ulid.UlidFactory;
 import com.redis.lettucemod.api.async.RedisModulesAsyncCommands;
 import com.redis.lettucemod.search.CreateOptions;
 import com.redis.lettucemod.search.Field;
-import com.redis.testcontainers.junit.jupiter.RedisTestContext;
+import com.redis.testcontainers.junit.RedisTestContext;
 
 import io.lettuce.core.LettuceFutures;
 import io.lettuce.core.RedisFuture;

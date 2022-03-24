@@ -3,7 +3,7 @@ package com.redis.trino;
 import java.io.Closeable;
 
 import com.redis.testcontainers.RedisModulesContainer;
-import com.redis.testcontainers.junit.jupiter.RedisTestContext;
+import com.redis.testcontainers.junit.RedisTestContext;
 
 public class RediSearchServer implements Closeable {
 

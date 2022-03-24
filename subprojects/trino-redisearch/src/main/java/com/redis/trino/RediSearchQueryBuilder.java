@@ -15,13 +15,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiFunction;
+import java.util.stream.Collectors;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.primitives.Primitives;
 import com.google.common.primitives.Shorts;
 import com.google.common.primitives.SignedBytes;
 import com.redis.lettucemod.RedisModulesUtils;
+import com.redis.lettucemod.search.Group;
+import com.redis.lettucemod.search.Reducer;
+import com.redis.lettucemod.search.Reducers.Avg;
+import com.redis.lettucemod.search.Reducers.Count;
+import com.redis.lettucemod.search.Reducers.Max;
+import com.redis.lettucemod.search.Reducers.Min;
+import com.redis.lettucemod.search.Reducers.Sum;
 
+import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
 import io.redisearch.querybuilder.Node;
 import io.redisearch.querybuilder.QueryBuilder;
@@ -37,13 +48,23 @@ import io.trino.spi.type.VarcharType;
 
 public class RediSearchQueryBuilder {
 
+	private static final Logger log = Logger.get(RediSearchQueryBuilder.class);
+
+	private static final Map<String, BiFunction<String, String, Reducer>> CONVERTERS = ImmutableMap.of(
+			MetricAggregation.MAX, (alias, field) -> Max.property(field).as(alias).build(), MetricAggregation.MIN,
+			(alias, field) -> Min.property(field).as(alias).build(), MetricAggregation.SUM,
+			(alias, field) -> Sum.property(field).as(alias).build(), MetricAggregation.AVG,
+			(alias, field) -> Avg.property(field).as(alias).build(), MetricAggregation.COUNT,
+			(alias, field) -> Count.as(alias));
+
 	private RediSearchQueryBuilder() {
 	}
 
 	public static String buildQuery(TupleDomain<ColumnHandle> tupleDomain) {
 		List<Node> nodes = new ArrayList<>();
-		if (tupleDomain.getDomains().isPresent()) {
-			for (Map.Entry<ColumnHandle, Domain> entry : tupleDomain.getDomains().get().entrySet()) {
+		Optional<Map<ColumnHandle, Domain>> domains = tupleDomain.getDomains();
+		if (domains.isPresent()) {
+			for (Map.Entry<ColumnHandle, Domain> entry : domains.get().entrySet()) {
 				RediSearchColumnHandle column = (RediSearchColumnHandle) entry.getKey();
 				Domain domain = entry.getValue();
 				checkArgument(!domain.isNone(), "Unexpected NONE domain for %s", column.getName());
@@ -166,5 +187,25 @@ public class RediSearchQueryBuilder {
 			return Optional.of(((Slice) trinoNativeValue).toStringUtf8());
 		}
 		return Optional.empty();
+	}
+
+	public static Optional<Group> group(List<TermAggregation> terms, List<MetricAggregation> aggregates) {
+		List<String> groupFields = new ArrayList<>();
+		if (terms != null && !terms.isEmpty()) {
+			groupFields = terms.stream().map(TermAggregation::getTerm).collect(Collectors.toList());
+		}
+		List<Reducer> reducers = aggregates.stream().map(RediSearchQueryBuilder::reducer).collect(Collectors.toList());
+		if (reducers.isEmpty()) {
+			return Optional.empty();
+		}
+		log.info("Group fields=%s reducers=%s", groupFields, reducers);
+		return Optional
+				.of(Group.by(groupFields.toArray(String[]::new)).reducers(reducers.toArray(Reducer[]::new)).build());
+	}
+
+	private static Reducer reducer(MetricAggregation aggregation) {
+		Optional<RediSearchColumnHandle> column = aggregation.getColumnHandle();
+		String field = column.isPresent() ? column.get().getName() : null;
+		return CONVERTERS.get(aggregation.getFunctionName()).apply(aggregation.getAlias(), field);
 	}
 }

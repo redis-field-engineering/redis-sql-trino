@@ -25,12 +25,16 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.UncheckedExecutionException;
 import com.redis.lettucemod.RedisModulesUtils;
 import com.redis.lettucemod.api.StatefulRedisModulesConnection;
+import com.redis.lettucemod.search.AggregateOptions;
+import com.redis.lettucemod.search.AggregateWithCursorResults;
 import com.redis.lettucemod.search.CreateOptions;
+import com.redis.lettucemod.search.CursorOptions;
 import com.redis.lettucemod.search.Field;
+import com.redis.lettucemod.search.Group;
 import com.redis.lettucemod.search.IndexInfo;
+import com.redis.lettucemod.search.Limit;
 import com.redis.lettucemod.search.SearchOptions;
 import com.redis.lettucemod.search.SearchOptions.Builder;
-import com.redis.lettucemod.search.SearchOptions.Limit;
 import com.redis.lettucemod.search.SearchResults;
 
 import io.airlift.log.Logger;
@@ -60,12 +64,14 @@ import io.trino.spi.type.UuidType;
 import io.trino.spi.type.VarcharType;
 
 public class RediSearchSession {
+
 	private static final Logger log = Logger.get(RediSearchSession.class);
 
 	private final TypeManager typeManager;
 	private final StatefulRedisModulesConnection<String, String> connection;
 	private final RediSearchConfig config;
 	private final LoadingCache<SchemaTableName, RediSearchTable> tableCache;
+	private final long pageSize = 1000;
 
 	public RediSearchSession(TypeManager typeManager, StatefulRedisModulesConnection<String, String> connection,
 			RediSearchConfig config) {
@@ -163,7 +169,8 @@ public class RediSearchSession {
 			columnHandles.add(columnHandle);
 		}
 
-		RediSearchTableHandle tableHandle = new RediSearchTableHandle(schemaTableName);
+		RediSearchTableHandle tableHandle = new RediSearchTableHandle(RediSearchTableHandle.Type.SEARCH,
+				schemaTableName);
 		return new RediSearchTable(tableHandle, columnHandles.build());
 	}
 
@@ -191,14 +198,41 @@ public class RediSearchSession {
 		return typeManager.fromSqlType(typeSignature.toString());
 	}
 
-	public SearchResults<String, String> execute(RediSearchTableHandle tableHandle) {
-		String index = tableHandle.getSchemaTableName().getTableName();
+	public SearchResults<String, String> search(RediSearchTableHandle tableHandle) {
+		String index = index(tableHandle);
 		String query = RediSearchQueryBuilder.buildQuery(tableHandle.getConstraint());
-		Builder<String, String> options = SearchOptions.<String, String>builder();
-		options.limit(Limit.of(0,
-				tableHandle.getLimit().isPresent() ? tableHandle.getLimit().getAsInt() : config.getDefaultLimit()));
-		log.info("Find documents: index: %s, query: %s", index, query);
+		Builder<String, String> options = SearchOptions.builder();
+		options.limit(Limit.offset(0).num(limit(tableHandle)));
+		log.info("Running search on index %s with query '%s'", index, query);
 		return connection.sync().search(index, query, options.build());
+	}
+
+	public AggregateWithCursorResults<String> aggregate(RediSearchTableHandle table) {
+		String index = index(table);
+		String query = RediSearchQueryBuilder.buildQuery(table.getConstraint());
+		AggregateOptions.Builder<String, String> optionsBuilder = AggregateOptions.builder();
+		optionsBuilder.limit(Limit.offset(0).num(limit(table)));
+		Optional<Group> group = RediSearchQueryBuilder.group(table.getTermAggregations(),
+				table.getMetricAggregations());
+		group.ifPresent(optionsBuilder::group);
+		AggregateOptions<String, String> options = optionsBuilder.build();
+		log.info("Running aggregation on index %s with query '%s' and %s", index, query, options);
+		return connection.sync().aggregate(index, query, CursorOptions.builder().count(pageSize).build(), options);
+	}
+
+	public AggregateWithCursorResults<String> cursorRead(RediSearchTableHandle tableHandle, long cursor) {
+		return connection.sync().cursorRead(index(tableHandle), cursor, pageSize);
+	}
+
+	private String index(RediSearchTableHandle tableHandle) {
+		return tableHandle.getSchemaTableName().getTableName();
+	}
+
+	private long limit(RediSearchTableHandle tableHandle) {
+		if (tableHandle.getLimit().isPresent()) {
+			return tableHandle.getLimit().getAsLong();
+		}
+		return config.getDefaultLimit();
 	}
 
 	private Field buildField(String columnName, Type columnType) {
@@ -275,6 +309,10 @@ public class RediSearchSession {
 
 	private TypeSignature varcharType() {
 		return createUnboundedVarcharType().getTypeSignature();
+	}
+
+	public void cursorDelete(RediSearchTableHandle tableHandle, long cursor) {
+		connection.sync().cursorDelete(index(tableHandle), cursor);
 	}
 
 }

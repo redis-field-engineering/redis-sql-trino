@@ -1,6 +1,8 @@
 package com.redis.trino;
 
 import com.google.common.collect.ImmutableList;
+import com.redis.trino.RediSearchTableHandle.Type;
+
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ConnectorPageSource;
 import io.trino.spi.connector.ConnectorPageSourceProvider;
@@ -33,7 +35,10 @@ public class RediSearchPageSourceProvider implements ConnectorPageSourceProvider
 		for (ColumnHandle handle : requireNonNull(columns, "columns is null")) {
 			handles.add((RediSearchColumnHandle) handle);
 		}
-
-		return new RediSearchPageSource(rediSearchSession, tableHandle, handles.build());
+		ImmutableList<RediSearchColumnHandle> columnHandles = handles.build();
+		if (tableHandle.getType() == Type.AGGREGATE) {
+			return new RediSearchPageSourceAggregate(rediSearchSession, tableHandle, columnHandles);
+		}
+		return new RediSearchPageSource(rediSearchSession, tableHandle, columnHandles);
 	}
 }
