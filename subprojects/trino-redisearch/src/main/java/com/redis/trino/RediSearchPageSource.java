@@ -37,7 +37,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 			List<RediSearchColumnHandle> columns) {
 		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).collect(toList());
 		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType).collect(toList());
-		this.cursor = rediSearchSession.search(tableHandle).iterator();
+		this.cursor = rediSearchSession.search(tableHandle, columns).iterator();
 		this.currentDoc = null;
 		this.pageBuilder = new PageBuilder(columnTypes);
 	}

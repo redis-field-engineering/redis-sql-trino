@@ -198,11 +198,13 @@ public class RediSearchSession {
 		return typeManager.fromSqlType(typeSignature.toString());
 	}
 
-	public SearchResults<String, String> search(RediSearchTableHandle tableHandle) {
+	public SearchResults<String, String> search(RediSearchTableHandle tableHandle,
+			List<RediSearchColumnHandle> columns) {
 		String index = index(tableHandle);
 		String query = RediSearchQueryBuilder.buildQuery(tableHandle.getConstraint());
 		Builder<String, String> options = SearchOptions.builder();
 		options.limit(Limit.offset(0).num(limit(tableHandle)));
+		options.returnFields(columns.stream().map(RediSearchColumnHandle::getName).toArray(String[]::new));
 		log.info("Running search on index %s with query '%s'", index, query);
 		return connection.sync().search(index, query, options.build());
 	}
