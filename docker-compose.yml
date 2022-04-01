@@ -19,7 +19,3 @@ services:
       - redismod
     environment:
       REDISEARCH_URI: 'redis://redismod:6379'
-    
-networks:
-  localnet:
-    attachable: true
