@@ -4,7 +4,6 @@ plugins {
 
 dependencies {
     implementation group: 'com.redis', name: 'lettucemod', version: lettucemodVersion
-    implementation group: 'com.redislabs', name: 'jredisearch', version: jredisearchVersion
     implementation group: 'com.github.f4b6a3', name: 'ulid-creator', version: ulidVersion
     implementation group: 'io.trino', name: 'trino-collect', version: trinoVersion
     implementation group: 'io.trino', name: 'trino-matching', version: trinoVersion

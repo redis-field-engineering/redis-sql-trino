@@ -31,13 +31,13 @@ import com.redis.lettucemod.search.Reducers.Count;
 import com.redis.lettucemod.search.Reducers.Max;
 import com.redis.lettucemod.search.Reducers.Min;
 import com.redis.lettucemod.search.Reducers.Sum;
+import com.redis.lettucemod.search.querybuilder.Node;
+import com.redis.lettucemod.search.querybuilder.QueryBuilder;
+import com.redis.lettucemod.search.querybuilder.Value;
+import com.redis.lettucemod.search.querybuilder.Values;
 
 import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
-import io.redisearch.querybuilder.Node;
-import io.redisearch.querybuilder.QueryBuilder;
-import io.redisearch.querybuilder.Value;
-import io.redisearch.querybuilder.Values;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.Range;
