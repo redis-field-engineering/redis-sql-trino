@@ -4,11 +4,13 @@
 :project-name:    redis-sql
 :project-group:   com.redis
 :project-version: 0.2.0
+:artifact-id:     trino-redisearch
+:codecov-token:   CQFF495IPH
 
 image:https://github.com/{project-owner}/{project-name}/actions/workflows/early-access.yml/badge.svg["Build Status", link="https://github.com/{project-owner}/{project-name}/actions/workflows/early-access.yml"]
-image:https://img.shields.io/maven-central/v/{project-group}/trino-redisearch[Download, link="https://search.maven.org/#search|ga|1|trino-redisearch"]
-image:https://img.shields.io/nexus/s/{project-group}/trino-redisearch?server=https%3A%2F%2Fs01.oss.sonatype.org[Snapshot,link="https://s01.oss.sonatype.org/#nexus-search;quick~trino-redisearch"]
-image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg?token=CQFF495IPH["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
+image:https://img.shields.io/maven-central/v/{project-group}/{artifact-id}[Download, link="https://search.maven.org/#search|ga|1|{artifact-id}"]
+image:https://img.shields.io/nexus/s/{project-group}/{artifact-id}?server=https%3A%2F%2Fs01.oss.sonatype.org[Snapshot,link="https://s01.oss.sonatype.org/#nexus-search;quick~{artifact-id}"]
+image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg?token={codecov-token}["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
 
 Redis-SQL is a SQL interface to https://oss.redislabs.com/redisearch/[RediSearch] implemented as a https://trino.io[Trino] connector.
 
