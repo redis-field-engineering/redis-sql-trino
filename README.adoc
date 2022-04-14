@@ -1,4 +1,4 @@
-= SQL Redis
+= Redis-SQL
 :linkattrs:
 :project-owner:   redis-field-engineering
 :project-name:    redis-sql
