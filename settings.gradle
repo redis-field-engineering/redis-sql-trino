@@ -15,7 +15,7 @@ buildscript {
 
 apply plugin: 'org.kordamp.gradle.kordamp-parentbuild'
 
-rootProject.name = 'sql-redis'
+rootProject.name = 'redis-sql'
 
 projects {
     directories = ['subprojects']

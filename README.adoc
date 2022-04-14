@@ -1,16 +1,16 @@
 = SQL Redis
 :linkattrs:
 :project-owner:   redis-field-engineering
-:project-name:    trino-redisearch
+:project-name:    redis-sql
 :project-group:   com.redis
 :project-version: 0.2.0
 
-image:https://github.com/{project-owner}/sql-redis/actions/workflows/early-access.yml/badge.svg["Build Status", link="https://github.com/{project-owner}/{project-name}/actions/workflows/early-access.yml"]
-image:https://img.shields.io/maven-central/v/{project-group}/{project-name}[Download, link="https://search.maven.org/#search|ga|1|{project-name}"]
-image:https://img.shields.io/nexus/s/{project-group}/{project-name}?server=https%3A%2F%2Fs01.oss.sonatype.org[Snapshot,link="https://s01.oss.sonatype.org/#nexus-search;quick~{project-name}"]
-image:https://codecov.io/gh/{project-owner}/sql-redis/branch/master/graph/badge.svg?token=9I4H9NOBRQ["Coverage", link="https://codecov.io/gh/{project-owner}/sql-redis"]
+image:https://github.com/{project-owner}/{project-name}/actions/workflows/early-access.yml/badge.svg["Build Status", link="https://github.com/{project-owner}/{project-name}/actions/workflows/early-access.yml"]
+image:https://img.shields.io/maven-central/v/{project-group}/trino-redisearch[Download, link="https://search.maven.org/#search|ga|1|trino-redisearch"]
+image:https://img.shields.io/nexus/s/{project-group}/trino-redisearch?server=https%3A%2F%2Fs01.oss.sonatype.org[Snapshot,link="https://s01.oss.sonatype.org/#nexus-search;quick~trino-redisearch"]
+image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg?token=9I4H9NOBRQ["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
 
-SQL Redis is a SQL interface to https://oss.redislabs.com/redisearch/[RediSearch] implemented as a https://trino.io[Trino] connector.
+Redis-SQL is a SQL interface to https://oss.redislabs.com/redisearch/[RediSearch] implemented as a https://trino.io[Trino] connector.
 
 == Docker Example
 
@@ -59,7 +59,7 @@ For macOS: `brew install trino`
 
 === Install the connector
 
-1. Download latest https://github.com/redis-field-engineering/sql-redis/releases/latest[release].
+1. Download latest https://github.com/redis-field-engineering/{project-name}/releases/latest[release].
 
 2. Unzip the release without any directory structure under `<trino>/plugin/redisearch`:
 +
@@ -110,7 +110,7 @@ Run these commands to build the Trino connector for RediSearch from source:
 
 [source,console]
 ----
-git clone https://github.com/redis-field-engineering/sql-redis.git
-cd sql-redis
+git clone https://github.com/redis-field-engineering/redis-sql.git
+cd redis-sql
 ./gradlew clean build
 ----
