@@ -1,6 +1,5 @@
 package com.redis.trino;
 
-import static com.redis.trino.TypeUtils.isJsonType;
 import static io.airlift.slice.Slices.utf8Slice;
 import static io.trino.plugin.base.util.JsonTypeUtil.jsonParse;
 import static io.trino.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
@@ -13,6 +12,7 @@ import static io.trino.spi.type.Decimals.encodeShortScaledValue;
 import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.RealType.REAL;
 import static io.trino.spi.type.SmallintType.SMALLINT;
+import static io.trino.spi.type.StandardTypes.JSON;
 import static io.trino.spi.type.TimeZoneKey.UTC_KEY;
 import static io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
 import static io.trino.spi.type.TimestampWithTimeZoneType.TIMESTAMP_TZ_MILLIS;
@@ -91,7 +91,7 @@ public class RediSearchPageSourceResultWriter {
 			type.writeSlice(output, truncateToLengthAndTrimSpaces(utf8Slice(value), ((CharType) type)));
 		} else if (type instanceof DecimalType) {
 			type.writeObject(output, encodeScaledValue(new BigDecimal(value), ((DecimalType) type).getScale()));
-		} else if (isJsonType(type)) {
+		} else if (type.getBaseName().equals(JSON)) {
 			type.writeSlice(output, jsonParse(utf8Slice(value)));
 		} else {
 			throw new TrinoException(GENERIC_INTERNAL_ERROR, "Unhandled type for Slice: " + type.getTypeSignature());
