@@ -69,12 +69,11 @@ public class RediSearchSession {
 
 	private final TypeManager typeManager;
 	private final StatefulRedisModulesConnection<String, String> connection;
-	private final RediSearchConfig config;
+	private final RediSearchClientConfig config;
 	private final LoadingCache<SchemaTableName, RediSearchTable> tableCache;
-	private final long pageSize = 1000;
 
 	public RediSearchSession(TypeManager typeManager, StatefulRedisModulesConnection<String, String> connection,
-			RediSearchConfig config) {
+			RediSearchClientConfig config) {
 		this.typeManager = requireNonNull(typeManager, "typeManager is null");
 		this.connection = requireNonNull(connection, "connection is null");
 		this.config = requireNonNull(config, "config is null");
@@ -87,7 +86,7 @@ public class RediSearchSession {
 		return connection;
 	}
 
-	public RediSearchConfig getConfig() {
+	public RediSearchClientConfig getConfig() {
 		return config;
 	}
 
@@ -131,18 +130,17 @@ public class RediSearchSession {
 	}
 
 	public void dropTable(SchemaTableName tableName) {
-		connection.sync().dropindexDeleteDocs(toRemoteTableName(tableName.getSchemaName(), tableName.getTableName()));
+		connection.sync().dropindexDeleteDocs(toRemoteTableName(tableName.getTableName()));
 		tableCache.invalidate(tableName);
 	}
 
 	public void addColumn(SchemaTableName schemaTableName, ColumnMetadata columnMetadata) {
-		String schemaName = schemaTableName.getSchemaName();
-		String tableName = toRemoteTableName(schemaName, schemaTableName.getTableName());
+		String tableName = toRemoteTableName(schemaTableName.getTableName());
 		connection.sync().alter(tableName, buildField(columnMetadata.getName(), columnMetadata.getType()));
 		tableCache.invalidate(schemaTableName);
 	}
 
-	private String toRemoteTableName(String schemaName, String tableName) {
+	private String toRemoteTableName(String tableName) {
 		verify(tableName.equals(tableName.toLowerCase(ENGLISH)), "tableName not in lower-case: %s", tableName);
 		if (!config.isCaseInsensitiveNameMatching()) {
 			return tableName;
@@ -219,11 +217,19 @@ public class RediSearchSession {
 		group.ifPresent(optionsBuilder::group);
 		AggregateOptions<String, String> options = optionsBuilder.build();
 		log.info("Running aggregation on index %s with query '%s' and %s", index, query, options);
-		return connection.sync().aggregate(index, query, CursorOptions.builder().count(pageSize).build(), options);
+		CursorOptions.Builder cursorOptions = CursorOptions.builder();
+		if (config.getCursorCount() > 0) {
+			cursorOptions.count(config.getCursorCount());
+		}
+		return connection.sync().aggregate(index, query, cursorOptions.build(), options);
 	}
 
 	public AggregateWithCursorResults<String> cursorRead(RediSearchTableHandle tableHandle, long cursor) {
-		return connection.sync().cursorRead(index(tableHandle), cursor, pageSize);
+		String index = index(tableHandle);
+		if (config.getCursorCount() > 0) {
+			return connection.sync().cursorRead(index, cursor, config.getCursorCount());
+		}
+		return connection.sync().cursorRead(index, cursor);
 	}
 
 	private String index(RediSearchTableHandle tableHandle) {

@@ -9,7 +9,7 @@ import io.airlift.configuration.Config;
 import io.airlift.configuration.ConfigDescription;
 import io.airlift.configuration.ConfigSecuritySensitive;
 
-public class RediSearchConfig {
+public class RediSearchClientConfig {
 
 	public static final String DEFAULT_SCHEMA = "default";
 	public static final long DEFAULT_LIMIT = 10000;
@@ -18,6 +18,17 @@ public class RediSearchConfig {
 	private Optional<String> uri = Optional.empty();
 	private boolean caseInsensitiveNameMatching;
 	private long defaultLimit = DEFAULT_LIMIT;
+	private long cursorCount = 0; // Use RediSearch default
+
+	public long getCursorCount() {
+		return cursorCount;
+	}
+
+	@Config("redisearch.cursor-count")
+	public RediSearchClientConfig setCursorCount(long cursorCount) {
+		this.cursorCount = cursorCount;
+		return this;
+	}
 
 	public long getDefaultLimit() {
 		return defaultLimit;
@@ -25,7 +36,7 @@ public class RediSearchConfig {
 
 	@Config("redisearch.default-limit")
 	@ConfigDescription("Default search limit number to use")
-	public RediSearchConfig setDefaultLimit(long defaultLimit) {
+	public RediSearchClientConfig setDefaultLimit(long defaultLimit) {
 		this.defaultLimit = defaultLimit;
 		return this;
 	}
@@ -37,7 +48,7 @@ public class RediSearchConfig {
 
 	@Config("redisearch.default-schema-name")
 	@ConfigDescription("Default schema name to use")
-	public RediSearchConfig setDefaultSchema(String defaultSchema) {
+	public RediSearchClientConfig setDefaultSchema(String defaultSchema) {
 		this.defaultSchema = defaultSchema;
 		return this;
 	}
@@ -50,7 +61,7 @@ public class RediSearchConfig {
 	@Config("redisearch.uri")
 	@ConfigDescription("Redis connection URI e.g. 'redis://localhost:6379'")
 	@ConfigSecuritySensitive
-	public RediSearchConfig setUri(String uri) {
+	public RediSearchClientConfig setUri(String uri) {
 		this.uri = Optional.ofNullable(uri);
 		return this;
 	}
@@ -61,7 +72,7 @@ public class RediSearchConfig {
 
 	@Config("redisearch.case-insensitive-name-matching")
 	@ConfigDescription("Case-insensitive name-matching")
-	public RediSearchConfig setCaseInsensitiveNameMatching(boolean caseInsensitiveNameMatching) {
+	public RediSearchClientConfig setCaseInsensitiveNameMatching(boolean caseInsensitiveNameMatching) {
 		this.caseInsensitiveNameMatching = caseInsensitiveNameMatching;
 		return this;
 	}

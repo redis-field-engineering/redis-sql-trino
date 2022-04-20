@@ -24,12 +24,12 @@ public class RediSearchClientModule implements Module {
 		binder.bind(RediSearchPageSourceProvider.class).in(Scopes.SINGLETON);
 		binder.bind(RediSearchPageSinkProvider.class).in(Scopes.SINGLETON);
 
-		configBinder(binder).bindConfig(RediSearchConfig.class);
+		configBinder(binder).bindConfig(RediSearchClientConfig.class);
 	}
 
 	@Singleton
 	@Provides
-	public static RediSearchSession createRediSearchSession(TypeManager typeManager, RediSearchConfig config) {
+	public static RediSearchSession createRediSearchSession(TypeManager typeManager, RediSearchClientConfig config) {
 		requireNonNull(config, "config is null");
 		Optional<String> uri = config.getUri();
 		if (uri.isPresent()) {

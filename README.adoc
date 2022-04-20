@@ -13,6 +13,50 @@ image:https://img.shields.io/nexus/s/{project-group}/{artifact-id}?server=https%
 image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg?token={codecov-token}["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
 
 Redis-SQL is a SQL interface to https://oss.redislabs.com/redisearch/[RediSearch] implemented as a https://trino.io[Trino] connector.
+It allows the use of RediSearch indexes as tables in Trino.
+
+== Requirements
+
+To connect to RediSearch you need:
+
+. RediSearch 2.0 or higher
+. Network access from the Trino coordinator and workers to RediSearch.
+
+== Configuration
+
+To configure the RediSearch connector, create a catalog properties file `etc/catalog/redisearch.properties` with the following contents (replace properties as appropriate):
+
+[source,properties]
+----
+connector.name=redisearch
+redisearch.uri=redis://user:pass@host:6379
+----
+
+.Configuration properties
+[%header]
+|====
+|Property Name|Description
+|`redisearch.uri`|The connection URI that the driver uses to connect to Redis
+|`redisearch.case-insensitive-name-matching`|Match index names case insensitively
+|`redisearch.default-limit`|Default search limit number to use
+|====
+
+`redisearch.uri`:: A connection string containing the protocol, credential, and host info to connect to Redis.
++
+For example, the connection string may use the format `redis://<user>:<pass>@<host>:<port>`.
++
+See the https://github.com/lettuce-io/lettuce-core/wiki/Redis-URI-and-connection-details#uri-syntax[Redis URI syntax] for more information.
++
+This property is required and has no default. A Redis URI must be provided to connect to RediSearch.
+
+`redisearch.case-insensitive-name-matching`:: Match index names case insensitively.
++
+This property is optional and the default is `false`.
+
+`redisearch.default-limit`:: Max number of documents returned by FT.SEARCH and FT.AGGREGATE when no limit is present in the SQL query.
++
+This property is optional and the default is `10000`.
+
 
 == Docker Example
 

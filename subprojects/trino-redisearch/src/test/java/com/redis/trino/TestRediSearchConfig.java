@@ -16,9 +16,10 @@ public class TestRediSearchConfig {
 
 	@Test
 	public void testDefaults() {
-		assertRecordedDefaults(
-				recordDefaults(RediSearchConfig.class).setUri(null).setDefaultSchema(RediSearchConfig.DEFAULT_SCHEMA)
-						.setDefaultLimit(RediSearchConfig.DEFAULT_LIMIT).setCaseInsensitiveNameMatching(false));
+		assertRecordedDefaults(recordDefaults(RediSearchClientConfig.class).setUri(null)
+				.setDefaultSchema(RediSearchClientConfig.DEFAULT_SCHEMA)
+				.setDefaultLimit(RediSearchClientConfig.DEFAULT_LIMIT).setCaseInsensitiveNameMatching(false)
+				.setCursorCount(0));
 	}
 
 	@Test
@@ -29,9 +30,9 @@ public class TestRediSearchConfig {
 				.put("redisearch.default-schema-name", defaultSchema).build();
 
 		ConfigurationFactory configurationFactory = new ConfigurationFactory(properties);
-		RediSearchConfig config = configurationFactory.build(RediSearchConfig.class);
+		RediSearchClientConfig config = configurationFactory.build(RediSearchClientConfig.class);
 
-		RediSearchConfig expected = new RediSearchConfig().setDefaultSchema(defaultSchema).setUri(uri);
+		RediSearchClientConfig expected = new RediSearchClientConfig().setDefaultSchema(defaultSchema).setUri(uri);
 
 		assertEquals(config.getDefaultSchema(), expected.getDefaultSchema());
 		assertEquals(config.getUri(), expected.getUri());
