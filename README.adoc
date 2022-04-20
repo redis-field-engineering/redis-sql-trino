@@ -32,14 +32,7 @@ connector.name=redisearch
 redisearch.uri=redis://user:pass@host:6379
 ----
 
-.Configuration properties
-[%header]
-|====
-|Property Name|Description
-|`redisearch.uri`|The connection URI that the driver uses to connect to Redis
-|`redisearch.case-insensitive-name-matching`|Match index names case insensitively
-|`redisearch.default-limit`|Default search limit number to use
-|====
+=== Configuration Properties
 
 `redisearch.uri`:: A connection string containing the protocol, credential, and host info to connect to Redis.
 +
