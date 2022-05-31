@@ -55,6 +55,10 @@ docker {
     buildArgs([TRINO_VERSION: trinoVersion, BUILD_VERSION: project.version])
 }
 
+dockerfileZip {
+baseName 'dockerfile'
+}
+
 eclipse {
     project {
         name = 'redis-sql-trino-redisearch'
