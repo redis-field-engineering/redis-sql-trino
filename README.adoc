@@ -71,7 +71,7 @@ docker exec redismod /usr/local/bin/redis-cli FT.CREATE beers ON HASH PREFIX 1 b
 +
 [source,console]
 ----
-docker run --add-host=host.docker.internal:host-gateway jruaux/riot-file -h host.docker.internal import http://developer.redis.com/riot/beers.json hset --keyspace beer --keys id
+docker run --add-host=host.docker.internal:host-gateway jruaux/riot-file -h host.docker.internal import https://storage.googleapis.com/jrx/beers.json hset --keyspace beer --keys id
 ----
 
 4. Run the Trino CLI
