@@ -12,9 +12,7 @@ import static java.util.concurrent.TimeUnit.HOURS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -22,6 +20,7 @@ import java.util.stream.Collectors;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.UncheckedExecutionException;
 import com.redis.lettucemod.RedisModulesUtils;
@@ -30,7 +29,6 @@ import com.redis.lettucemod.search.AggregateOptions;
 import com.redis.lettucemod.search.AggregateWithCursorResults;
 import com.redis.lettucemod.search.CreateOptions;
 import com.redis.lettucemod.search.CursorOptions;
-import com.redis.lettucemod.search.Document;
 import com.redis.lettucemod.search.Field;
 import com.redis.lettucemod.search.Group;
 import com.redis.lettucemod.search.IndexInfo;
@@ -165,23 +163,13 @@ public class RediSearchSession {
 		if (indexInfo.isEmpty()) {
 			throw new TableNotFoundException(schemaTableName, format("Index '%s' not found", index), null);
 		}
-		Map<String, RediSearchColumnHandle> columns = new LinkedHashMap<>();
+		ImmutableList.Builder<RediSearchColumnHandle> columnHandles = ImmutableList.builder();
 		for (Field columnMetadata : indexInfo.get().getFields()) {
-			RediSearchColumnHandle columnHandle = buildColumnHandle(columnMetadata);
-			columns.put(columnHandle.getName(), columnHandle);
-		}
-
-		SearchResults<String, String> results = connection.sync().search(index, "*");
-		for (Document<String, String> doc : results) {
-			Set<String> fields = doc.keySet();
-			fields.removeAll(columns.keySet());
-			for (String field : fields) {
-				columns.put(field, new RediSearchColumnHandle(field, VarcharType.VARCHAR, false));
-			}
+			columnHandles.add(buildColumnHandle(columnMetadata));
 		}
 		RediSearchTableHandle tableHandle = new RediSearchTableHandle(RediSearchTableHandle.Type.SEARCH,
 				schemaTableName);
-		return new RediSearchTable(tableHandle, columns.values());
+		return new RediSearchTable(tableHandle, columnHandles.build());
 	}
 
 	private Optional<IndexInfo> indexInfo(String index) {
