@@ -1,17 +1,18 @@
 package com.redis.trino;
 
-import com.google.common.collect.ImmutableList;
+import static com.google.common.base.MoreObjects.toStringHelper;
 
+import java.util.Collection;
 import java.util.List;
 
-import static com.google.common.base.MoreObjects.toStringHelper;
+import com.google.common.collect.ImmutableList;
 
 public class RediSearchTable {
 
 	private final RediSearchTableHandle tableHandle;
 	private final List<RediSearchColumnHandle> columns;
 
-	public RediSearchTable(RediSearchTableHandle tableHandle, List<RediSearchColumnHandle> columns) {
+	public RediSearchTable(RediSearchTableHandle tableHandle, Collection<RediSearchColumnHandle> columns) {
 		this.tableHandle = tableHandle;
 		this.columns = ImmutableList.copyOf(columns);
 	}

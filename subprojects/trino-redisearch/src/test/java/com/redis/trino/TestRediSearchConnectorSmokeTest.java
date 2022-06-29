@@ -9,11 +9,14 @@ import static io.trino.tpch.TpchTable.REGION;
 import static java.util.Objects.requireNonNull;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
+
 import org.testng.SkipException;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
 
 import com.google.common.base.Throwables;
+import com.redis.lettucemod.test.Beers;
 
 import io.airlift.log.Logger;
 import io.trino.spi.TrinoException;
@@ -98,6 +101,12 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	protected QueryRunner createQueryRunner() throws Exception {
 		redisearch = new RediSearchServer();
 		return RediSearchQueryRunner.createRediSearchQueryRunner(redisearch, CUSTOMER, NATION, ORDERS, REGION);
+	}
+
+	@Test
+	public void testNonIndexFields() throws IOException {
+		Beers.populateIndex(redisearch.getTestContext().getConnection());
+		getQueryRunner().execute("select id,last_mod from beers");
 	}
 
 	@Test
