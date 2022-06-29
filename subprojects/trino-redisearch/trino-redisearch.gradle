@@ -3,43 +3,19 @@ plugins {
 }
 
 dependencies {
-    implementation group: 'com.redis', name: 'lettucemod', version: lettucemodVersion
-    implementation group: 'com.github.f4b6a3', name: 'ulid-creator', version: ulidVersion
-    implementation group: 'io.trino', name: 'trino-collect', version: trinoVersion
-    implementation group: 'io.trino', name: 'trino-matching', version: trinoVersion
+    compileOnly group: 'io.trino', name: 'trino-spi', version: trinoVersion
     implementation group: 'io.trino', name: 'trino-plugin-toolkit', version: trinoVersion
     implementation group: 'io.airlift', name: 'bootstrap', version: airliftVersion
-    implementation group: 'io.airlift', name: 'concurrent', version: airliftVersion
     implementation group: 'io.airlift', name: 'configuration', version: airliftVersion
-    implementation group: 'io.airlift', name: 'http-client', version: airliftVersion
     implementation group: 'io.airlift', name: 'json', version: airliftVersion
-    implementation group: 'io.airlift', name: 'log', version: airliftVersion
-    implementation group: 'io.airlift', name: 'log-manager', version: airliftVersion
-    implementation group: 'io.airlift', name: 'units', version: unitsVersion
-    implementation 'com.fasterxml.jackson.core:jackson-core'
-    implementation 'com.fasterxml.jackson.core:jackson-databind'
-    implementation 'com.google.guava:guava'
-    implementation 'com.google.inject:guice'
-    implementation 'javax.inject:javax.inject'
+    implementation group: 'com.redis', name: 'lettucemod', version: lettucemodVersion
+    implementation group: 'com.github.f4b6a3', name: 'ulid-creator', version: ulidVersion
     implementation 'javax.validation:validation-api'
-    runtimeOnly group: 'org.antlr', name: 'antlr4-runtime', version: antlrVersion
-    compileOnly group: 'io.trino', name: 'trino-spi', version: trinoVersion
-    compileOnly group: 'io.airlift', name: 'slice', version: sliceVersion
-    compileOnly 'com.fasterxml.jackson.core:jackson-annotations'
-    compileOnly 'org.openjdk.jol:jol-core'
     testImplementation group: 'com.redis.testcontainers', name: 'testcontainers-redis-junit', version: testcontainersRedisVersion
     testImplementation group: 'com.redis', name: 'lettucemod', version: lettucemodVersion, classifier: 'tests'
-    testImplementation group: 'io.trino', name: 'trino-client', version: trinoVersion
-    testImplementation group: 'io.trino', name: 'trino-main', version: trinoVersion
-    testImplementation group: 'io.trino', name: 'trino-main', classifier: 'tests', version: trinoVersion
     testImplementation(group: 'io.trino', name: 'trino-testing', version: trinoVersion) {
     	exclude group: 'org.testcontainers', module: 'testcontainers-java'
     }
-    testImplementation group: 'io.trino', name: 'trino-jmx', version: trinoVersion
-    testImplementation group: 'io.airlift', name: 'http-server', version: airliftVersion
-    testImplementation group: 'io.airlift', name: 'node', version: airliftVersion
-    testImplementation group: 'io.airlift', name: 'testing', version: airliftVersion
-    testImplementation group: 'javax.servlet', name: 'javax.servlet-api'
 }
 
 test {
