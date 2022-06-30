@@ -106,7 +106,7 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	@Test
 	public void testNonIndexedFields() throws IOException {
 		Beers.populateIndex(redisearch.getTestContext().getConnection());
-		getQueryRunner().execute("select id, name from beers");
+		getQueryRunner().execute("select id, last_mod from beers");
 	}
 
 	@Test

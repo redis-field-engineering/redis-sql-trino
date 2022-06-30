@@ -12,6 +12,7 @@ import static java.util.concurrent.TimeUnit.HOURS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -29,6 +30,7 @@ import com.redis.lettucemod.search.AggregateOptions;
 import com.redis.lettucemod.search.AggregateWithCursorResults;
 import com.redis.lettucemod.search.CreateOptions;
 import com.redis.lettucemod.search.CursorOptions;
+import com.redis.lettucemod.search.Document;
 import com.redis.lettucemod.search.Field;
 import com.redis.lettucemod.search.Group;
 import com.redis.lettucemod.search.IndexInfo;
@@ -163,13 +165,25 @@ public class RediSearchSession {
 		if (indexInfo.isEmpty()) {
 			throw new TableNotFoundException(schemaTableName, format("Index '%s' not found", index), null);
 		}
+		Set<String> fields = new HashSet<>();
 		ImmutableList.Builder<RediSearchColumnHandle> columnHandles = ImmutableList.builder();
 		for (Field columnMetadata : indexInfo.get().getFields()) {
-			columnHandles.add(buildColumnHandle(columnMetadata));
+			RediSearchColumnHandle column = buildColumnHandle(columnMetadata);
+			fields.add(column.getName());
+			columnHandles.add(column);
 		}
-		RediSearchTableHandle tableHandle = new RediSearchTableHandle(RediSearchTableHandle.Type.SEARCH,
-				schemaTableName);
-		return new RediSearchTable(tableHandle, columnHandles.build());
+		SearchResults<String, String> results = connection.sync().search(index, "*");
+		for (Document<String, String> doc : results) {
+			for (String field : doc.keySet()) {
+				if (fields.contains(field)) {
+					continue;
+				}
+				columnHandles.add(new RediSearchColumnHandle(field, VarcharType.VARCHAR, false));
+				fields.add(field);
+			}
+		}
+		return new RediSearchTable(new RediSearchTableHandle(RediSearchTableHandle.Type.SEARCH, schemaTableName),
+				columnHandles.build());
 	}
 
 	private Optional<IndexInfo> indexInfo(String index) {
