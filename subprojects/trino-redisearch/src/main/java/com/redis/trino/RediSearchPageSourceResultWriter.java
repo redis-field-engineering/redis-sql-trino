@@ -1,7 +1,6 @@
 package com.redis.trino;
 
 import static io.airlift.slice.Slices.utf8Slice;
-import static io.trino.plugin.base.util.JsonTypeUtil.jsonParse;
 import static io.trino.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.Chars.truncateToLengthAndTrimSpaces;
@@ -92,7 +91,7 @@ public class RediSearchPageSourceResultWriter {
 		} else if (type instanceof DecimalType) {
 			type.writeObject(output, encodeScaledValue(new BigDecimal(value), ((DecimalType) type).getScale()));
 		} else if (type.getBaseName().equals(JSON)) {
-			type.writeSlice(output, jsonParse(utf8Slice(value)));
+			type.writeSlice(output, JsonTypeUtil.jsonParse(utf8Slice(value)));
 		} else {
 			throw new TrinoException(GENERIC_INTERNAL_ERROR, "Unhandled type for Slice: " + type.getTypeSignature());
 		}
