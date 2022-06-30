@@ -1,11 +1,10 @@
 package com.redis.trino;
 
-import static io.airlift.testing.Closeables.closeAllSuppress;
-import static io.airlift.units.Duration.nanosSince;
 import static io.trino.plugin.tpch.TpchMetadata.TINY_SCHEMA_NAME;
 import static io.trino.testing.TestingSession.testSessionBuilder;
 import static java.lang.String.format;
 import static java.util.Locale.ENGLISH;
+import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
 import java.util.Map;
@@ -15,6 +14,8 @@ import com.google.common.collect.ImmutableMap;
 
 import io.airlift.log.Logger;
 import io.airlift.log.Logging;
+import io.airlift.testing.Closeables;
+import io.airlift.units.Duration;
 import io.trino.Session;
 import io.trino.metadata.QualifiedObjectName;
 import io.trino.plugin.tpch.TpchPlugin;
@@ -57,12 +58,32 @@ public final class RediSearchQueryRunner {
 			for (TpchTable<?> table : tables) {
 				loadTpchTopic(server, trinoClient, table);
 			}
-			LOG.info("Loading complete in %s", nanosSince(startTime).toString(SECONDS));
+			LOG.info("Loading complete in %s", Duration.nanosSince(startTime).toString(SECONDS));
 			return queryRunner;
 		} catch (Throwable e) {
-			closeAllSuppress(e, queryRunner);
+			Closeables.closeAllSuppress(e, queryRunner);
 			throw e;
 		}
+	}
+
+	public static <T extends Throwable> T closeAllSuppress(T rootCause, AutoCloseable... closeables) {
+		requireNonNull(rootCause, "rootCause is null");
+		if (closeables == null) {
+			return rootCause;
+		}
+		for (AutoCloseable closeable : closeables) {
+			try {
+				if (closeable != null) {
+					closeable.close();
+				}
+			} catch (Throwable e) {
+				// Self-suppression not permitted
+				if (rootCause != e) {
+					rootCause.addSuppressed(e);
+				}
+			}
+		}
+		return rootCause;
 	}
 
 	private static void installRediSearchPlugin(RediSearchServer server, QueryRunner queryRunner,
@@ -81,7 +102,7 @@ public final class RediSearchQueryRunner {
 				table.getTableName().toLowerCase(ENGLISH), trinoClient.getServer(), trinoClient.getDefaultSession());
 		loader.execute(format("SELECT * from %s",
 				new QualifiedObjectName(TPCH_SCHEMA, TINY_SCHEMA_NAME, table.getTableName().toLowerCase(ENGLISH))));
-		LOG.info("Imported %s in %s", table.getTableName(), nanosSince(start).convertToMostSuccinctTimeUnit());
+		LOG.info("Imported %s in %s", table.getTableName(), Duration.nanosSince(start).convertToMostSuccinctTimeUnit());
 	}
 
 	public static Session createSession() {

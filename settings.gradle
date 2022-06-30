@@ -7,8 +7,6 @@ buildscript {
     dependencies {
         classpath "org.kordamp.gradle:kordamp-parentbuild:$kordampBuildVersion"
         classpath "org.kordamp.gradle:java-project-gradle-plugin:$kordampPluginVersion"
-        classpath "org.springframework.boot:spring-boot-gradle-plugin:$bootPluginVersion"
-        classpath "io.spring.gradle:dependency-management-plugin:$dependencyPluginVersion"
         classpath "com.palantir.gradle.docker:gradle-docker:$dockerPluginVersion"
     }
 }
@@ -30,12 +28,47 @@ projects {
         dirs(['subprojects']) {
             id 'java-library'
             id 'java-library-distribution'
-            id 'org.springframework.boot'
-            id 'io.spring.dependency-management'
         }
     }
 }
 
 enforce {
-    enabled = false
+    rule(enforcer.rules.ForceDependencies) { r ->
+        r.dependencies.addAll "com.google.guava:guava:$guavaVersion",
+        "com.google.inject:guice:$guiceVersion",
+        "com.google.errorprone:error_prone_annotations:$errorproneVersion",
+        "io.airlift:units:$unitsVersion",
+		"io.airlift:bootstrap:$airliftVersion",
+		"io.airlift:configuration:$airliftVersion",
+		"io.airlift:json:$airliftVersion",
+		"io.airlift:concurrent:$airliftVersion",
+		"io.airlift:log:$airliftVersion",
+		"io.airlift:slice:$sliceVersion",
+		"io.airlift:discovery:$airliftVersion",
+		"io.airlift:event:$airliftVersion",
+		"io.airlift:http-client:$airliftVersion",
+		"io.airlift:http-server:$airliftVersion",
+		"io.airlift:jaxrs:$airliftVersion",
+		"io.airlift:jmx:$airliftVersion",
+		"io.airlift:node:$airliftVersion",
+		"io.airlift:trace-token:$airliftVersion",
+		"javax.servlet:javax.servlet-api:$servletVersion",
+        "org.slf4j:slf4j-api:$slf4jVersion",
+        "com.fasterxml.jackson.core:jackson-annotations:$jacksonVersion",
+        "com.fasterxml.jackson.core:jackson-core:$jacksonVersion",
+        "com.fasterxml.jackson.core:jackson-databind:$jacksonVersion",
+        "com.fasterxml.jackson.dataformat:jackson-dataformat-smile:$jacksonVersion",
+        "javax.validation:validation-api:$validationVersion",
+        "javax.annotation:javax.annotation-api:$annotationVersion",
+        "joda-time:joda-time:$jodaVersion",
+        "org.awaitility:awaitility:$awaitilityVersion",
+        "org.antlr:antlr4-runtime:$antlrVersion",
+        "it.unimi.dsi:fastutil:$fastutilVersion",
+        "net.java.dev.jna:jna:$jnaVersion",
+        "javax.ws.rs:javax.ws.rs-api:$wsVersion"
+    }
+    rule(enforcer.rules.BanDuplicateClasses) { r ->
+        // ignore all classes under the following package
+        r.ignore('org.hamcrest.*')
+    }
 }

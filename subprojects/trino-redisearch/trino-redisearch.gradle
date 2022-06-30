@@ -10,12 +10,16 @@ dependencies {
     implementation group: 'io.airlift', name: 'json', version: airliftVersion
     implementation group: 'com.redis', name: 'lettucemod', version: lettucemodVersion
     implementation group: 'com.github.f4b6a3', name: 'ulid-creator', version: ulidVersion
-    implementation 'javax.validation:validation-api'
-    testImplementation group: 'com.redis.testcontainers', name: 'testcontainers-redis-junit', version: testcontainersRedisVersion
+    implementation group: 'javax.validation', name: 'validation-api', version: validationVersion
     testImplementation group: 'com.redis', name: 'lettucemod', version: lettucemodVersion, classifier: 'tests'
+    testImplementation(group: 'com.redis.testcontainers', name: 'testcontainers-redis-junit', version: testcontainersRedisVersion) {
+        exclude group: 'com.redis', module: 'lettucemod'
+        exclude group: 'org.junit.jupiter', module: 'junit-jupiter-api'
+    }
+    testImplementation group: 'io.airlift', name: 'testing', version: airliftVersion
     testImplementation(group: 'io.trino', name: 'trino-testing', version: trinoVersion) {
     	exclude group: 'org.testcontainers', module: 'testcontainers-java'
-    }
+    }    
 }
 
 test {
