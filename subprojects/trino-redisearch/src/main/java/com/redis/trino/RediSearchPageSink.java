@@ -61,7 +61,7 @@ public class RediSearchPageSink implements ConnectorPageSink {
 	private final List<RediSearchColumnHandle> columns;
 	private final UlidFactory factory = UlidFactory.newInstance(new Random());
 
-	public RediSearchPageSink(RediSearchClientConfig config, RediSearchSession rediSearchSession,
+	public RediSearchPageSink(RediSearchConfig config, RediSearchSession rediSearchSession,
 			SchemaTableName schemaTableName, List<RediSearchColumnHandle> columns) {
 		this.rediSearchSession = rediSearchSession;
 		this.schemaTableName = schemaTableName;

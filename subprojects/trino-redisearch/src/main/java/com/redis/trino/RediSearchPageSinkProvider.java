@@ -11,11 +11,11 @@ import javax.inject.Inject;
 
 public class RediSearchPageSinkProvider implements ConnectorPageSinkProvider {
 
-	private final RediSearchClientConfig config;
+	private final RediSearchConfig config;
 	private final RediSearchSession rediSearchSession;
 
 	@Inject
-	public RediSearchPageSinkProvider(RediSearchClientConfig config, RediSearchSession rediSearchSession) {
+	public RediSearchPageSinkProvider(RediSearchConfig config, RediSearchSession rediSearchSession) {
 		this.config = config;
 		this.rediSearchSession = rediSearchSession;
 	}

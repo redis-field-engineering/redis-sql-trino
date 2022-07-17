@@ -16,10 +16,11 @@ public class TestRediSearchConfig {
 
 	@Test
 	public void testDefaults() {
-		assertRecordedDefaults(recordDefaults(RediSearchClientConfig.class).setUri(null)
-				.setDefaultSchema(RediSearchClientConfig.DEFAULT_SCHEMA)
-				.setDefaultLimit(RediSearchClientConfig.DEFAULT_LIMIT).setCaseInsensitiveNameMatching(false)
-				.setCursorCount(0));
+		assertRecordedDefaults(recordDefaults(RediSearchConfig.class).setUri(null)
+				.setDefaultSchema(RediSearchConfig.DEFAULT_SCHEMA).setDefaultLimit(RediSearchConfig.DEFAULT_LIMIT)
+				.setCaseInsensitiveNameMatching(false).setCursorCount(0)
+				.setTableCacheExpiration(RediSearchConfig.DEFAULT_TABLE_CACHE_EXPIRATION.toSeconds())
+				.setTableCacheRefresh(RediSearchConfig.DEFAULT_TABLE_CACHE_REFRESH.toSeconds()));
 	}
 
 	@Test
@@ -30,9 +31,9 @@ public class TestRediSearchConfig {
 				.put("redisearch.default-schema-name", defaultSchema).build();
 
 		ConfigurationFactory configurationFactory = new ConfigurationFactory(properties);
-		RediSearchClientConfig config = configurationFactory.build(RediSearchClientConfig.class);
+		RediSearchConfig config = configurationFactory.build(RediSearchConfig.class);
 
-		RediSearchClientConfig expected = new RediSearchClientConfig().setDefaultSchema(defaultSchema).setUri(uri);
+		RediSearchConfig expected = new RediSearchConfig().setDefaultSchema(defaultSchema).setUri(uri);
 
 		assertEquals(config.getDefaultSchema(), expected.getDefaultSchema());
 		assertEquals(config.getUri(), expected.getUri());

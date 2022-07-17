@@ -8,14 +8,13 @@ import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static java.lang.String.format;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
-import static java.util.concurrent.TimeUnit.HOURS;
-import static java.util.concurrent.TimeUnit.MINUTES;
 
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import com.google.common.cache.CacheBuilder;
@@ -71,16 +70,16 @@ public class RediSearchSession {
 
 	private final TypeManager typeManager;
 	private final StatefulRedisModulesConnection<String, String> connection;
-	private final RediSearchClientConfig config;
+	private final RediSearchConfig config;
 	private final LoadingCache<SchemaTableName, RediSearchTable> tableCache;
 
 	public RediSearchSession(TypeManager typeManager, StatefulRedisModulesConnection<String, String> connection,
-			RediSearchClientConfig config) {
+			RediSearchConfig config) {
 		this.typeManager = requireNonNull(typeManager, "typeManager is null");
 		this.connection = requireNonNull(connection, "connection is null");
 		this.config = requireNonNull(config, "config is null");
-		// TODO make table cache expiration configurable
-		this.tableCache = CacheBuilder.newBuilder().expireAfterWrite(1, HOURS).refreshAfterWrite(1, MINUTES)
+		this.tableCache = CacheBuilder.newBuilder().expireAfterWrite(config.getTableCacheExpiration(), TimeUnit.SECONDS)
+				.refreshAfterWrite(config.getTableCacheRefresh(), TimeUnit.SECONDS)
 				.build(CacheLoader.from(this::loadTableSchema));
 	}
 
@@ -88,7 +87,7 @@ public class RediSearchSession {
 		return connection;
 	}
 
-	public RediSearchClientConfig getConfig() {
+	public RediSearchConfig getConfig() {
 		return config;
 	}
 
@@ -107,7 +106,7 @@ public class RediSearchSession {
 
 	public Set<String> getAllTables() throws SchemaNotFoundException {
 		ImmutableSet.Builder<String> builder = ImmutableSet.builder();
-		builder.addAll(connection.sync().list());
+		builder.addAll(connection.sync().ftList());
 		return builder.build();
 	}
 
@@ -120,25 +119,26 @@ public class RediSearchSession {
 		}
 	}
 
+	@SuppressWarnings("unchecked")
 	public void createTable(SchemaTableName schemaTableName, List<RediSearchColumnHandle> columns) {
 		String tableName = schemaTableName.getTableName();
-		if (!connection.sync().list().contains(tableName)) {
-			List<Field> fields = columns.stream().filter(c -> !c.getName().equals("_id"))
+		if (!connection.sync().ftList().contains(tableName)) {
+			List<Field<String>> fields = columns.stream().filter(c -> !c.getName().equals("_id"))
 					.map(c -> buildField(c.getName(), c.getType())).collect(Collectors.toList());
 			CreateOptions.Builder<String, String> options = CreateOptions.<String, String>builder();
 			options.prefix(tableName + ":");
-			connection.sync().create(tableName, options.build(), fields.toArray(new Field[0]));
+			connection.sync().ftCreate(tableName, options.build(), fields.toArray(Field[]::new));
 		}
 	}
 
 	public void dropTable(SchemaTableName tableName) {
-		connection.sync().dropindexDeleteDocs(toRemoteTableName(tableName.getTableName()));
+		connection.sync().ftDropindexDeleteDocs(toRemoteTableName(tableName.getTableName()));
 		tableCache.invalidate(tableName);
 	}
 
 	public void addColumn(SchemaTableName schemaTableName, ColumnMetadata columnMetadata) {
 		String tableName = toRemoteTableName(schemaTableName.getTableName());
-		connection.sync().alter(tableName, buildField(columnMetadata.getName(), columnMetadata.getType()));
+		connection.sync().ftAlter(tableName, buildField(columnMetadata.getName(), columnMetadata.getType()));
 		tableCache.invalidate(schemaTableName);
 	}
 
@@ -167,12 +167,12 @@ public class RediSearchSession {
 		}
 		Set<String> fields = new HashSet<>();
 		ImmutableList.Builder<RediSearchColumnHandle> columnHandles = ImmutableList.builder();
-		for (Field columnMetadata : indexInfo.get().getFields()) {
+		for (Field<String> columnMetadata : indexInfo.get().getFields()) {
 			RediSearchColumnHandle column = buildColumnHandle(columnMetadata);
 			fields.add(column.getName());
 			columnHandles.add(column);
 		}
-		SearchResults<String, String> results = connection.sync().search(index, "*");
+		SearchResults<String, String> results = connection.sync().ftSearch(index, "*");
 		for (Document<String, String> doc : results) {
 			for (String field : doc.keySet()) {
 				if (fields.contains(field)) {
@@ -188,7 +188,7 @@ public class RediSearchSession {
 
 	private Optional<IndexInfo> indexInfo(String index) {
 		try {
-			List<Object> indexInfoList = connection.sync().indexInfo(index);
+			List<Object> indexInfoList = connection.sync().ftInfo(index);
 			if (indexInfoList != null) {
 				return Optional.of(RedisModulesUtils.indexInfo(indexInfoList));
 			}
@@ -198,7 +198,7 @@ public class RediSearchSession {
 		return Optional.empty();
 	}
 
-	private RediSearchColumnHandle buildColumnHandle(Field field) {
+	private RediSearchColumnHandle buildColumnHandle(Field<String> field) {
 		return buildColumnHandle(field.getName(), field.getType(), false);
 	}
 
@@ -222,32 +222,31 @@ public class RediSearchSession {
 		options.limit(Limit.offset(0).num(limit(tableHandle)));
 		options.returnFields(columns.stream().map(RediSearchColumnHandle::getName).toArray(String[]::new));
 		log.info("Running search on index %s with query '%s'", index, query);
-		return connection.sync().search(index, query, options.build());
+		return connection.sync().ftSearch(index, query, options.build());
 	}
 
 	public AggregateWithCursorResults<String> aggregate(RediSearchTableHandle table) {
 		String index = index(table);
 		String query = RediSearchQueryBuilder.buildQuery(table.getConstraint());
-		AggregateOptions.Builder<String, String> optionsBuilder = AggregateOptions.builder();
-		optionsBuilder.limit(Limit.offset(0).num(limit(table)));
+		AggregateOptions.Builder<String, String> options = AggregateOptions.builder();
+		options.operation(Limit.offset(0).num(limit(table)));
 		Optional<Group> group = RediSearchQueryBuilder.group(table.getTermAggregations(),
 				table.getMetricAggregations());
-		group.ifPresent(optionsBuilder::group);
-		AggregateOptions<String, String> options = optionsBuilder.build();
-		log.info("Running aggregation on index %s with query '%s' and %s", index, query, options);
+		group.ifPresent(options::operation);
+		log.info("Running aggregation on index %s with query '%s' and %s", index, query, options.build());
 		CursorOptions.Builder cursorOptions = CursorOptions.builder();
 		if (config.getCursorCount() > 0) {
 			cursorOptions.count(config.getCursorCount());
 		}
-		return connection.sync().aggregate(index, query, cursorOptions.build(), options);
+		return connection.sync().ftAggregate(index, query, cursorOptions.build(), options.build());
 	}
 
 	public AggregateWithCursorResults<String> cursorRead(RediSearchTableHandle tableHandle, long cursor) {
 		String index = index(tableHandle);
 		if (config.getCursorCount() > 0) {
-			return connection.sync().cursorRead(index, cursor, config.getCursorCount());
+			return connection.sync().ftCursorRead(index, cursor, config.getCursorCount());
 		}
-		return connection.sync().cursorRead(index, cursor);
+		return connection.sync().ftCursorRead(index, cursor);
 	}
 
 	private String index(RediSearchTableHandle tableHandle) {
@@ -261,7 +260,7 @@ public class RediSearchSession {
 		return config.getDefaultLimit();
 	}
 
-	private Field buildField(String columnName, Type columnType) {
+	private Field<String> buildField(String columnName, Type columnType) {
 		Field.Type fieldType = toFieldType(columnType);
 		switch (fieldType) {
 		case GEO:
@@ -338,7 +337,7 @@ public class RediSearchSession {
 	}
 
 	public void cursorDelete(RediSearchTableHandle tableHandle, long cursor) {
-		connection.sync().cursorDelete(index(tableHandle), cursor);
+		connection.sync().ftCursorDelete(index(tableHandle), cursor);
 	}
 
 }

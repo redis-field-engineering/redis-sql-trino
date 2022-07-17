@@ -59,6 +59,7 @@ public class RediSearchLoader extends AbstractTestingTrinoClient<Void> {
 		private RediSearchLoadingSession() {
 		}
 
+		@SuppressWarnings("unchecked")
 		@Override
 		public void addResults(QueryStatusInfo statusInfo, QueryData data) {
 			if (types.get() == null && statusInfo.getColumns() != null) {
@@ -70,15 +71,15 @@ public class RediSearchLoader extends AbstractTestingTrinoClient<Void> {
 			}
 			checkState(types.get() != null, "Type information is missing");
 			List<Column> columns = statusInfo.getColumns();
-			if (!context.sync().list().contains(tableName)) {
-				List<Field> schema = new ArrayList<>();
+			if (!context.sync().ftList().contains(tableName)) {
+				List<Field<String>> schema = new ArrayList<>();
 				for (int i = 0; i < columns.size(); i++) {
 					Type type = types.get().get(i);
 					schema.add(field(columns.get(i).getName(), type));
 				}
-				context.sync().create(tableName,
+				context.sync().ftCreate(tableName,
 						CreateOptions.<String, String>builder().prefix(tableName + ":").build(),
-						schema.toArray(new Field[0]));
+						schema.toArray(Field[]::new));
 			}
 			RedisModulesAsyncCommands<String, String> async = context.async();
 			async.setAutoFlushCommands(false);
@@ -99,7 +100,7 @@ public class RediSearchLoader extends AbstractTestingTrinoClient<Void> {
 			async.setAutoFlushCommands(true);
 		}
 
-		private Field field(String name, Type type) {
+		private Field<String> field(String name, Type type) {
 			if (type instanceof VarcharType) {
 				return Field.tag(name).build();
 			}
