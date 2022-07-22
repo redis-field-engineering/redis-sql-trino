@@ -16,6 +16,10 @@ import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
 
 import com.google.common.base.Throwables;
+import com.redis.lettucemod.api.sync.RedisModulesCommands;
+import com.redis.lettucemod.search.CreateOptions;
+import com.redis.lettucemod.search.CreateOptions.DataType;
+import com.redis.lettucemod.search.Field;
 import com.redis.lettucemod.test.Beers;
 
 import io.airlift.log.Logger;
@@ -107,6 +111,17 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	public void testNonIndexedFields() throws IOException {
 		Beers.populateIndex(redisearch.getTestContext().getConnection());
 		getQueryRunner().execute("select id, last_mod from beers");
+	}
+
+	@SuppressWarnings("unchecked")
+	@Test
+	public void testJsonSearch() throws IOException {
+		RedisModulesCommands<String, String> sync = redisearch.getTestContext().getConnection().sync();
+		sync.ftCreate("jsontest", CreateOptions.<String, String>builder().on(DataType.JSON).build(),
+				Field.tag("$.id").as("id").build(), Field.text("$.message").as("message").build());
+		sync.jsonSet("doc:1", "$", "{\"id\": \"1\", \"message\": \"this is a test\"}");
+		sync.jsonSet("doc:2", "$", "{\"id\": \"2\", \"message\": \"this is another test\"}");
+		getQueryRunner().execute("select id, message from jsontest");
 	}
 
 	@Test
