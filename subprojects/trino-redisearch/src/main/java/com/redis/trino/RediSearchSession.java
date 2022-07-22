@@ -167,8 +167,8 @@ public class RediSearchSession {
 		}
 		Set<String> fields = new HashSet<>();
 		ImmutableList.Builder<RediSearchColumnHandle> columnHandles = ImmutableList.builder();
-		for (Field<String> columnMetadata : indexInfo.get().getFields()) {
-			RediSearchColumnHandle column = buildColumnHandle(columnMetadata);
+		for (Field<String> field : indexInfo.get().getFields()) {
+			RediSearchColumnHandle column = buildColumnHandle(field);
 			fields.add(column.getName());
 			columnHandles.add(column);
 		}
@@ -199,7 +199,15 @@ public class RediSearchSession {
 	}
 
 	private RediSearchColumnHandle buildColumnHandle(Field<String> field) {
-		return buildColumnHandle(field.getName(), field.getType(), false);
+		return buildColumnHandle(name(field), field.getType(), false);
+	}
+
+	private String name(Field<String> field) {
+		Optional<String> as = field.getAs();
+		if (as.isEmpty()) {
+			return field.getName();
+		}
+		return as.get();
 	}
 
 	private RediSearchColumnHandle buildColumnHandle(String name, Field.Type type, boolean hidden) {
