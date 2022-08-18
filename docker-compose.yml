@@ -10,7 +10,9 @@ services:
     restart: always
 
   trino:
-    image: jruaux/trino-redisearch
+    image: redis/trino-redisearch
+    build:
+      context: .
     hostname: trino
     container_name: trino
     ports:

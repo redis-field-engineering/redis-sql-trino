@@ -1,0 +1,6 @@
+coordinator=false
+http-server.http.port=8080
+query.max-memory=1GB
+query.max-memory-per-node=500MB
+query.max-total-memory-per-node=500MB
+discovery.uri=${TRINO_DISCOVERY_URI}

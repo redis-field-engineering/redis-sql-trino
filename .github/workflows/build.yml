@@ -5,14 +5,31 @@ on:
 
 jobs:
   build:
-    name: Build
+
+    runs-on: ubuntu-18.04
     if: startsWith(github.event.head_commit.message, 'Releasing version') != true
-    runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
+
+      - name: Set up Java
+        uses: actions/setup-java@v1
+        with:
+          java-version: 11
+
+      - uses: actions/cache@v2
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
 
       - name: Build
-        uses: redis-field-engineering/redis-build-action@v1
+        run: ./mvnw -B package --file pom.xml
+
+      - name: Show Reports
+        uses: actions/upload-artifact@v1
+        if: failure()
         with:
-          release: false
+          name: reports-${{ runner.os }}
+          path: build/

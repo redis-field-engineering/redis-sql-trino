@@ -48,7 +48,7 @@ release:
           - 'Merge'
       replacers:
         - search: 'deps: '
-  
+
 announce:
   slack:
     active: release
@@ -58,9 +58,5 @@ announce:
 distributions:
   trino-redisearch:
     artifacts:
-      - path: subprojects/{{distributionName}}/build/distributions/{{distributionName}}-{{projectVersion}}.zip
-        transform: '{{distributionName}}/{{distributionName}}-{{projectEffectiveVersion}}.zip'
-
-files:
-  artifacts:
-    - path: VERSION
+      - path: target/{{distributionName}}-{{projectVersion}}.zip
+        transform: '{{distributionName}}-{{projectEffectiveVersion}}.zip'

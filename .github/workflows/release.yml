@@ -9,57 +9,62 @@ on:
 jobs:
   release:
     name: Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
-      - name: Login to DockerHub
-        uses: docker/login-action@v1
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
       - name: Checkout
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      - name: Version
+      - name: Set up Java
+        uses: actions/setup-java@v1
+        with:
+          java-version: 11
+
+      - uses: actions/cache@v2
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Set release version
         run: |
-          echo ${{ github.event.inputs.version }} > VERSION
+          VERSION=${{ github.event.inputs.version }}
+          sed -i -e "s/^\:project-version\:\ .*/:project-version: $VERSION/g" README.adoc
+          sed -i -e "s/^ARG TRINO_VERSION=.*/ARG TRINO_VERSION=$VERSION/g" Dockerfile
+          git add README.adoc
+          git add Dockerfile
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "GitHub Action"
+          git commit -a -m "Releasing version $VERSION"
+          git push origin master
+
+      - name: Build
+        run: ./mvnw --no-transfer-progress -B --file pom.xml verify
+
+      - name: Show Reports
+        uses: actions/upload-artifact@v1
+        if: failure()
+        with:
+          name: reports-${{ runner.os }}
+          path: target/
 
       - name: Release
-        uses: redis-field-engineering/redis-release-action@v3
-        with:
-          gpg-key-id: ${{ secrets.GPG_KEY_ID }}
-          gpg-public-key: ${{ secrets.GPG_PUBLIC_KEY }}
-          gpg-secret-key: ${{ secrets.GPG_SECRET_KEY }}
-          gpg-passphrase: ${{ secrets.GPG_PASSPHRASE }}
-          sonatype-username: ${{ secrets.SONATYPE_USERNAME }}
-          sonatype-password: ${{ secrets.SONATYPE_PASSWORD }}
-          github-token: ${{ secrets.GIT_ACCESS_TOKEN }}
-          slack-webhook: ${{ secrets.JRELEASER_SLACK_WEBHOOK }}
+        uses: jreleaser/release-action@v1
+        env:
+          JRELEASER_PROJECT_VERSION: ${{ github.event.inputs.version }}
+          JRELEASER_GITHUB_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
+          JRELEASER_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          JRELEASER_GPG_PUBLIC_KEY: ${{ secrets.GPG_PUBLIC_KEY}}
+          JRELEASER_GPG_SECRET_KEY: ${{ secrets.GPG_SECRET_KEY }}
+          JRELEASER_SLACK_WEBHOOK: ${{ secrets.JRELEASER_SLACK_WEBHOOK }}
 
       - name: JReleaser output
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v2
         with:
           name: artifact
           path: |
             out/jreleaser/trace.log
             out/jreleaser/output.properties
-
-      - name: Upload test reports
-        if: failure()
-        uses: actions/upload-artifact@v3
-        with:
-          name: test-reports
-          path: |
-            build/reports/aggregate-tests/
-
-      - name: Set Version
-        uses: redis-field-engineering/redis-version-action@v2
-        with:
-          version: ${{ github.event.inputs.version }}
-
-      - name: Build/Push Docker image
-        run: |
-          ./gradlew dockerPush -x test -S
