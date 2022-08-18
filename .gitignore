@@ -8,6 +8,7 @@ hs_err*.log
 test-output/
 
 ### STS ###
+.checkstyle
 .apt_generated
 .classpath
 .factorypath
@@ -39,4 +40,3 @@ out/
 .vscode/
 .DS_Store
 /target/
-.checkstyle
