@@ -35,6 +35,7 @@ import io.trino.spi.connector.ConnectorSplitManager;
 import io.trino.spi.connector.ConnectorSplitSource;
 import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.ConnectorTransactionHandle;
+import io.trino.spi.connector.Constraint;
 import io.trino.spi.connector.DynamicFilter;
 import io.trino.spi.connector.FixedSplitSource;
 
@@ -47,9 +48,14 @@ public class RediSearchSplitManager implements ConnectorSplitManager {
 		this.addresses = session.getAddresses();
 	}
 
-	@Override
-	public ConnectorSplitSource getSplits(ConnectorTransactionHandle transaction, ConnectorSession session,
-			ConnectorTableHandle table, SplitSchedulingStrategy splitSchedulingStrategy, DynamicFilter dynamicFilter) {
+    @Override
+    public ConnectorSplitSource getSplits(
+            ConnectorTransactionHandle transaction,
+            ConnectorSession session,
+            ConnectorTableHandle tableHandle,
+            DynamicFilter dynamicFilter,
+            Constraint constraint)
+    {
 		RediSearchSplit split = new RediSearchSplit(addresses);
 
 		return new FixedSplitSource(ImmutableList.of(split));

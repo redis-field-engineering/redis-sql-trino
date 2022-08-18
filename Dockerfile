@@ -1,4 +1,4 @@
-ARG TRINO_VERSION=380
+ARG TRINO_VERSION=393
 
 FROM docker.io/library/maven:3.6.3-openjdk-11 AS builder
 WORKDIR /root/trino-redisearch

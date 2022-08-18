@@ -42,6 +42,8 @@ import com.redis.trino.RediSearchTableHandle.Type;
 
 import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
+import io.trino.spi.StandardErrorCode;
+import io.trino.spi.TrinoException;
 import io.trino.spi.connector.AggregateFunction;
 import io.trino.spi.connector.AggregationApplicationResult;
 import io.trino.spi.connector.Assignment;
@@ -60,6 +62,7 @@ import io.trino.spi.connector.Constraint;
 import io.trino.spi.connector.ConstraintApplicationResult;
 import io.trino.spi.connector.LimitApplicationResult;
 import io.trino.spi.connector.NotFoundException;
+import io.trino.spi.connector.RetryMode;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.SchemaTablePrefix;
 import io.trino.spi.connector.TableNotFoundException;
@@ -182,7 +185,10 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 	@Override
 	public ConnectorOutputTableHandle beginCreateTable(ConnectorSession session, ConnectorTableMetadata tableMetadata,
-			Optional<ConnectorTableLayout> layout) {
+			Optional<ConnectorTableLayout> layout, RetryMode retryMode) {
+		if (retryMode != RetryMode.NO_RETRIES) {
+			throw new TrinoException(StandardErrorCode.NOT_SUPPORTED, "This connector does not support query retries");
+		}
 		List<RediSearchColumnHandle> columns = buildColumnHandles(tableMetadata);
 
 		rediSearchSession.createTable(tableMetadata.getTable(), columns);
@@ -202,7 +208,11 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	}
 
 	@Override
-	public ConnectorInsertTableHandle beginInsert(ConnectorSession session, ConnectorTableHandle tableHandle) {
+	public ConnectorInsertTableHandle beginInsert(ConnectorSession session, ConnectorTableHandle tableHandle,
+			List<ColumnHandle> insertedColumns, RetryMode retryMode) {
+		if (retryMode != RetryMode.NO_RETRIES) {
+			throw new TrinoException(StandardErrorCode.NOT_SUPPORTED, "This connector does not support query retries");
+		}
 		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
 		List<RediSearchColumnHandle> columns = rediSearchSession.getTable(table.getSchemaTableName()).getColumns();
 
