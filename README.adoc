@@ -42,6 +42,18 @@ See the https://github.com/lettuce-io/lettuce-core/wiki/Redis-URI-and-connection
 +
 This property is required and has no default. A Redis URI must be provided to connect to RediSearch.
 
+`redisearch.username`:: Redis connection username.
+
+`redisearch.password`:: Redis connection password.
+
+`redisearch.insecure`:: Allow insecure connections (e.g. invalid certificates) to Redis when using SSL.
++
+This property is optional and the default is `false`.
+
+`redisearch.timeout`:: Redis command timeout in seconds.
++
+This property is optional and the default is `60`.
+
 `redisearch.case-insensitive-name-matching`:: Match index names case insensitively.
 +
 This property is optional and the default is `false`.
@@ -49,6 +61,10 @@ This property is optional and the default is `false`.
 `redisearch.default-limit`:: Max number of documents returned by FT.SEARCH and FT.AGGREGATE when no limit is present in the SQL query.
 +
 This property is optional and the default is `10000`.
+
+`redisearch.cursor-count`:: Number of rows read during each https://redis.io/docs/stack/search/reference/aggregations/#cursor-api[aggregation cursor] fetch.
++
+This property is optional and if it is not specified the RediSearch default is used.
 
 
 == Docker Example
@@ -122,14 +138,14 @@ redisearch.uri=redis://localhost:6379
 +
 [source,console]
 ----
-`trino-server start`
+trino-server start
 ----
 
 2. Connect to Trino using the CLI:
 +
 [source,console]
 ----
-`trino --catalog redisearch --schema default`
+trino --catalog redisearch --schema default
 ----
 
 3. Run a SQL query:

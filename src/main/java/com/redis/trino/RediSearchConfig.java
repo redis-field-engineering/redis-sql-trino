@@ -47,7 +47,7 @@ public class RediSearchConfig {
 	private boolean caseInsensitiveNameMatching;
 	private boolean insecure;
 	private boolean tls;
-	private long timeout;
+	private long timeout = 0; // Use Lettuce default
 	private long defaultLimit = DEFAULT_LIMIT;
 	private long cursorCount = 0; // Use RediSearch default
 	private long tableCacheExpiration = DEFAULT_TABLE_CACHE_EXPIRATION.toSeconds();
