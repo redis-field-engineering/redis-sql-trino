@@ -26,7 +26,7 @@ package com.redis.trino;
 import static io.airlift.configuration.ConfigBinder.configBinder;
 import static java.util.Objects.requireNonNull;
 
-import java.util.Optional;
+import java.time.Duration;
 
 import javax.inject.Singleton;
 
@@ -36,6 +36,7 @@ import com.google.inject.Provides;
 import com.google.inject.Scopes;
 import com.redis.lettucemod.RedisModulesClient;
 
+import io.lettuce.core.RedisURI;
 import io.trino.spi.type.TypeManager;
 
 public class RediSearchClientModule implements Module {
@@ -50,15 +51,28 @@ public class RediSearchClientModule implements Module {
 		configBinder(binder).bindConfig(RediSearchConfig.class);
 	}
 
+	@SuppressWarnings("deprecation")
 	@Singleton
 	@Provides
 	public static RediSearchSession createRediSearchSession(TypeManager typeManager, RediSearchConfig config) {
 		requireNonNull(config, "config is null");
-		Optional<String> uri = config.getUri();
-		if (uri.isPresent()) {
-			RedisModulesClient client = RedisModulesClient.create(uri.get());
+		if (config.getUri().isPresent()) {
+			RedisURI uri = RedisURI.create(config.getUri().get());
+			if (config.isInsecure()) {
+				uri.setVerifyPeer(false);
+			}
+			if (config.isTls()) {
+				uri.setSsl(true);
+			}
+			config.getUsername().ifPresent(uri::setUsername);
+			config.getPassword().ifPresent(uri::setPassword);
+			if (config.getTimeout() > 0) {
+				uri.setTimeout(Duration.ofSeconds(config.getTimeout()));
+			}
+			RedisModulesClient client = RedisModulesClient.create(uri);
 			return new RediSearchSession(typeManager, client.connect(), config);
 		}
 		throw new IllegalArgumentException("No Redis URI specified");
 	}
+
 }

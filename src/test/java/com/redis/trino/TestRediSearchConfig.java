@@ -16,7 +16,7 @@ public class TestRediSearchConfig {
 
 	@Test
 	public void testDefaults() {
-		assertRecordedDefaults(recordDefaults(RediSearchConfig.class).setUri(null)
+		assertRecordedDefaults(recordDefaults(RediSearchConfig.class).setUri(null).setInsecure(false).setUsername(null).setPassword(null).setTimeout(0).setTls(false)
 				.setDefaultSchema(RediSearchConfig.DEFAULT_SCHEMA).setDefaultLimit(RediSearchConfig.DEFAULT_LIMIT)
 				.setCaseInsensitiveNameMatching(false).setCursorCount(0)
 				.setTableCacheExpiration(RediSearchConfig.DEFAULT_TABLE_CACHE_EXPIRATION.toSeconds())

@@ -42,7 +42,12 @@ public class RediSearchConfig {
 
 	private String defaultSchema = DEFAULT_SCHEMA;
 	private Optional<String> uri = Optional.empty();
+	private Optional<String> username = Optional.empty();
+	private Optional<String> password = Optional.empty();
 	private boolean caseInsensitiveNameMatching;
+	private boolean insecure;
+	private boolean tls;
+	private long timeout;
 	private long defaultLimit = DEFAULT_LIMIT;
 	private long cursorCount = 0; // Use RediSearch default
 	private long tableCacheExpiration = DEFAULT_TABLE_CACHE_EXPIRATION.toSeconds();
@@ -116,6 +121,30 @@ public class RediSearchConfig {
 		return this;
 	}
 
+	public Optional<String> getUsername() {
+		return username;
+	}
+
+	@Config("redisearch.username")
+	@ConfigDescription("Redis connection username")
+	@ConfigSecuritySensitive
+	public RediSearchConfig setUsername(String username) {
+		this.username = Optional.ofNullable(username);
+		return this;
+	}
+
+	public Optional<String> getPassword() {
+		return password;
+	}
+
+	@Config("redisearch.password")
+	@ConfigDescription("Redis connection password")
+	@ConfigSecuritySensitive
+	public RediSearchConfig setPassword(String password) {
+		this.password = Optional.ofNullable(password);
+		return this;
+	}
+
 	public boolean isCaseInsensitiveNameMatching() {
 		return caseInsensitiveNameMatching;
 	}
@@ -127,4 +156,36 @@ public class RediSearchConfig {
 		return this;
 	}
 
+	public boolean isInsecure() {
+		return insecure;
+	}
+
+	@Config("redisearch.insecure")
+	@ConfigDescription("Allow insecure connections (e.g. invalid certificates) to Redis when using SSL")
+	public RediSearchConfig setInsecure(boolean insecure) {
+		this.insecure = insecure;
+		return this;
+	}
+
+	public boolean isTls() {
+		return tls;
+	}
+
+	@Config("redisearch.tls")
+	@ConfigDescription("Establish a secure TLS connection")
+	public RediSearchConfig setTls(boolean tls) {
+		this.tls = tls;
+		return this;
+	}
+
+	public long getTimeout() {
+		return timeout;
+	}
+
+	@Config("redisearch.timeout")
+	@ConfigDescription("Redis command timeout in seconds")
+	public RediSearchConfig setTimeout(long timeout) {
+		this.timeout = timeout;
+		return this;
+	}
 }
