@@ -39,14 +39,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
-import java.util.stream.Collectors;
 
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.primitives.Primitives;
 import com.google.common.primitives.Shorts;
 import com.google.common.primitives.SignedBytes;
-import com.redis.lettucemod.RedisModulesUtils;
 import com.redis.lettucemod.search.Group;
 import com.redis.lettucemod.search.Reducer;
 import com.redis.lettucemod.search.Reducers.Avg;
@@ -58,6 +55,7 @@ import com.redis.lettucemod.search.querybuilder.Node;
 import com.redis.lettucemod.search.querybuilder.QueryBuilder;
 import com.redis.lettucemod.search.querybuilder.Value;
 import com.redis.lettucemod.search.querybuilder.Values;
+import com.redis.lettucemod.util.RedisModulesUtils;
 
 import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
@@ -73,7 +71,7 @@ public class RediSearchQueryBuilder {
 
 	private static final Logger log = Logger.get(RediSearchQueryBuilder.class);
 
-	private static final Map<String, BiFunction<String, String, Reducer>> CONVERTERS = ImmutableMap.of(
+	private static final Map<String, BiFunction<String, String, Reducer>> CONVERTERS = Map.of(
 			MetricAggregation.MAX, (alias, field) -> Max.property(field).as(alias).build(), MetricAggregation.MIN,
 			(alias, field) -> Min.property(field).as(alias).build(), MetricAggregation.SUM,
 			(alias, field) -> Sum.property(field).as(alias).build(), MetricAggregation.AVG,
@@ -212,23 +210,25 @@ public class RediSearchQueryBuilder {
 		return Optional.empty();
 	}
 
-	public static Optional<Group> group(List<TermAggregation> terms, List<MetricAggregation> aggregates) {
+	private static Reducer reducer(MetricAggregation aggregation) {
+		Optional<RediSearchColumnHandle> column = aggregation.getColumnHandle();
+		String field = column.isPresent() ? column.get().getName() : null;
+		return CONVERTERS.get(aggregation.getFunctionName()).apply(aggregation.getAlias(), field);
+	}
+
+	public static Optional<Group> group(RediSearchTableHandle table) {
+		List<TermAggregation> terms = table.getTermAggregations();
+		List<MetricAggregation> aggregates = table.getMetricAggregations();
 		List<String> groupFields = new ArrayList<>();
 		if (terms != null && !terms.isEmpty()) {
-			groupFields = terms.stream().map(TermAggregation::getTerm).collect(Collectors.toList());
+			groupFields = terms.stream().map(TermAggregation::getTerm).toList();
 		}
-		List<Reducer> reducers = aggregates.stream().map(RediSearchQueryBuilder::reducer).collect(Collectors.toList());
+		List<Reducer> reducers = aggregates.stream().map(RediSearchQueryBuilder::reducer).toList();
 		if (reducers.isEmpty()) {
 			return Optional.empty();
 		}
 		log.info("Group fields=%s reducers=%s", groupFields, reducers);
 		return Optional
 				.of(Group.by(groupFields.toArray(String[]::new)).reducers(reducers.toArray(Reducer[]::new)).build());
-	}
-
-	private static Reducer reducer(MetricAggregation aggregation) {
-		Optional<RediSearchColumnHandle> column = aggregation.getColumnHandle();
-		String field = column.isPresent() ? column.get().getName() : null;
-		return CONVERTERS.get(aggregation.getFunctionName()).apply(aggregation.getAlias(), field);
 	}
 }

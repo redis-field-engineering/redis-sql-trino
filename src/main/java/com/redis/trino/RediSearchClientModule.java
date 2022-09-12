@@ -26,17 +26,17 @@ package com.redis.trino;
 import static io.airlift.configuration.ConfigBinder.configBinder;
 import static java.util.Objects.requireNonNull;
 
-import java.time.Duration;
-
 import javax.inject.Singleton;
 
 import com.google.inject.Binder;
 import com.google.inject.Module;
 import com.google.inject.Provides;
 import com.google.inject.Scopes;
-import com.redis.lettucemod.RedisModulesClient;
+import com.redis.lettucemod.util.RedisClientBuilder;
+import com.redis.lettucemod.util.RedisClientOptions;
+import com.redis.lettucemod.util.RedisClientOptions.Builder;
 
-import io.lettuce.core.RedisURI;
+import io.lettuce.core.SslVerifyMode;
 import io.trino.spi.type.TypeManager;
 
 public class RediSearchClientModule implements Module {
@@ -51,28 +51,23 @@ public class RediSearchClientModule implements Module {
 		configBinder(binder).bindConfig(RediSearchConfig.class);
 	}
 
-	@SuppressWarnings("deprecation")
 	@Singleton
 	@Provides
 	public static RediSearchSession createRediSearchSession(TypeManager typeManager, RediSearchConfig config) {
 		requireNonNull(config, "config is null");
-		if (config.getUri().isPresent()) {
-			RedisURI uri = RedisURI.create(config.getUri().get());
-			if (config.isInsecure()) {
-				uri.setVerifyPeer(false);
-			}
-			if (config.isTls()) {
-				uri.setSsl(true);
-			}
-			config.getUsername().ifPresent(uri::setUsername);
-			config.getPassword().ifPresent(uri::setPassword);
-			if (config.getTimeout() > 0) {
-				uri.setTimeout(Duration.ofSeconds(config.getTimeout()));
-			}
-			RedisModulesClient client = RedisModulesClient.create(uri);
-			return new RediSearchSession(typeManager, client.connect(), config);
+		Builder options = RedisClientOptions.builder();
+		options.uriString(config.getUri());
+		options.ssl(config.isTls());
+		options.username(config.getUsername());
+		options.password(config.getPassword());
+		if (config.isInsecure()) {
+			options.sslVerifyMode(SslVerifyMode.NONE);
 		}
-		throw new IllegalArgumentException("No Redis URI specified");
+		if (config.getTimeout() > 0) {
+			options.timeoutInSeconds(config.getTimeout());
+		}
+		RedisClientBuilder clientBuilder = RedisClientBuilder.create(options.build());
+		return new RediSearchSession(typeManager, clientBuilder.client(), config);
 	}
 
 }

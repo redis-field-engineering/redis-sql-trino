@@ -23,23 +23,24 @@
  */
 package com.redis.trino;
 
-import io.trino.spi.connector.Connector;
-import io.trino.spi.connector.ConnectorMetadata;
-import io.trino.spi.connector.ConnectorPageSinkProvider;
-import io.trino.spi.connector.ConnectorPageSourceProvider;
-import io.trino.spi.connector.ConnectorSplitManager;
-import io.trino.spi.connector.ConnectorTransactionHandle;
-import io.trino.spi.transaction.IsolationLevel;
-
-import javax.inject.Inject;
-
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-
 import static com.google.common.base.Preconditions.checkArgument;
 import static io.trino.spi.transaction.IsolationLevel.READ_UNCOMMITTED;
 import static io.trino.spi.transaction.IsolationLevel.checkConnectorSupports;
 import static java.util.Objects.requireNonNull;
+
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
+import javax.inject.Inject;
+
+import io.trino.spi.connector.Connector;
+import io.trino.spi.connector.ConnectorMetadata;
+import io.trino.spi.connector.ConnectorPageSinkProvider;
+import io.trino.spi.connector.ConnectorPageSourceProvider;
+import io.trino.spi.connector.ConnectorSession;
+import io.trino.spi.connector.ConnectorSplitManager;
+import io.trino.spi.connector.ConnectorTransactionHandle;
+import io.trino.spi.transaction.IsolationLevel;
 
 public class RediSearchConnector implements Connector {
 
@@ -67,29 +68,22 @@ public class RediSearchConnector implements Connector {
 		transactions.put(transaction, new RediSearchMetadata(rediSearchSession));
 		return transaction;
 	}
-
+	
 	@Override
-	public ConnectorMetadata getMetadata(ConnectorTransactionHandle transaction) {
-		RediSearchMetadata metadata = transactions.get(transaction);
-		checkTransaction(metadata, transaction);
+	public ConnectorMetadata getMetadata(ConnectorSession session, ConnectorTransactionHandle transactionHandle) {
+		RediSearchMetadata metadata = transactions.get(transactionHandle);
+		checkTransaction(metadata, transactionHandle);
 		return metadata;
 	}
 
-	private void checkTransaction(Object object, ConnectorTransactionHandle transaction) {
-		checkArgument(object != null, "no such transaction: %s", transaction);
+	private void checkTransaction(Object object, ConnectorTransactionHandle transactionHandle) {
+		checkArgument(object != null, "no such transaction: %s", transactionHandle);
 	}
 
 	@Override
 	public void commit(ConnectorTransactionHandle transaction) {
 		checkTransaction(transactions.remove(transaction), transaction);
 	}
-
-//	@Override
-//	public void rollback(ConnectorTransactionHandle transaction) {
-//		RediSearchMetadata metadata = transactions.remove(transaction);
-//		checkTransaction(metadata, transaction);
-//		metadata.rollback();
-//	}
 
 	@Override
 	public ConnectorSplitManager getSplitManager() {

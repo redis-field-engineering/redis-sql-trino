@@ -312,7 +312,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		RediSearchTableHandle tableHandle = new RediSearchTableHandle(Type.AGGREGATE, table.getSchemaTableName(),
 				table.getConstraint(), table.getLimit(), termAggregations.build(), metrics);
 		return Optional.of(new AggregationApplicationResult<>(tableHandle, projections.build(),
-				resultAssignments.build(), ImmutableMap.of(), false));
+				resultAssignments.build(), Map.of(), false));
 	}
 
 	private void setRollback(Runnable action) {

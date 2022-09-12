@@ -5,20 +5,22 @@
 	<parent>
 		<groupId>io.trino</groupId>
 		<artifactId>trino-root</artifactId>
-		<version>393</version>
+		<version>395</version>
 	</parent>
 
 	<groupId>com.redis</groupId>
 	<artifactId>trino-redisearch</artifactId>
+	<version>0.2.4-SNAPSHOT</version>
 	<description>Trino - RediSearch Connector</description>
 	<packaging>trino-plugin</packaging>
 
 	<properties>
-		<lettucemod.version>3.0.4</lettucemod.version>
+		<trino.version>395</trino.version>
+		<lettucemod.version>3.1.2</lettucemod.version>
 		<lettuce.version>6.2.0.RELEASE</lettuce.version>
 		<testcontainers-redis.version>1.6.2</testcontainers-redis.version>
 		<ulid.version>5.0.0</ulid.version>
-		<air.check.skip-enforcer>true</air.check.skip-enforcer>
+
 		<air.check.skip-license>true</air.check.skip-license>
 		<air.check.skip-checkstyle>true</air.check.skip-checkstyle>
 	</properties>
@@ -28,7 +30,7 @@
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-plugin-toolkit</artifactId>
-			<scope>compile</scope>
+			<version>${trino.version}</version>
 		</dependency>
 
 		<dependency>
@@ -94,6 +96,13 @@
 			<artifactId>validation-api</artifactId>
 		</dependency>
 
+		<dependency>
+			<groupId>io.trino</groupId>
+			<artifactId>trino-matching</artifactId>
+			<version>${trino.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+
 		<!-- used by tests but also needed transitively -->
 		<dependency>
 			<groupId>io.airlift</groupId>
@@ -105,6 +114,7 @@
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-spi</artifactId>
+			<version>${trino.version}</version>
 			<scope>provided</scope>
 		</dependency>
 
@@ -120,6 +130,7 @@
 			<scope>provided</scope>
 		</dependency>
 
+
 		<dependency>
 			<groupId>org.openjdk.jol</groupId>
 			<artifactId>jol-core</artifactId>
@@ -131,36 +142,42 @@
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-array</artifactId>
+			<version>${trino.version}</version>
 			<scope>test</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-client</artifactId>
+			<version>${trino.version}</version>
 			<scope>test</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-collect</artifactId>
+			<version>${trino.version}</version>
 			<scope>test</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-geospatial-toolkit</artifactId>
+			<version>${trino.version}</version>
 			<scope>test</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-jmx</artifactId>
+			<version>${trino.version}</version>
 			<scope>test</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-main</artifactId>
+			<version>${trino.version}</version>
 			<scope>test</scope>
 
 			<exclusions>
@@ -175,6 +192,7 @@
 			<groupId>io.trino</groupId>
 			<artifactId>trino-main</artifactId>
 			<type>test-jar</type>
+			<version>${trino.version}</version>
 			<scope>test</scope>
 
 			<exclusions>
@@ -188,30 +206,35 @@
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-memory-context</artifactId>
+			<version>${trino.version}</version>
 			<scope>test</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-parser</artifactId>
+			<version>${trino.version}</version>
 			<scope>test</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-testing</artifactId>
+			<version>${trino.version}</version>
 			<scope>test</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-testing-services</artifactId>
+			<version>${trino.version}</version>
 			<scope>test</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-tpch</artifactId>
+			<version>${trino.version}</version>
 			<scope>test</scope>
 		</dependency>
 
@@ -330,7 +353,6 @@
 			<artifactId>annotations</artifactId>
 			<scope>test</scope>
 		</dependency>
-
 
 		<dependency>
 			<groupId>org.testcontainers</groupId>

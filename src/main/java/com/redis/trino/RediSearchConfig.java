@@ -26,6 +26,7 @@ package com.redis.trino;
 import java.time.Duration;
 import java.util.Optional;
 
+import javax.validation.constraints.Min;
 import javax.validation.constraints.NotNull;
 import javax.validation.constraints.Pattern;
 
@@ -44,15 +45,16 @@ public class RediSearchConfig {
 	private Optional<String> uri = Optional.empty();
 	private Optional<String> username = Optional.empty();
 	private Optional<String> password = Optional.empty();
-	private boolean caseInsensitiveNameMatching;
 	private boolean insecure;
 	private boolean tls;
-	private long timeout = 0; // Use Lettuce default
+	private long timeout; // Use Lettuce default
+	private boolean caseInsensitiveNameMatching;
 	private long defaultLimit = DEFAULT_LIMIT;
-	private long cursorCount = 0; // Use RediSearch default
+	private long cursorCount; // Use RediSearch default
 	private long tableCacheExpiration = DEFAULT_TABLE_CACHE_EXPIRATION.toSeconds();
 	private long tableCacheRefresh = DEFAULT_TABLE_CACHE_REFRESH.toSeconds();
 
+	@Min(0)
 	public long getCursorCount() {
 		return cursorCount;
 	}
@@ -178,6 +180,7 @@ public class RediSearchConfig {
 		return this;
 	}
 
+	@Min(0)
 	public long getTimeout() {
 		return timeout;
 	}
@@ -188,4 +191,5 @@ public class RediSearchConfig {
 		this.timeout = timeout;
 		return this;
 	}
+
 }

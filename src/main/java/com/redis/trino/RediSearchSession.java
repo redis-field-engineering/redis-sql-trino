@@ -38,7 +38,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -46,22 +45,19 @@ import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.UncheckedExecutionException;
-import com.redis.lettucemod.RedisModulesUtils;
 import com.redis.lettucemod.api.StatefulRedisModulesConnection;
-import com.redis.lettucemod.search.AggregateOptions;
 import com.redis.lettucemod.search.AggregateWithCursorResults;
 import com.redis.lettucemod.search.CreateOptions;
-import com.redis.lettucemod.search.CursorOptions;
 import com.redis.lettucemod.search.Document;
 import com.redis.lettucemod.search.Field;
-import com.redis.lettucemod.search.Group;
 import com.redis.lettucemod.search.IndexInfo;
-import com.redis.lettucemod.search.Limit;
-import com.redis.lettucemod.search.SearchOptions;
-import com.redis.lettucemod.search.SearchOptions.Builder;
 import com.redis.lettucemod.search.SearchResults;
+import com.redis.lettucemod.util.RedisModulesUtils;
+import com.redis.trino.RediSearchTranslator.Aggregation;
+import com.redis.trino.RediSearchTranslator.Search;
 
 import io.airlift.log.Logger;
+import io.lettuce.core.AbstractRedisClient;
 import io.lettuce.core.RedisURI;
 import io.trino.spi.HostAddress;
 import io.trino.spi.TrinoException;
@@ -92,18 +88,21 @@ public class RediSearchSession {
 	private static final Logger log = Logger.get(RediSearchSession.class);
 
 	private final TypeManager typeManager;
+	private final AbstractRedisClient client;
 	private final StatefulRedisModulesConnection<String, String> connection;
+	private final RediSearchTranslator translator;
 	private final RediSearchConfig config;
 	private final LoadingCache<SchemaTableName, RediSearchTable> tableCache;
 
-	public RediSearchSession(TypeManager typeManager, StatefulRedisModulesConnection<String, String> connection,
-			RediSearchConfig config) {
+	public RediSearchSession(TypeManager typeManager, AbstractRedisClient client, RediSearchConfig config) {
 		this.typeManager = requireNonNull(typeManager, "typeManager is null");
-		this.connection = requireNonNull(connection, "connection is null");
+		this.client = requireNonNull(client, "client is null");
+		this.connection = RedisModulesUtils.connection(client);
 		this.config = requireNonNull(config, "config is null");
 		this.tableCache = CacheBuilder.newBuilder().expireAfterWrite(config.getTableCacheExpiration(), TimeUnit.SECONDS)
 				.refreshAfterWrite(config.getTableCacheRefresh(), TimeUnit.SECONDS)
 				.build(CacheLoader.from(this::loadTableSchema));
+		this.translator = new RediSearchTranslator(config);
 	}
 
 	public StatefulRedisModulesConnection<String, String> getConnection() {
@@ -116,6 +115,8 @@ public class RediSearchSession {
 
 	public void shutdown() {
 		connection.close();
+		client.shutdown();
+		client.getResources().shutdown();
 	}
 
 	public List<HostAddress> getAddresses() {
@@ -147,7 +148,7 @@ public class RediSearchSession {
 		String tableName = schemaTableName.getTableName();
 		if (!connection.sync().ftList().contains(tableName)) {
 			List<Field<String>> fields = columns.stream().filter(c -> !c.getName().equals("_id"))
-					.map(c -> buildField(c.getName(), c.getType())).collect(Collectors.toList());
+					.map(c -> buildField(c.getName(), c.getType())).toList();
 			CreateOptions.Builder<String, String> options = CreateOptions.<String, String>builder();
 			options.prefix(tableName + ":");
 			connection.sync().ftCreate(tableName, options.build(), fields.toArray(Field[]::new));
@@ -247,29 +248,16 @@ public class RediSearchSession {
 
 	public SearchResults<String, String> search(RediSearchTableHandle tableHandle,
 			List<RediSearchColumnHandle> columns) {
-		String index = index(tableHandle);
-		String query = RediSearchQueryBuilder.buildQuery(tableHandle.getConstraint());
-		Builder<String, String> options = SearchOptions.builder();
-		options.limit(Limit.offset(0).num(limit(tableHandle)));
-		options.returnFields(columns.stream().map(RediSearchColumnHandle::getName).toArray(String[]::new));
-		log.info("Running search on index %s with query '%s'", index, query);
-		return connection.sync().ftSearch(index, query, options.build());
+		Search search = translator.search(tableHandle, columns);
+		log.info("Running %s", search);
+		return connection.sync().ftSearch(search.getIndex(), search.getQuery(), search.getOptions());
 	}
 
 	public AggregateWithCursorResults<String> aggregate(RediSearchTableHandle table) {
-		String index = index(table);
-		String query = RediSearchQueryBuilder.buildQuery(table.getConstraint());
-		AggregateOptions.Builder<String, String> options = AggregateOptions.builder();
-		options.operation(Limit.offset(0).num(limit(table)));
-		Optional<Group> group = RediSearchQueryBuilder.group(table.getTermAggregations(),
-				table.getMetricAggregations());
-		group.ifPresent(options::operation);
-		log.info("Running aggregation on index %s with query '%s' and %s", index, query, options.build());
-		CursorOptions.Builder cursorOptions = CursorOptions.builder();
-		if (config.getCursorCount() > 0) {
-			cursorOptions.count(config.getCursorCount());
-		}
-		return connection.sync().ftAggregate(index, query, cursorOptions.build(), options.build());
+		Aggregation aggregation = translator.aggregate(table);
+		log.info("Running %s", aggregation);
+		return connection.sync().ftAggregate(aggregation.getIndex(), aggregation.getQuery(),
+				aggregation.getCursorOptions(), aggregation.getOptions());
 	}
 
 	public AggregateWithCursorResults<String> cursorRead(RediSearchTableHandle tableHandle, long cursor) {
@@ -282,13 +270,6 @@ public class RediSearchSession {
 
 	private String index(RediSearchTableHandle tableHandle) {
 		return tableHandle.getSchemaTableName().getTableName();
-	}
-
-	private long limit(RediSearchTableHandle tableHandle) {
-		if (tableHandle.getLimit().isPresent()) {
-			return tableHandle.getLimit().getAsLong();
-		}
-		return config.getDefaultLimit();
 	}
 
 	private Field<String> buildField(String columnName, Type columnType) {

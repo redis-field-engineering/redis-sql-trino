@@ -24,7 +24,6 @@
 package com.redis.trino;
 
 import static com.google.common.base.Verify.verify;
-import static java.util.stream.Collectors.toList;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -63,8 +62,8 @@ public class RediSearchPageSourceAggregate implements ConnectorPageSource {
 	public RediSearchPageSourceAggregate(RediSearchSession rediSearchSession, RediSearchTableHandle tableHandle,
 			List<RediSearchColumnHandle> columns) {
 		this.iterator = new CursorIterator(rediSearchSession, tableHandle);
-		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).collect(toList());
-		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType).collect(toList());
+		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).toList();
+		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType).toList();
 		this.currentDoc = null;
 		this.pageBuilder = new PageBuilder(columnTypes);
 	}
@@ -126,7 +125,7 @@ public class RediSearchPageSourceAggregate implements ConnectorPageSource {
 		try {
 			iterator.close();
 		} catch (Exception e) {
-			log.error("Could not close cursor iterator", e);
+			log.error(e, "Could not close cursor iterator");
 		}
 	}
 
@@ -166,6 +165,9 @@ public class RediSearchPageSourceAggregate implements ConnectorPageSource {
 
 		@Override
 		public void close() throws Exception {
+			if (cursor == 0) {
+				return;
+			}
 			session.cursorDelete(tableHandle, cursor);
 		}
 
