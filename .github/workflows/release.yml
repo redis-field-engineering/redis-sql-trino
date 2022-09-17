@@ -32,9 +32,7 @@ jobs:
         run: |
           VERSION=${{ github.event.inputs.version }}
           sed -i -e "s/^\:project-version\:\ .*/:project-version: $VERSION/g" README.adoc
-          sed -i -e "s/^ARG TRINO_VERSION=.*/ARG TRINO_VERSION=$VERSION/g" Dockerfile
           git add README.adoc
-          git add Dockerfile
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --global user.name "GitHub Action"
           git commit -a -m "Releasing version $VERSION"

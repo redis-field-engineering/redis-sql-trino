@@ -90,8 +90,8 @@ public class RediSearchPageSourceResultWriter {
 		if (type.equals(REAL)) {
 			return floatToIntBits((Float.parseFloat(value)));
 		}
-		if (type instanceof DecimalType) {
-			return encodeShortScaledValue(new BigDecimal(value), ((DecimalType) type).getScale());
+		if (type instanceof DecimalType decimalType) {
+			return encodeShortScaledValue(new BigDecimal(value), decimalType.getScale());
 		}
 		if (type.equals(DATE)) {
 			return LocalDate.from(DateTimeFormatter.ISO_DATE.parse(value)).toEpochDay();
@@ -109,10 +109,10 @@ public class RediSearchPageSourceResultWriter {
 	private void writeSlice(BlockBuilder output, Type type, String value) {
 		if (type instanceof VarcharType) {
 			type.writeSlice(output, utf8Slice(value));
-		} else if (type instanceof CharType) {
-			type.writeSlice(output, truncateToLengthAndTrimSpaces(utf8Slice(value), ((CharType) type)));
-		} else if (type instanceof DecimalType) {
-			type.writeObject(output, encodeScaledValue(new BigDecimal(value), ((DecimalType) type).getScale()));
+		} else if (type instanceof CharType charType) {
+			type.writeSlice(output, truncateToLengthAndTrimSpaces(utf8Slice(value), charType));
+		} else if (type instanceof DecimalType decimalType) {
+			type.writeObject(output, encodeScaledValue(new BigDecimal(value), decimalType.getScale()));
 		} else if (type.getBaseName().equals(JSON)) {
 			type.writeSlice(output, io.trino.plugin.base.util.JsonTypeUtil.jsonParse(utf8Slice(value)));
 		} else {

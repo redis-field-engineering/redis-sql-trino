@@ -32,11 +32,7 @@ import com.google.inject.Binder;
 import com.google.inject.Module;
 import com.google.inject.Provides;
 import com.google.inject.Scopes;
-import com.redis.lettucemod.util.RedisClientBuilder;
-import com.redis.lettucemod.util.RedisClientOptions;
-import com.redis.lettucemod.util.RedisClientOptions.Builder;
 
-import io.lettuce.core.SslVerifyMode;
 import io.trino.spi.type.TypeManager;
 
 public class RediSearchClientModule implements Module {
@@ -55,19 +51,7 @@ public class RediSearchClientModule implements Module {
 	@Provides
 	public static RediSearchSession createRediSearchSession(TypeManager typeManager, RediSearchConfig config) {
 		requireNonNull(config, "config is null");
-		Builder options = RedisClientOptions.builder();
-		options.uriString(config.getUri());
-		options.ssl(config.isTls());
-		options.username(config.getUsername());
-		options.password(config.getPassword());
-		if (config.isInsecure()) {
-			options.sslVerifyMode(SslVerifyMode.NONE);
-		}
-		if (config.getTimeout() > 0) {
-			options.timeoutInSeconds(config.getTimeout());
-		}
-		RedisClientBuilder clientBuilder = RedisClientBuilder.create(options.build());
-		return new RediSearchSession(typeManager, clientBuilder.client(), config);
+		return new RediSearchSession(typeManager, config);
 	}
 
 }

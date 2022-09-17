@@ -52,13 +52,16 @@ import com.redis.lettucemod.search.Document;
 import com.redis.lettucemod.search.Field;
 import com.redis.lettucemod.search.IndexInfo;
 import com.redis.lettucemod.search.SearchResults;
+import com.redis.lettucemod.util.ClientBuilder;
 import com.redis.lettucemod.util.RedisModulesUtils;
+import com.redis.lettucemod.util.RedisURIBuilder;
 import com.redis.trino.RediSearchTranslator.Aggregation;
 import com.redis.trino.RediSearchTranslator.Search;
 
 import io.airlift.log.Logger;
 import io.lettuce.core.AbstractRedisClient;
 import io.lettuce.core.RedisURI;
+import io.lettuce.core.SslVerifyMode;
 import io.trino.spi.HostAddress;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ColumnMetadata;
@@ -88,21 +91,47 @@ public class RediSearchSession {
 	private static final Logger log = Logger.get(RediSearchSession.class);
 
 	private final TypeManager typeManager;
+	private final RediSearchConfig config;
+	private final RediSearchTranslator translator;
 	private final AbstractRedisClient client;
 	private final StatefulRedisModulesConnection<String, String> connection;
-	private final RediSearchTranslator translator;
-	private final RediSearchConfig config;
 	private final LoadingCache<SchemaTableName, RediSearchTable> tableCache;
 
-	public RediSearchSession(TypeManager typeManager, AbstractRedisClient client, RediSearchConfig config) {
+	public RediSearchSession(TypeManager typeManager, RediSearchConfig config) {
 		this.typeManager = requireNonNull(typeManager, "typeManager is null");
-		this.client = requireNonNull(client, "client is null");
-		this.connection = RedisModulesUtils.connection(client);
 		this.config = requireNonNull(config, "config is null");
+		this.translator = new RediSearchTranslator(config);
+		this.client = client(config);
+		this.connection = RedisModulesUtils.connection(client);
 		this.tableCache = CacheBuilder.newBuilder().expireAfterWrite(config.getTableCacheExpiration(), TimeUnit.SECONDS)
 				.refreshAfterWrite(config.getTableCacheRefresh(), TimeUnit.SECONDS)
 				.build(CacheLoader.from(this::loadTableSchema));
-		this.translator = new RediSearchTranslator(config);
+
+	}
+
+	private AbstractRedisClient client(RediSearchConfig config) {
+		ClientBuilder builder = ClientBuilder.create(redisURI(config));
+		builder.cluster(config.isCluster());
+		builder.key(config.getKeyPath());
+		config.getCertPath().ifPresent(builder::keyCert);
+		config.getKeyPassword().ifPresent(p -> builder.keyPassword(p.toCharArray()));
+		builder.trustManager(config.getCaCertPath());
+		return builder.build();
+	}
+
+	private RedisURI redisURI(RediSearchConfig config) {
+		RedisURIBuilder uri = RedisURIBuilder.create();
+		uri.uriString(config.getUri());
+		uri.ssl(config.isTls());
+		config.getUsername().ifPresent(uri::username);
+		config.getPassword().ifPresent(p -> uri.password(p.toCharArray()));
+		if (config.isInsecure()) {
+			uri.sslVerifyMode(SslVerifyMode.NONE);
+		}
+		if (config.getTimeout() > 0) {
+			uri.timeoutInSeconds(config.getTimeout());
+		}
+		return uri.build();
 	}
 
 	public StatefulRedisModulesConnection<String, String> getConnection() {

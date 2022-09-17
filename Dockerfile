@@ -12,7 +12,7 @@ COPY --from=builder --chown=trino:trino /root/trino-redisearch/target/trino-redi
 
 USER root:root
 RUN apt-get update
-RUN apt-get install -y -q gettext
+RUN apt-get install -y -q gettext uuid-runtime
 COPY --chown=trino:trino docker/etc /etc/trino
 COPY docker/template docker/setup.sh /tmp/
 

@@ -24,7 +24,6 @@
 package com.redis.trino;
 
 import static com.google.common.base.Verify.verify;
-import static java.util.stream.Collectors.toList;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -58,8 +57,8 @@ public class RediSearchPageSource implements ConnectorPageSource {
 
 	public RediSearchPageSource(RediSearchSession rediSearchSession, RediSearchTableHandle tableHandle,
 			List<RediSearchColumnHandle> columns) {
-		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).collect(toList());
-		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType).collect(toList());
+		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).toList();
+		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType).toList();
 		this.cursor = rediSearchSession.search(tableHandle, columns).iterator();
 		this.currentDoc = null;
 		this.pageBuilder = new PageBuilder(columnTypes);

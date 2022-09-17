@@ -23,6 +23,7 @@
  */
 package com.redis.trino;
 
+import java.io.File;
 import java.time.Duration;
 import java.util.Optional;
 
@@ -33,6 +34,7 @@ import javax.validation.constraints.Pattern;
 import io.airlift.configuration.Config;
 import io.airlift.configuration.ConfigDescription;
 import io.airlift.configuration.ConfigSecuritySensitive;
+import io.airlift.configuration.validation.FileExists;
 
 public class RediSearchConfig {
 
@@ -46,13 +48,18 @@ public class RediSearchConfig {
 	private Optional<String> username = Optional.empty();
 	private Optional<String> password = Optional.empty();
 	private boolean insecure;
-	private boolean tls;
 	private long timeout; // Use Lettuce default
 	private boolean caseInsensitiveNameMatching;
 	private long defaultLimit = DEFAULT_LIMIT;
 	private long cursorCount; // Use RediSearch default
 	private long tableCacheExpiration = DEFAULT_TABLE_CACHE_EXPIRATION.toSeconds();
 	private long tableCacheRefresh = DEFAULT_TABLE_CACHE_REFRESH.toSeconds();
+	private boolean cluster;
+	private boolean tls;
+	private File caCertPath;
+	private File keyPath;
+	private File certPath;
+	private String keyPassword;
 
 	@Min(0)
 	public long getCursorCount() {
@@ -169,17 +176,6 @@ public class RediSearchConfig {
 		return this;
 	}
 
-	public boolean isTls() {
-		return tls;
-	}
-
-	@Config("redisearch.tls")
-	@ConfigDescription("Establish a secure TLS connection")
-	public RediSearchConfig setTls(boolean tls) {
-		this.tls = tls;
-		return this;
-	}
-
 	@Min(0)
 	public long getTimeout() {
 		return timeout;
@@ -189,6 +185,69 @@ public class RediSearchConfig {
 	@ConfigDescription("Redis command timeout in seconds")
 	public RediSearchConfig setTimeout(long timeout) {
 		this.timeout = timeout;
+		return this;
+	}
+
+	public boolean isTls() {
+		return tls;
+	}
+
+	@Config("redisearch.tls.enabled")
+	@ConfigDescription("Establish a secure TLS connection")
+	public RediSearchConfig setTls(boolean tls) {
+		this.tls = tls;
+		return this;
+	}
+
+	public boolean isCluster() {
+		return cluster;
+	}
+
+	@Config("redisearch.cluster")
+	@ConfigDescription("Connect to a Redis Cluster")
+	public RediSearchConfig setCluster(boolean cluster) {
+		this.cluster = cluster;
+		return this;
+	}
+
+	public Optional<@FileExists File> getCaCertPath() {
+		return Optional.ofNullable(caCertPath);
+	}
+
+	@Config("redisearch.tls.ca-cert-path")
+	public RediSearchConfig setCaCertPath(File path) {
+		this.caCertPath = path;
+		return this;
+	}
+
+	public Optional<@FileExists File> getCertPath() {
+		return Optional.ofNullable(certPath);
+	}
+
+	@Config("redisearch.tls.cert-path")
+	public RediSearchConfig setCertPath(File path) {
+		this.certPath = path;
+		return this;
+	}
+
+	public Optional<@FileExists File> getKeyPath() {
+		return Optional.ofNullable(keyPath);
+	}
+
+	@Config("redisearch.tls.key-path")
+	public RediSearchConfig setKeyPath(File path) {
+		this.keyPath = path;
+		return this;
+	}
+
+	public Optional<String> getKeyPassword() {
+		return Optional.ofNullable(keyPassword);
+	}
+
+	@Config("redisearch.tls.key-password")
+	@ConfigSecuritySensitive
+	public RediSearchConfig setKeyPassword(String password) {
+		this.keyPassword = password;
 		return this;
 	}
 

@@ -16,7 +16,7 @@
 
 	<properties>
 		<trino.version>395</trino.version>
-		<lettucemod.version>3.1.2</lettucemod.version>
+		<lettucemod.version>3.1.5</lettucemod.version>
 		<lettuce.version>6.2.0.RELEASE</lettuce.version>
 		<testcontainers-redis.version>1.6.2</testcontainers-redis.version>
 		<ulid.version>5.0.0</ulid.version>
@@ -366,5 +366,30 @@
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>0.8.8</version>
+				<executions>
+					<execution>
+						<id>prepare-agent</id>
+						<goals>
+							<goal>prepare-agent</goal>
+						</goals>
+					</execution>
+					<execution>
+						<id>report</id>
+						<phase>test</phase>
+						<goals>
+							<goal>report</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+		</plugins>
+	</build>
 
 </project>

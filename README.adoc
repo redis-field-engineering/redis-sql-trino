@@ -3,7 +3,7 @@
 :project-owner:   redis-field-engineering
 :project-name:    redis-sql
 :project-group:   com.redis
-:project-version: 393
+:project-version: 0.2.4-SNAPSHOT
 :artifact-id:     trino-redisearch
 :codecov-token:   CQFF495IPH
 

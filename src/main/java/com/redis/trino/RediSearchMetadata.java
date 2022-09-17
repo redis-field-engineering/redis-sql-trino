@@ -25,9 +25,7 @@ package com.redis.trino;
 
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
-import static com.google.common.collect.ImmutableList.toImmutableList;
 import static java.util.Objects.requireNonNull;
-import static java.util.stream.Collectors.toList;
 
 import java.util.Collection;
 import java.util.List;
@@ -88,7 +86,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 	@Override
 	public List<String> listSchemaNames(ConnectorSession session) {
-		return ImmutableList.of(schemaName);
+		return List.of(schemaName);
 	}
 
 	@Override
@@ -152,7 +150,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		if (prefix.getTable().isEmpty()) {
 			return listTables(session, prefix.getSchema());
 		}
-		return ImmutableList.of(prefix.toSchemaTableName());
+		return List.of(prefix.toSchemaTableName());
 	}
 
 	@Override
@@ -196,7 +194,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		setRollback(() -> rediSearchSession.dropTable(tableMetadata.getTable()));
 
 		return new RediSearchOutputTableHandle(tableMetadata.getTable(),
-				columns.stream().filter(c -> !c.isHidden()).collect(toList()));
+				columns.stream().filter(c -> !c.isHidden()).toList());
 	}
 
 	@Override
@@ -217,7 +215,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		List<RediSearchColumnHandle> columns = rediSearchSession.getTable(table.getSchemaTableName()).getColumns();
 
 		return new RediSearchInsertTableHandle(table.getSchemaTableName(),
-				columns.stream().filter(column -> !column.isHidden()).collect(toImmutableList()));
+				columns.stream().filter(column -> !column.isHidden()).toList());
 	}
 
 	@Override
@@ -231,7 +229,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	public ConnectorTableProperties getTableProperties(ConnectorSession session, ConnectorTableHandle table) {
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
 		return new ConnectorTableProperties(handle.getConstraint(), Optional.empty(), Optional.empty(),
-				Optional.empty(), ImmutableList.of());
+				Optional.empty(), List.of());
 	}
 
 	@Override
@@ -334,15 +332,14 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	private ConnectorTableMetadata getTableMetadata(ConnectorSession session, SchemaTableName tableName) {
 		RediSearchTableHandle tableHandle = rediSearchSession.getTable(tableName).getTableHandle();
 
-		List<ColumnMetadata> columns = ImmutableList
-				.copyOf(getColumnHandles(session, tableHandle).values().stream().map(RediSearchColumnHandle.class::cast)
-						.map(RediSearchColumnHandle::toColumnMetadata).collect(toList()));
+		List<ColumnMetadata> columns = ImmutableList.copyOf(getColumnHandles(session, tableHandle).values().stream()
+				.map(RediSearchColumnHandle.class::cast).map(RediSearchColumnHandle::toColumnMetadata).toList());
 
 		return new ConnectorTableMetadata(tableName, columns);
 	}
 
 	private static List<RediSearchColumnHandle> buildColumnHandles(ConnectorTableMetadata tableMetadata) {
 		return tableMetadata.getColumns().stream()
-				.map(m -> new RediSearchColumnHandle(m.getName(), m.getType(), m.isHidden())).collect(toList());
+				.map(m -> new RediSearchColumnHandle(m.getName(), m.getType(), m.isHidden())).toList();
 	}
 }

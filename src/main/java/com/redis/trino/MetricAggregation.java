@@ -45,6 +45,7 @@ import io.trino.spi.expression.Variable;
 import io.trino.spi.type.Type;
 
 public class MetricAggregation {
+
 	public static final String MAX = "max";
 	public static final String MIN = "min";
 	public static final String AVG = "avg";

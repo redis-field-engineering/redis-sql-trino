@@ -101,7 +101,7 @@ public final class RediSearchQueryRunner {
 				table.getTableName().toLowerCase(ENGLISH), trinoClient.getServer(), trinoClient.getDefaultSession());
 		loader.execute(format("SELECT * from %s",
 				new QualifiedObjectName(TPCH_SCHEMA, TINY_SCHEMA_NAME, table.getTableName().toLowerCase(ENGLISH))));
-		LOG.info("Imported %s in %s s", table.getTableName(), Duration.ofNanos(System.nanoTime()-start).toSeconds());
+		LOG.info("Imported %s in %s s", table.getTableName(), Duration.ofNanos(System.nanoTime() - start).toSeconds());
 	}
 
 	public static Session createSession() {
