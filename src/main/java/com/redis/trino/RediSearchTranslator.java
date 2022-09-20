@@ -40,6 +40,8 @@ import io.trino.spi.HostAddress;
 
 public class RediSearchTranslator {
 
+	private final RediSearchQueryBuilder queryBuilder = new RediSearchQueryBuilder();
+
 	private final RediSearchConfig config;
 
 	public RediSearchTranslator(RediSearchConfig config) {
@@ -222,7 +224,7 @@ public class RediSearchTranslator {
 
 	public Search search(RediSearchTableHandle tableHandle, List<RediSearchColumnHandle> columns) {
 		String index = index(tableHandle);
-		String query = RediSearchQueryBuilder.buildQuery(tableHandle.getConstraint(), tableHandle.getWildcards());
+		String query = queryBuilder.buildQuery(tableHandle.getConstraint(), tableHandle.getWildcards());
 		Builder<String, String> options = SearchOptions.builder();
 		options.limit(Limit.offset(0).num(limit(tableHandle)));
 		options.returnFields(columns.stream().map(RediSearchColumnHandle::getName).toArray(String[]::new));
@@ -231,9 +233,9 @@ public class RediSearchTranslator {
 
 	public Aggregation aggregate(RediSearchTableHandle table) {
 		String index = index(table);
-		String query = RediSearchQueryBuilder.buildQuery(table.getConstraint(), table.getWildcards());
+		String query = queryBuilder.buildQuery(table.getConstraint(), table.getWildcards());
 		AggregateOptions.Builder<String, String> builder = AggregateOptions.builder();
-		RediSearchQueryBuilder.group(table).ifPresent(builder::operation);
+		queryBuilder.group(table).ifPresent(builder::operation);
 		builder.operation(Limit.offset(0).num(limit(table)));
 		AggregateOptions<String, String> options = builder.build();
 		CursorOptions.Builder cursorOptions = CursorOptions.builder();

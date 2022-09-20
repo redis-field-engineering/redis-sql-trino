@@ -273,23 +273,6 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			ConnectorTableHandle table, Constraint constraint) {
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
 
-		Map<ColumnHandle, Domain> supported = new HashMap<>();
-		Map<ColumnHandle, Domain> unsupported = new HashMap<>();
-		Map<ColumnHandle, Domain> domains = constraint.getSummary().getDomains()
-				.orElseThrow(() -> new IllegalArgumentException("constraint summary is NONE"));
-		for (Map.Entry<ColumnHandle, Domain> entry : domains.entrySet()) {
-			RediSearchColumnHandle column = (RediSearchColumnHandle) entry.getKey();
-
-			if (column.isSupportsPredicates()) {
-				supported.put(column, entry.getValue());
-			} else {
-				unsupported.put(column, entry.getValue());
-			}
-		}
-
-		TupleDomain<ColumnHandle> oldDomain = handle.getConstraint();
-		TupleDomain<ColumnHandle> newDomain = oldDomain.intersect(TupleDomain.withColumnDomains(supported));
-
 		ConnectorExpression oldExpression = constraint.getExpression();
 		Map<String, String> newWildcards = new HashMap<>(handle.getWildcards());
 		List<ConnectorExpression> expressions = ConnectorExpressions.extractConjuncts(constraint.getExpression());
@@ -319,6 +302,22 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			notHandledExpressions.add(expression);
 		}
 
+		Map<ColumnHandle, Domain> supported = new HashMap<>();
+		Map<ColumnHandle, Domain> unsupported = new HashMap<>();
+		Map<ColumnHandle, Domain> domains = constraint.getSummary().getDomains()
+				.orElseThrow(() -> new IllegalArgumentException("constraint summary is NONE"));
+		for (Map.Entry<ColumnHandle, Domain> entry : domains.entrySet()) {
+			RediSearchColumnHandle column = (RediSearchColumnHandle) entry.getKey();
+
+			if (column.isSupportsPredicates() && !newWildcards.containsKey(column.getName())) {
+				supported.put(column, entry.getValue());
+			} else {
+				unsupported.put(column, entry.getValue());
+			}
+		}
+
+		TupleDomain<ColumnHandle> oldDomain = handle.getConstraint();
+		TupleDomain<ColumnHandle> newDomain = oldDomain.intersect(TupleDomain.withColumnDomains(supported));
 		ConnectorExpression newExpression = ConnectorExpressions.and(notHandledExpressions);
 		if (oldDomain.equals(newDomain) && oldExpression.equals(newExpression)) {
 			return Optional.empty();

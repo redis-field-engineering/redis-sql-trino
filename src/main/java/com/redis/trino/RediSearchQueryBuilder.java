@@ -44,6 +44,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.primitives.Primitives;
 import com.google.common.primitives.Shorts;
 import com.google.common.primitives.SignedBytes;
+import com.redis.lettucemod.search.Field;
 import com.redis.lettucemod.search.Group;
 import com.redis.lettucemod.search.Reducer;
 import com.redis.lettucemod.search.Reducers.Avg;
@@ -78,14 +79,11 @@ public class RediSearchQueryBuilder {
 			(alias, field) -> Avg.property(field).as(alias).build(), MetricAggregation.COUNT,
 			(alias, field) -> Count.as(alias));
 
-	private RediSearchQueryBuilder() {
-	}
-
-	public static String buildQuery(TupleDomain<ColumnHandle> tupleDomain) {
+	public String buildQuery(TupleDomain<ColumnHandle> tupleDomain) {
 		return buildQuery(tupleDomain, Map.of());
 	}
 
-	public static String buildQuery(TupleDomain<ColumnHandle> tupleDomain, Map<String, String> wildcards) {
+	public String buildQuery(TupleDomain<ColumnHandle> tupleDomain, Map<String, String> wildcards) {
 		List<Node> nodes = new ArrayList<>();
 		Optional<Map<ColumnHandle, Domain>> domains = tupleDomain.getDomains();
 		if (domains.isPresent()) {
@@ -94,7 +92,7 @@ public class RediSearchQueryBuilder {
 				Domain domain = entry.getValue();
 				checkArgument(!domain.isNone(), "Unexpected NONE domain for %s", column.getName());
 				if (!domain.isAll()) {
-					buildPredicate(column.getName(), domain, column.getType()).ifPresent(nodes::add);
+					buildPredicate(column, domain).ifPresent(nodes::add);
 				}
 			}
 		}
@@ -107,8 +105,8 @@ public class RediSearchQueryBuilder {
 		return QueryBuilder.intersect(nodes.toArray(new Node[0])).toString();
 	}
 
-	private static Optional<Node> buildPredicate(String name, Domain domain, Type type) {
-		String columnName = RedisModulesUtils.escapeTag(name);
+	private Optional<Node> buildPredicate(RediSearchColumnHandle column, Domain domain) {
+		String columnName = RedisModulesUtils.escapeTag(column.getName());
 		checkArgument(domain.getType().isOrderable(), "Domain type must be orderable");
 		if (domain.getValues().isNone()) {
 			return Optional.empty();
@@ -120,21 +118,29 @@ public class RediSearchQueryBuilder {
 		List<Node> disjuncts = new ArrayList<>();
 		for (Range range : domain.getValues().getRanges().getOrderedRanges()) {
 			if (range.isSingleValue()) {
-				singleValues.add(translateValue(range.getSingleValue(), type));
+				singleValues.add(translateValue(range.getSingleValue(), column.getType()));
 			} else {
 				List<Value> rangeConjuncts = new ArrayList<>();
 				if (!range.isLowUnbounded()) {
-					Object translated = translateValue(range.getLowBoundedValue(), type);
+					Object translated = translateValue(range.getLowBoundedValue(), column.getType());
 					if (translated instanceof Number numericValue) {
 						double doubleValue = numericValue.doubleValue();
 						rangeConjuncts.add(range.isLowInclusive() ? Values.ge(doubleValue) : Values.gt(doubleValue));
+					} else {
+						throw new UnsupportedOperationException(
+								String.format("Range constraint not supported for type %s (column: '%s')",
+										column.getType(), column.getName()));
 					}
 				}
 				if (!range.isHighUnbounded()) {
-					Object translated = translateValue(range.getHighBoundedValue(), type);
+					Object translated = translateValue(range.getHighBoundedValue(), column.getType());
 					if (translated instanceof Number numericValue) {
 						double doubleValue = numericValue.doubleValue();
 						rangeConjuncts.add(range.isHighInclusive() ? Values.le(doubleValue) : Values.lt(doubleValue));
+					} else {
+						throw new UnsupportedOperationException(
+								String.format("Range constraint not supported for type %s (column: '%s')",
+										column.getType(), column.getName()));
 					}
 				}
 				// If conjuncts is null, then the range was ALL, which should already have been
@@ -145,17 +151,18 @@ public class RediSearchQueryBuilder {
 			}
 		}
 		if (singleValues.size() == 1) {
-			disjuncts.add(QueryBuilder.intersect(columnName, value(Iterables.getOnlyElement(singleValues), type)));
+			disjuncts.add(QueryBuilder.intersect(columnName, value(Iterables.getOnlyElement(singleValues), column)));
 		} else if (singleValues.size() > 1) {
 			disjuncts.add(QueryBuilder.union(columnName,
-					singleValues.stream().map(v -> value(v, type)).toArray(Value[]::new)));
+					singleValues.stream().map(v -> value(v, column)).toArray(Value[]::new)));
 		}
 		return Optional.of(QueryBuilder.union(disjuncts.toArray(Node[]::new)));
 	}
 
-	private static Value value(Object trinoNativeValue, Type type) {
+	private Value value(Object trinoNativeValue, RediSearchColumnHandle column) {
 		requireNonNull(trinoNativeValue, "trinoNativeValue is null");
-		requireNonNull(type, "type is null");
+		requireNonNull(column, "column is null");
+		Type type = column.getType();
 		if (type == DOUBLE) {
 			return Values.eq((Double) trinoNativeValue);
 		}
@@ -172,12 +179,15 @@ public class RediSearchQueryBuilder {
 			return Values.eq((Long) trinoNativeValue);
 		}
 		if (type instanceof VarcharType) {
-			return Values.tags(RedisModulesUtils.escapeTag((String) trinoNativeValue));
+			if (column.getFieldType() == Field.Type.TAG) {
+				return Values.tags(RedisModulesUtils.escapeTag((String) trinoNativeValue));
+			}
+			return Values.value((String) trinoNativeValue);
 		}
 		throw new UnsupportedOperationException("Type " + type + " not supported");
 	}
 
-	private static Object translateValue(Object trinoNativeValue, Type type) {
+	private Object translateValue(Object trinoNativeValue, Type type) {
 		requireNonNull(trinoNativeValue, "trinoNativeValue is null");
 		requireNonNull(type, "type is null");
 		checkArgument(Primitives.wrap(type.getJavaType()).isInstance(trinoNativeValue),
@@ -207,20 +217,20 @@ public class RediSearchQueryBuilder {
 		throw new IllegalArgumentException("Unhandled type: " + type);
 	}
 
-	private static Reducer reducer(MetricAggregation aggregation) {
+	private Reducer reducer(MetricAggregation aggregation) {
 		Optional<RediSearchColumnHandle> column = aggregation.getColumnHandle();
 		String field = column.isPresent() ? column.get().getName() : null;
 		return CONVERTERS.get(aggregation.getFunctionName()).apply(aggregation.getAlias(), field);
 	}
 
-	public static Optional<Group> group(RediSearchTableHandle table) {
+	public Optional<Group> group(RediSearchTableHandle table) {
 		List<TermAggregation> terms = table.getTermAggregations();
 		List<MetricAggregation> aggregates = table.getMetricAggregations();
 		List<String> groupFields = new ArrayList<>();
 		if (terms != null && !terms.isEmpty()) {
 			groupFields = terms.stream().map(TermAggregation::getTerm).toList();
 		}
-		List<Reducer> reducers = aggregates.stream().map(RediSearchQueryBuilder::reducer).toList();
+		List<Reducer> reducers = aggregates.stream().map(this::reducer).toList();
 		if (reducers.isEmpty()) {
 			return Optional.empty();
 		}

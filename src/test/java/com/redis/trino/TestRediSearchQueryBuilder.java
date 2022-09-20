@@ -33,7 +33,7 @@ public class TestRediSearchQueryBuilder {
 				ImmutableMap.of(COL1, Domain.create(ValueSet.ofRanges(range(BIGINT, 100L, false, 200L, true)), false),
 						COL2, Domain.singleValue(createUnboundedVarcharType(), utf8Slice("a value"))));
 
-		String query = RediSearchQueryBuilder.buildQuery(tupleDomain);
+		String query = new RediSearchQueryBuilder().buildQuery(tupleDomain);
 		String expected = "((@col1:[(100.0 inf] @col1:[-inf 200.0]) @col2:{a\\ value})";
 		assertEquals(query, expected);
 	}
@@ -43,7 +43,7 @@ public class TestRediSearchQueryBuilder {
 		TupleDomain<ColumnHandle> tupleDomain = TupleDomain.withColumnDomains(ImmutableMap.of(COL2,
 				Domain.create(ValueSet.ofRanges(equal(createUnboundedVarcharType(), utf8Slice("hello")),
 						equal(createUnboundedVarcharType(), utf8Slice("world"))), false)));
-		String query = RediSearchQueryBuilder.buildQuery(tupleDomain);
+		String query = new RediSearchQueryBuilder().buildQuery(tupleDomain);
 		String expected = "(@col2:{world}|@col2:{hello})";
 		assertEquals(query, expected);
 
@@ -54,7 +54,7 @@ public class TestRediSearchQueryBuilder {
 		TupleDomain<ColumnHandle> tupleDomain = TupleDomain.withColumnDomains(ImmutableMap.of(COL1,
 				Domain.create(ValueSet.ofRanges(lessThan(BIGINT, 100L), greaterThan(BIGINT, 200L)), false)));
 
-		String query = RediSearchQueryBuilder.buildQuery(tupleDomain);
+		String query = new RediSearchQueryBuilder().buildQuery(tupleDomain);
 		String expected = "(@col1:[-inf (100.0]|@col1:[(200.0 inf])";
 		assertEquals(query, expected);
 	}
@@ -64,7 +64,7 @@ public class TestRediSearchQueryBuilder {
 		TupleDomain<ColumnHandle> tupleDomain = TupleDomain.withColumnDomains(
 				ImmutableMap.of(COL1, Domain.create(ValueSet.ofRanges(greaterThan(BIGINT, 200L)), true)));
 
-		String query = RediSearchQueryBuilder.buildQuery(tupleDomain);
+		String query = new RediSearchQueryBuilder().buildQuery(tupleDomain);
 		String expected = "@col1:[(200.0 inf]";
 		assertEquals(query, expected);
 	}
@@ -77,7 +77,7 @@ public class TestRediSearchQueryBuilder {
 				equal(DoubleType.DOUBLE, 3.0));
 		TupleDomain<ColumnHandle> tupleDomain = TupleDomain
 				.withColumnDomains(ImmutableMap.of(orderkey, Domain.create(values, false)));
-		String query = RediSearchQueryBuilder.buildQuery(tupleDomain);
+		String query = new RediSearchQueryBuilder().buildQuery(tupleDomain);
 		String expected = "(@orderkey:[1.0 1.0]|@orderkey:[2.0 2.0]|@orderkey:[3.0 3.0])";
 		assertEquals(query, expected);
 	}
