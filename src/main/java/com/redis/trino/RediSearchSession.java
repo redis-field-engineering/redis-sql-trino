@@ -231,7 +231,8 @@ public class RediSearchSession {
 				if (fields.contains(field)) {
 					continue;
 				}
-				columnHandles.add(new RediSearchColumnHandle(field, VarcharType.VARCHAR, false));
+				columnHandles
+						.add(new RediSearchColumnHandle(field, VarcharType.VARCHAR, Field.Type.TEXT, false, false));
 				fields.add(field);
 			}
 		}
@@ -252,7 +253,7 @@ public class RediSearchSession {
 	}
 
 	private RediSearchColumnHandle buildColumnHandle(Field<String> field) {
-		return buildColumnHandle(name(field), field.getType(), false);
+		return buildColumnHandle(name(field), field.getType(), false, true);
 	}
 
 	private String name(Field<String> field) {
@@ -263,8 +264,9 @@ public class RediSearchSession {
 		return as.get();
 	}
 
-	private RediSearchColumnHandle buildColumnHandle(String name, Field.Type type, boolean hidden) {
-		return new RediSearchColumnHandle(name, columnType(type), hidden);
+	private RediSearchColumnHandle buildColumnHandle(String name, Field.Type type, boolean hidden,
+			boolean supportsPredicates) {
+		return new RediSearchColumnHandle(name, columnType(type), type, hidden, supportsPredicates);
 	}
 
 	private Type columnType(Field.Type type) {
@@ -316,7 +318,7 @@ public class RediSearchSession {
 		throw new IllegalArgumentException(String.format("Field type %s not supported", fieldType));
 	}
 
-	private static Field.Type toFieldType(Type type) {
+	public static Field.Type toFieldType(Type type) {
 		if (type.equals(BooleanType.BOOLEAN)) {
 			return Field.Type.NUMERIC;
 		}

@@ -222,7 +222,7 @@ public class RediSearchTranslator {
 
 	public Search search(RediSearchTableHandle tableHandle, List<RediSearchColumnHandle> columns) {
 		String index = index(tableHandle);
-		String query = RediSearchQueryBuilder.buildQuery(tableHandle.getConstraint());
+		String query = RediSearchQueryBuilder.buildQuery(tableHandle.getConstraint(), tableHandle.getWildcards());
 		Builder<String, String> options = SearchOptions.builder();
 		options.limit(Limit.offset(0).num(limit(tableHandle)));
 		options.returnFields(columns.stream().map(RediSearchColumnHandle::getName).toArray(String[]::new));
@@ -231,7 +231,7 @@ public class RediSearchTranslator {
 
 	public Aggregation aggregate(RediSearchTableHandle table) {
 		String index = index(table);
-		String query = RediSearchQueryBuilder.buildQuery(table.getConstraint());
+		String query = RediSearchQueryBuilder.buildQuery(table.getConstraint(), table.getWildcards());
 		AggregateOptions.Builder<String, String> builder = AggregateOptions.builder();
 		RediSearchQueryBuilder.group(table).ifPresent(builder::operation);
 		builder.operation(Limit.offset(0).num(limit(table)));

@@ -38,6 +38,8 @@ public class TestRediSearchPlugin {
 
 	@AfterClass(alwaysRun = true)
 	public void destroy() {
-		server.close();
+		if (server != null) {
+			server.close();
+		}
 	}
 }

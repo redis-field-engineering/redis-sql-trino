@@ -23,29 +23,36 @@
  */
 package com.redis.trino;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import io.trino.spi.connector.ColumnHandle;
-import io.trino.spi.connector.ColumnMetadata;
-import io.trino.spi.type.Type;
+import static com.google.common.base.MoreObjects.toStringHelper;
+import static java.util.Objects.requireNonNull;
 
 import java.util.Objects;
 
-import static com.google.common.base.MoreObjects.toStringHelper;
-import static java.util.Objects.requireNonNull;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.redis.lettucemod.search.Field;
+
+import io.trino.spi.connector.ColumnHandle;
+import io.trino.spi.connector.ColumnMetadata;
+import io.trino.spi.type.Type;
 
 public class RediSearchColumnHandle implements ColumnHandle {
 
 	private final String name;
 	private final Type type;
+	private final Field.Type fieldType;
 	private final boolean hidden;
+	private final boolean supportsPredicates;
 
 	@JsonCreator
 	public RediSearchColumnHandle(@JsonProperty("name") String name, @JsonProperty("columnType") Type type,
-			@JsonProperty("hidden") boolean hidden) {
+			@JsonProperty("fieldType") Field.Type fieldType, @JsonProperty("hidden") boolean hidden,
+			@JsonProperty("supportsPredicates") boolean supportsPredicates) {
 		this.name = requireNonNull(name, "name is null");
 		this.type = requireNonNull(type, "type is null");
+		this.fieldType = requireNonNull(fieldType, "fieldType is null");
 		this.hidden = hidden;
+		this.supportsPredicates = supportsPredicates;
 	}
 
 	@JsonProperty
@@ -58,9 +65,19 @@ public class RediSearchColumnHandle implements ColumnHandle {
 		return type;
 	}
 
+	@JsonProperty("fieldType")
+	public Field.Type getFieldType() {
+		return fieldType;
+	}
+
 	@JsonProperty
 	public boolean isHidden() {
 		return hidden;
+	}
+
+	@JsonProperty
+	public boolean isSupportsPredicates() {
+		return supportsPredicates;
 	}
 
 	public ColumnMetadata toColumnMetadata() {
@@ -69,7 +86,7 @@ public class RediSearchColumnHandle implements ColumnHandle {
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(name, type, hidden);
+		return Objects.hash(name, type, fieldType, hidden, supportsPredicates);
 	}
 
 	@Override
@@ -81,12 +98,13 @@ public class RediSearchColumnHandle implements ColumnHandle {
 			return false;
 		}
 		RediSearchColumnHandle other = (RediSearchColumnHandle) obj;
-		return Objects.equals(name, other.name) && Objects.equals(type, other.type)
-				&& Objects.equals(hidden, other.hidden);
+		return Objects.equals(name, other.name) && Objects.equals(type, other.type) && this.fieldType == other.fieldType
+				&& this.hidden == other.hidden && this.supportsPredicates == other.supportsPredicates;
 	}
 
 	@Override
 	public String toString() {
-		return toStringHelper(this).add("name", name).add("type", type).add("hidden", hidden).toString();
+		return toStringHelper(this).add("name", name).add("type", type).add("fieldType", fieldType)
+				.add("hidden", hidden).add("supportsPredicates", supportsPredicates).toString();
 	}
 }

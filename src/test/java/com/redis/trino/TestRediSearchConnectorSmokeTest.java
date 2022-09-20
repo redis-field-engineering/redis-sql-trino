@@ -186,4 +186,9 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 		return false;
 	}
 
+	@Test
+	public void testLikePredicate() {
+		assertQuery("SELECT name, regionkey FROM nation WHERE name LIKE 'EGY%'");
+	}
+
 }

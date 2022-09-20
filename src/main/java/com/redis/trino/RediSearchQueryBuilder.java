@@ -24,7 +24,6 @@
 package com.redis.trino;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Verify.verify;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.SmallintType.SMALLINT;
@@ -36,6 +35,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
@@ -71,8 +71,8 @@ public class RediSearchQueryBuilder {
 
 	private static final Logger log = Logger.get(RediSearchQueryBuilder.class);
 
-	private static final Map<String, BiFunction<String, String, Reducer>> CONVERTERS = Map.of(
-			MetricAggregation.MAX, (alias, field) -> Max.property(field).as(alias).build(), MetricAggregation.MIN,
+	private static final Map<String, BiFunction<String, String, Reducer>> CONVERTERS = Map.of(MetricAggregation.MAX,
+			(alias, field) -> Max.property(field).as(alias).build(), MetricAggregation.MIN,
 			(alias, field) -> Min.property(field).as(alias).build(), MetricAggregation.SUM,
 			(alias, field) -> Sum.property(field).as(alias).build(), MetricAggregation.AVG,
 			(alias, field) -> Avg.property(field).as(alias).build(), MetricAggregation.COUNT,
@@ -82,6 +82,10 @@ public class RediSearchQueryBuilder {
 	}
 
 	public static String buildQuery(TupleDomain<ColumnHandle> tupleDomain) {
+		return buildQuery(tupleDomain, Map.of());
+	}
+
+	public static String buildQuery(TupleDomain<ColumnHandle> tupleDomain, Map<String, String> wildcards) {
 		List<Node> nodes = new ArrayList<>();
 		Optional<Map<ColumnHandle, Domain>> domains = tupleDomain.getDomains();
 		if (domains.isPresent()) {
@@ -89,11 +93,13 @@ public class RediSearchQueryBuilder {
 				RediSearchColumnHandle column = (RediSearchColumnHandle) entry.getKey();
 				Domain domain = entry.getValue();
 				checkArgument(!domain.isNone(), "Unexpected NONE domain for %s", column.getName());
-				if (domain.isAll()) {
-					continue;
+				if (!domain.isAll()) {
+					buildPredicate(column.getName(), domain, column.getType()).ifPresent(nodes::add);
 				}
-				buildPredicate(column.getName(), domain, column.getType()).ifPresent(nodes::add);
 			}
+		}
+		for (Entry<String, String> wildcard : wildcards.entrySet()) {
+			nodes.add(QueryBuilder.intersect(wildcard.getKey(), wildcard.getValue()));
 		}
 		if (nodes.isEmpty()) {
 			return "*";
@@ -114,37 +120,28 @@ public class RediSearchQueryBuilder {
 		List<Node> disjuncts = new ArrayList<>();
 		for (Range range : domain.getValues().getRanges().getOrderedRanges()) {
 			if (range.isSingleValue()) {
-				Optional<Object> translated = translateValue(range.getSingleValue(), type);
-				if (translated.isEmpty()) {
-					return Optional.empty();
-				}
-				singleValues.add(translated.get());
+				singleValues.add(translateValue(range.getSingleValue(), type));
 			} else {
 				List<Value> rangeConjuncts = new ArrayList<>();
 				if (!range.isLowUnbounded()) {
-					Optional<Object> translated = translateValue(range.getLowBoundedValue(), type);
-					if (translated.isEmpty()) {
-						return Optional.empty();
+					Object translated = translateValue(range.getLowBoundedValue(), type);
+					if (translated instanceof Number numericValue) {
+						double doubleValue = numericValue.doubleValue();
+						rangeConjuncts.add(range.isLowInclusive() ? Values.ge(doubleValue) : Values.gt(doubleValue));
 					}
-					double value = ((Number) translated.get()).doubleValue();
-					rangeConjuncts.add(range.isLowInclusive() ? Values.ge(value) : Values.gt(value));
 				}
 				if (!range.isHighUnbounded()) {
-					Optional<Object> translated = translateValue(range.getHighBoundedValue(), type);
-					if (translated.isEmpty()) {
-						return Optional.empty();
+					Object translated = translateValue(range.getHighBoundedValue(), type);
+					if (translated instanceof Number numericValue) {
+						double doubleValue = numericValue.doubleValue();
+						rangeConjuncts.add(range.isHighInclusive() ? Values.le(doubleValue) : Values.lt(doubleValue));
 					}
-					if (type instanceof VarcharType) {
-						String value = (String) translated.get();
-						return Optional.of(QueryBuilder.disjunct(columnName, Values.tags(value)));
-					}
-					double value = ((Number) translated.get()).doubleValue();
-					rangeConjuncts.add(range.isHighInclusive() ? Values.le(value) : Values.lt(value));
 				}
 				// If conjuncts is null, then the range was ALL, which should already have been
 				// checked for
-				verify(!rangeConjuncts.isEmpty());
-				disjuncts.add(QueryBuilder.intersect(columnName, rangeConjuncts.toArray(Value[]::new)));
+				if (!rangeConjuncts.isEmpty()) {
+					disjuncts.add(QueryBuilder.intersect(columnName, rangeConjuncts.toArray(Value[]::new)));
+				}
 			}
 		}
 		if (singleValues.size() == 1) {
@@ -180,34 +177,34 @@ public class RediSearchQueryBuilder {
 		throw new UnsupportedOperationException("Type " + type + " not supported");
 	}
 
-	private static Optional<Object> translateValue(Object trinoNativeValue, Type type) {
+	private static Object translateValue(Object trinoNativeValue, Type type) {
 		requireNonNull(trinoNativeValue, "trinoNativeValue is null");
 		requireNonNull(type, "type is null");
 		checkArgument(Primitives.wrap(type.getJavaType()).isInstance(trinoNativeValue),
 				"%s (%s) is not a valid representation for %s", trinoNativeValue, trinoNativeValue.getClass(), type);
 
 		if (type == DOUBLE) {
-			return Optional.of(trinoNativeValue);
+			return trinoNativeValue;
 		}
 		if (type == TINYINT) {
-			return Optional.of((long) SignedBytes.checkedCast(((Long) trinoNativeValue)));
+			return (long) SignedBytes.checkedCast(((Long) trinoNativeValue));
 		}
 
 		if (type == SMALLINT) {
-			return Optional.of((long) Shorts.checkedCast(((Long) trinoNativeValue)));
+			return (long) Shorts.checkedCast(((Long) trinoNativeValue));
 		}
 
 		if (type == IntegerType.INTEGER) {
-			return Optional.of((long) toIntExact(((Long) trinoNativeValue)));
+			return (long) toIntExact(((Long) trinoNativeValue));
 		}
 
 		if (type == BIGINT) {
-			return Optional.of(trinoNativeValue);
+			return trinoNativeValue;
 		}
 		if (type instanceof VarcharType) {
-			return Optional.of(((Slice) trinoNativeValue).toStringUtf8());
+			return ((Slice) trinoNativeValue).toStringUtf8();
 		}
-		return Optional.empty();
+		throw new IllegalArgumentException("Unhandled type: " + type);
 	}
 
 	private static Reducer reducer(MetricAggregation aggregation) {

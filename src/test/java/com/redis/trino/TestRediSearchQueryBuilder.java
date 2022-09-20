@@ -12,6 +12,7 @@ import static org.testng.Assert.assertEquals;
 import org.testng.annotations.Test;
 
 import com.google.common.collect.ImmutableMap;
+import com.redis.lettucemod.search.Field;
 
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.predicate.Domain;
@@ -21,9 +22,10 @@ import io.trino.spi.type.DoubleType;
 
 public class TestRediSearchQueryBuilder {
 
-	private static final RediSearchColumnHandle COL1 = new RediSearchColumnHandle("col1", BIGINT, false);
+	private static final RediSearchColumnHandle COL1 = new RediSearchColumnHandle("col1", BIGINT, Field.Type.NUMERIC,
+			false, true);
 	private static final RediSearchColumnHandle COL2 = new RediSearchColumnHandle("col2", createUnboundedVarcharType(),
-			false);
+			Field.Type.TAG, false, true);
 
 	@Test
 	public void testBuildQuery() {
@@ -69,7 +71,8 @@ public class TestRediSearchQueryBuilder {
 
 	@Test
 	public void testBuildQueryInDouble() {
-		RediSearchColumnHandle orderkey = new RediSearchColumnHandle("orderkey", DoubleType.DOUBLE, false);
+		RediSearchColumnHandle orderkey = new RediSearchColumnHandle("orderkey", DoubleType.DOUBLE, Field.Type.NUMERIC,
+				false, true);
 		ValueSet values = ValueSet.ofRanges(equal(DoubleType.DOUBLE, 1.0), equal(DoubleType.DOUBLE, 2.0),
 				equal(DoubleType.DOUBLE, 3.0));
 		TupleDomain<ColumnHandle> tupleDomain = TupleDomain

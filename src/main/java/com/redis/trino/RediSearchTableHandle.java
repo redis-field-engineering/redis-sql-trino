@@ -27,6 +27,7 @@ import static java.util.Objects.requireNonNull;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalLong;
 
@@ -51,10 +52,11 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	// for group by fields
 	private final List<TermAggregation> termAggregations;
 	private final List<MetricAggregation> metricAggregations;
+	private final Map<String, String> wildcards;
 
 	public RediSearchTableHandle(Type type, SchemaTableName schemaTableName) {
 		this(type, schemaTableName, TupleDomain.all(), OptionalLong.empty(), Collections.emptyList(),
-				Collections.emptyList());
+				Collections.emptyList(), Map.of());
 	}
 
 	@JsonCreator
@@ -62,13 +64,15 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 			@JsonProperty("schemaTableName") SchemaTableName schemaTableName,
 			@JsonProperty("constraint") TupleDomain<ColumnHandle> constraint, @JsonProperty("limit") OptionalLong limit,
 			@JsonProperty("aggTerms") List<TermAggregation> termAggregations,
-			@JsonProperty("aggregates") List<MetricAggregation> metricAggregations) {
+			@JsonProperty("aggregates") List<MetricAggregation> metricAggregations,
+			@JsonProperty("wildcards") Map<String, String> wildcards) {
 		this.type = requireNonNull(type, "type is null");
 		this.schemaTableName = requireNonNull(schemaTableName, "schemaTableName is null");
 		this.constraint = requireNonNull(constraint, "constraint is null");
 		this.limit = requireNonNull(limit, "limit is null");
 		this.termAggregations = requireNonNull(termAggregations, "aggTerms is null");
 		this.metricAggregations = requireNonNull(metricAggregations, "aggregates is null");
+		this.wildcards = requireNonNull(wildcards, "wildcards is null");
 	}
 
 	@JsonProperty
@@ -99,6 +103,11 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	@JsonProperty
 	public List<MetricAggregation> getMetricAggregations() {
 		return metricAggregations;
+	}
+
+	@JsonProperty
+	public Map<String, String> getWildcards() {
+		return wildcards;
 	}
 
 	@Override

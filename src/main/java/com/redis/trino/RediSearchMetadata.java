@@ -25,21 +25,33 @@ package com.redis.trino;
 
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
+import static com.google.common.base.Verify.verifyNotNull;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
+import static io.airlift.slice.SliceUtf8.getCodePointAt;
+import static io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
+import static io.trino.spi.expression.StandardFunctions.LIKE_FUNCTION_NAME;
 import static java.util.Objects.requireNonNull;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.IntStream;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.redis.lettucemod.search.Field;
+import com.redis.lettucemod.search.querybuilder.Values;
 import com.redis.trino.RediSearchTableHandle.Type;
 
 import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
+import io.trino.plugin.base.expression.ConnectorExpressions;
 import io.trino.spi.StandardErrorCode;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.AggregateFunction;
@@ -64,8 +76,11 @@ import io.trino.spi.connector.RetryMode;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.SchemaTablePrefix;
 import io.trino.spi.connector.TableNotFoundException;
+import io.trino.spi.expression.Call;
 import io.trino.spi.expression.ConnectorExpression;
+import io.trino.spi.expression.Constant;
 import io.trino.spi.expression.Variable;
+import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.statistics.ComputedStatistics;
 
@@ -74,6 +89,9 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	private static final Logger log = Logger.get(RediSearchMetadata.class);
 
 	private static final String SYNTHETIC_COLUMN_NAME_PREFIX = "syntheticColumn";
+	private static final Set<Integer> REDISEARCH_RESERVED_CHARACTERS = IntStream
+			.of('?', '*', '|', '{', '}', '[', ']', '(', ')', '"', '#', '@', '&', '<', '>', '~').boxed()
+			.collect(toImmutableSet());
 
 	private final RediSearchSession rediSearchSession;
 	private final String schemaName;
@@ -245,10 +263,9 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			return Optional.empty();
 		}
 
-		return Optional.of(new LimitApplicationResult<>(
-				new RediSearchTableHandle(handle.getType(), handle.getSchemaTableName(), handle.getConstraint(),
-						OptionalLong.of(limit), handle.getTermAggregations(), handle.getMetricAggregations()),
-				true, false));
+		return Optional.of(new LimitApplicationResult<>(new RediSearchTableHandle(handle.getType(),
+				handle.getSchemaTableName(), handle.getConstraint(), OptionalLong.of(limit),
+				handle.getTermAggregations(), handle.getMetricAggregations(), handle.getWildcards()), true, false));
 	}
 
 	@Override
@@ -256,16 +273,139 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			ConnectorTableHandle table, Constraint constraint) {
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
 
+		Map<ColumnHandle, Domain> supported = new HashMap<>();
+		Map<ColumnHandle, Domain> unsupported = new HashMap<>();
+		Map<ColumnHandle, Domain> domains = constraint.getSummary().getDomains()
+				.orElseThrow(() -> new IllegalArgumentException("constraint summary is NONE"));
+		for (Map.Entry<ColumnHandle, Domain> entry : domains.entrySet()) {
+			RediSearchColumnHandle column = (RediSearchColumnHandle) entry.getKey();
+
+			if (column.isSupportsPredicates()) {
+				supported.put(column, entry.getValue());
+			} else {
+				unsupported.put(column, entry.getValue());
+			}
+		}
+
 		TupleDomain<ColumnHandle> oldDomain = handle.getConstraint();
-		TupleDomain<ColumnHandle> newDomain = oldDomain.intersect(constraint.getSummary());
-		if (oldDomain.equals(newDomain)) {
+		TupleDomain<ColumnHandle> newDomain = oldDomain.intersect(TupleDomain.withColumnDomains(supported));
+
+		ConnectorExpression oldExpression = constraint.getExpression();
+		Map<String, String> newWildcards = new HashMap<>(handle.getWildcards());
+		List<ConnectorExpression> expressions = ConnectorExpressions.extractConjuncts(constraint.getExpression());
+		List<ConnectorExpression> notHandledExpressions = new ArrayList<>();
+		for (ConnectorExpression expression : expressions) {
+			if (expression instanceof Call call && isSupportedLikeCall(call)) {
+				List<ConnectorExpression> arguments = call.getArguments();
+				String variableName = ((Variable) arguments.get(0)).getName();
+				RediSearchColumnHandle column = (RediSearchColumnHandle) constraint.getAssignments().get(variableName);
+				verifyNotNull(column, "No assignment for %s", variableName);
+				String columnName = column.getName();
+				Object pattern = ((Constant) arguments.get(1)).getValue();
+				Optional<Slice> escape = Optional.empty();
+				if (arguments.size() == 3) {
+					escape = Optional.of((Slice) (((Constant) arguments.get(2)).getValue()));
+				}
+
+				if (!newWildcards.containsKey(columnName) && pattern instanceof Slice slice) {
+					String wildcard = likeToWildcard(slice, escape);
+					if (column.getFieldType() == Field.Type.TAG) {
+						wildcard = Values.tags(wildcard).toString();
+					}
+					newWildcards.put(columnName, wildcard);
+					continue;
+				}
+			}
+			notHandledExpressions.add(expression);
+		}
+
+		ConnectorExpression newExpression = ConnectorExpressions.and(notHandledExpressions);
+		if (oldDomain.equals(newDomain) && oldExpression.equals(newExpression)) {
 			return Optional.empty();
 		}
 
 		handle = new RediSearchTableHandle(handle.getType(), handle.getSchemaTableName(), newDomain, handle.getLimit(),
-				handle.getTermAggregations(), handle.getMetricAggregations());
+				handle.getTermAggregations(), handle.getMetricAggregations(), newWildcards);
 
-		return Optional.of(new ConstraintApplicationResult<>(handle, constraint.getSummary(), false));
+		return Optional.of(new ConstraintApplicationResult<>(handle, TupleDomain.withColumnDomains(unsupported),
+				newExpression, false));
+
+	}
+
+	protected static boolean isSupportedLikeCall(Call call) {
+		if (!LIKE_FUNCTION_NAME.equals(call.getFunctionName())) {
+			return false;
+		}
+
+		List<ConnectorExpression> arguments = call.getArguments();
+		if (arguments.size() < 2 || arguments.size() > 3) {
+			return false;
+		}
+
+		if (!(arguments.get(0) instanceof Variable) || !(arguments.get(1) instanceof Constant)) {
+			return false;
+		}
+
+		if (arguments.size() == 3) {
+			return arguments.get(2) instanceof Constant;
+		}
+
+		return true;
+	}
+
+	private static char getEscapeChar(Slice escape) {
+		String escapeString = escape.toStringUtf8();
+		if (escapeString.length() == 1) {
+			return escapeString.charAt(0);
+		}
+		throw new TrinoException(INVALID_FUNCTION_ARGUMENT, "Escape string must be a single character");
+	}
+
+	protected static String likeToWildcard(Slice pattern, Optional<Slice> escape) {
+		Optional<Character> escapeChar = escape.map(RediSearchMetadata::getEscapeChar);
+		StringBuilder wildcard = new StringBuilder();
+		boolean escaped = false;
+		int position = 0;
+		while (position < pattern.length()) {
+			int currentChar = getCodePointAt(pattern, position);
+			position += 1;
+			checkEscape(!escaped || currentChar == '%' || currentChar == '_' || currentChar == escapeChar.get());
+			if (!escaped && escapeChar.isPresent() && currentChar == escapeChar.get()) {
+				escaped = true;
+			} else {
+				switch (currentChar) {
+				case '%':
+					wildcard.append(escaped ? "%" : "*");
+					escaped = false;
+					break;
+				case '_':
+					wildcard.append(escaped ? "_" : "?");
+					escaped = false;
+					break;
+				case '\\':
+					wildcard.append("\\\\");
+					break;
+				default:
+					// escape special RediSearch characters
+					if (REDISEARCH_RESERVED_CHARACTERS.contains(currentChar)) {
+						wildcard.append('\\');
+					}
+
+					wildcard.appendCodePoint(currentChar);
+					escaped = false;
+				}
+			}
+		}
+
+		checkEscape(!escaped);
+		return wildcard.toString();
+	}
+
+	private static void checkEscape(boolean condition) {
+		if (!condition) {
+			throw new TrinoException(INVALID_FUNCTION_ARGUMENT,
+					"Escape character must be followed by '%', '_' or the escape character itself");
+		}
 	}
 
 	@Override
@@ -291,7 +431,9 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			if (metricAggregation.isEmpty()) {
 				return Optional.empty();
 			}
-			RediSearchColumnHandle newColumn = new RediSearchColumnHandle(colName, function.getOutputType(), false);
+			io.trino.spi.type.Type outputType = function.getOutputType();
+			RediSearchColumnHandle newColumn = new RediSearchColumnHandle(colName, outputType,
+					RediSearchSession.toFieldType(outputType), false, true);
 			projections.add(new Variable(colName, function.getOutputType()));
 			resultAssignments.add(new Assignment(colName, newColumn, function.getOutputType()));
 			metricAggregations.add(metricAggregation.get());
@@ -308,7 +450,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			return Optional.empty();
 		}
 		RediSearchTableHandle tableHandle = new RediSearchTableHandle(Type.AGGREGATE, table.getSchemaTableName(),
-				table.getConstraint(), table.getLimit(), termAggregations.build(), metrics);
+				table.getConstraint(), table.getLimit(), termAggregations.build(), metrics, table.getWildcards());
 		return Optional.of(new AggregationApplicationResult<>(tableHandle, projections.build(),
 				resultAssignments.build(), Map.of(), false));
 	}
@@ -325,7 +467,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		Optional.ofNullable(rollbackAction.getAndSet(null)).ifPresent(Runnable::run);
 	}
 
-	private static SchemaTableName getTableName(ConnectorTableHandle tableHandle) {
+	private SchemaTableName getTableName(ConnectorTableHandle tableHandle) {
 		return ((RediSearchTableHandle) tableHandle).getSchemaTableName();
 	}
 
@@ -338,8 +480,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		return new ConnectorTableMetadata(tableName, columns);
 	}
 
-	private static List<RediSearchColumnHandle> buildColumnHandles(ConnectorTableMetadata tableMetadata) {
-		return tableMetadata.getColumns().stream()
-				.map(m -> new RediSearchColumnHandle(m.getName(), m.getType(), m.isHidden())).toList();
+	private List<RediSearchColumnHandle> buildColumnHandles(ConnectorTableMetadata tableMetadata) {
+		return tableMetadata.getColumns().stream().map(m -> new RediSearchColumnHandle(m.getName(), m.getType(),
+				RediSearchSession.toFieldType(m.getType()), m.isHidden(), true)).toList();
 	}
 }
