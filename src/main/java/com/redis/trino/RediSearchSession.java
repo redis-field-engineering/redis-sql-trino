@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -177,7 +178,7 @@ public class RediSearchSession {
 		String tableName = schemaTableName.getTableName();
 		if (!connection.sync().ftList().contains(tableName)) {
 			List<Field<String>> fields = columns.stream().filter(c -> !c.getName().equals("_id"))
-					.map(c -> buildField(c.getName(), c.getType())).toList();
+					.map(c -> buildField(c.getName(), c.getType())).collect(Collectors.toList());
 			CreateOptions.Builder<String, String> options = CreateOptions.<String, String>builder();
 			options.prefix(tableName + ":");
 			connection.sync().ftCreate(tableName, options.build(), fields.toArray(Field[]::new));

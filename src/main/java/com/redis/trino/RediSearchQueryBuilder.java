@@ -39,6 +39,7 @@ import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
 import com.google.common.primitives.Primitives;
@@ -123,8 +124,8 @@ public class RediSearchQueryBuilder {
 				List<Value> rangeConjuncts = new ArrayList<>();
 				if (!range.isLowUnbounded()) {
 					Object translated = translateValue(range.getLowBoundedValue(), column.getType());
-					if (translated instanceof Number numericValue) {
-						double doubleValue = numericValue.doubleValue();
+					if (translated instanceof Number) {
+						double doubleValue = ((Number) translated).doubleValue();
 						rangeConjuncts.add(range.isLowInclusive() ? Values.ge(doubleValue) : Values.gt(doubleValue));
 					} else {
 						throw new UnsupportedOperationException(
@@ -134,8 +135,8 @@ public class RediSearchQueryBuilder {
 				}
 				if (!range.isHighUnbounded()) {
 					Object translated = translateValue(range.getHighBoundedValue(), column.getType());
-					if (translated instanceof Number numericValue) {
-						double doubleValue = numericValue.doubleValue();
+					if (translated instanceof Number) {
+						double doubleValue = ((Number) translated).doubleValue();
 						rangeConjuncts.add(range.isHighInclusive() ? Values.le(doubleValue) : Values.lt(doubleValue));
 					} else {
 						throw new UnsupportedOperationException(
@@ -228,9 +229,9 @@ public class RediSearchQueryBuilder {
 		List<MetricAggregation> aggregates = table.getMetricAggregations();
 		List<String> groupFields = new ArrayList<>();
 		if (terms != null && !terms.isEmpty()) {
-			groupFields = terms.stream().map(TermAggregation::getTerm).toList();
+			groupFields = terms.stream().map(TermAggregation::getTerm).collect(Collectors.toList());
 		}
-		List<Reducer> reducers = aggregates.stream().map(this::reducer).toList();
+		List<Reducer> reducers = aggregates.stream().map(this::reducer).collect(Collectors.toList());
 		if (reducers.isEmpty()) {
 			return Optional.empty();
 		}

@@ -140,8 +140,8 @@ public class RediSearchPageSink implements ConnectorPageSink {
 		if (type instanceof VarcharType) {
 			return type.getSlice(block, position).toStringUtf8();
 		}
-		if (type instanceof CharType charType) {
-			return padSpaces(type.getSlice(block, position), charType).toStringUtf8();
+		if (type instanceof CharType) {
+			return padSpaces(type.getSlice(block, position), (CharType) type).toStringUtf8();
 		}
 		if (type.equals(VarbinaryType.VARBINARY)) {
 			return new String(type.getSlice(block, position).getBytes());
@@ -162,8 +162,8 @@ public class RediSearchPageSink implements ConnectorPageSink {
 			long millisUtc = unpackMillisUtc(type.getLong(block, position));
 			return String.valueOf(millisUtc);
 		}
-		if (type instanceof DecimalType decimalType) {
-			return readBigDecimal(decimalType, block, position).toPlainString();
+		if (type instanceof DecimalType) {
+			return readBigDecimal((DecimalType) type, block, position).toPlainString();
 		}
 		throw new TrinoException(NOT_SUPPORTED, "unsupported type: " + type);
 	}

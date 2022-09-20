@@ -41,6 +41,7 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import com.google.common.collect.ImmutableList;
@@ -212,7 +213,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		setRollback(() -> rediSearchSession.dropTable(tableMetadata.getTable()));
 
 		return new RediSearchOutputTableHandle(tableMetadata.getTable(),
-				columns.stream().filter(c -> !c.isHidden()).toList());
+				columns.stream().filter(c -> !c.isHidden()).collect(Collectors.toList()));
 	}
 
 	@Override
@@ -233,7 +234,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		List<RediSearchColumnHandle> columns = rediSearchSession.getTable(table.getSchemaTableName()).getColumns();
 
 		return new RediSearchInsertTableHandle(table.getSchemaTableName(),
-				columns.stream().filter(column -> !column.isHidden()).toList());
+				columns.stream().filter(column -> !column.isHidden()).collect(Collectors.toList()));
 	}
 
 	@Override
@@ -293,8 +294,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
 						escape = Optional.of((Slice) (((Constant) arguments.get(2)).getValue()));
 					}
 
-					if (!newWildcards.containsKey(columnName) && pattern instanceof Slice slice) {
-						String wildcard = likeToWildcard(slice, escape);
+					if (!newWildcards.containsKey(columnName) && pattern instanceof Slice) {
+						String wildcard = likeToWildcard((Slice) pattern, escape);
 						if (column.getFieldType() == Field.Type.TAG) {
 							wildcard = Values.tags(wildcard).toString();
 						}
@@ -477,14 +478,15 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	private ConnectorTableMetadata getTableMetadata(ConnectorSession session, SchemaTableName tableName) {
 		RediSearchTableHandle tableHandle = rediSearchSession.getTable(tableName).getTableHandle();
 
-		List<ColumnMetadata> columns = ImmutableList.copyOf(getColumnHandles(session, tableHandle).values().stream()
-				.map(RediSearchColumnHandle.class::cast).map(RediSearchColumnHandle::toColumnMetadata).toList());
+		List<ColumnMetadata> columns = ImmutableList
+				.copyOf(getColumnHandles(session, tableHandle).values().stream().map(RediSearchColumnHandle.class::cast)
+						.map(RediSearchColumnHandle::toColumnMetadata).collect(Collectors.toList()));
 
 		return new ConnectorTableMetadata(tableName, columns);
 	}
 
 	private List<RediSearchColumnHandle> buildColumnHandles(ConnectorTableMetadata tableMetadata) {
 		return tableMetadata.getColumns().stream().map(m -> new RediSearchColumnHandle(m.getName(), m.getType(),
-				RediSearchSession.toFieldType(m.getType()), m.isHidden(), true)).toList();
+				RediSearchSession.toFieldType(m.getType()), m.isHidden(), true)).collect(Collectors.toList());
 	}
 }

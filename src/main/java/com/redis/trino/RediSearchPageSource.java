@@ -29,6 +29,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Iterator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
@@ -57,8 +58,8 @@ public class RediSearchPageSource implements ConnectorPageSource {
 
 	public RediSearchPageSource(RediSearchSession rediSearchSession, RediSearchTableHandle tableHandle,
 			List<RediSearchColumnHandle> columns) {
-		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).toList();
-		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType).toList();
+		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).collect(Collectors.toList());
+		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType).collect(Collectors.toList());
 		this.cursor = rediSearchSession.search(tableHandle, columns).iterator();
 		this.currentDoc = null;
 		this.pageBuilder = new PageBuilder(columnTypes);
