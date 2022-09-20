@@ -278,25 +278,29 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		List<ConnectorExpression> expressions = ConnectorExpressions.extractConjuncts(constraint.getExpression());
 		List<ConnectorExpression> notHandledExpressions = new ArrayList<>();
 		for (ConnectorExpression expression : expressions) {
-			if (expression instanceof Call call && isSupportedLikeCall(call)) {
-				List<ConnectorExpression> arguments = call.getArguments();
-				String variableName = ((Variable) arguments.get(0)).getName();
-				RediSearchColumnHandle column = (RediSearchColumnHandle) constraint.getAssignments().get(variableName);
-				verifyNotNull(column, "No assignment for %s", variableName);
-				String columnName = column.getName();
-				Object pattern = ((Constant) arguments.get(1)).getValue();
-				Optional<Slice> escape = Optional.empty();
-				if (arguments.size() == 3) {
-					escape = Optional.of((Slice) (((Constant) arguments.get(2)).getValue()));
-				}
-
-				if (!newWildcards.containsKey(columnName) && pattern instanceof Slice slice) {
-					String wildcard = likeToWildcard(slice, escape);
-					if (column.getFieldType() == Field.Type.TAG) {
-						wildcard = Values.tags(wildcard).toString();
+			if (expression instanceof Call) {
+				Call call = (Call) expression;
+				if (isSupportedLikeCall(call)) {
+					List<ConnectorExpression> arguments = call.getArguments();
+					String variableName = ((Variable) arguments.get(0)).getName();
+					RediSearchColumnHandle column = (RediSearchColumnHandle) constraint.getAssignments()
+							.get(variableName);
+					verifyNotNull(column, "No assignment for %s", variableName);
+					String columnName = column.getName();
+					Object pattern = ((Constant) arguments.get(1)).getValue();
+					Optional<Slice> escape = Optional.empty();
+					if (arguments.size() == 3) {
+						escape = Optional.of((Slice) (((Constant) arguments.get(2)).getValue()));
 					}
-					newWildcards.put(columnName, wildcard);
-					continue;
+
+					if (!newWildcards.containsKey(columnName) && pattern instanceof Slice slice) {
+						String wildcard = likeToWildcard(slice, escape);
+						if (column.getFieldType() == Field.Type.TAG) {
+							wildcard = Values.tags(wildcard).toString();
+						}
+						newWildcards.put(columnName, wildcard);
+						continue;
+					}
 				}
 			}
 			notHandledExpressions.add(expression);
