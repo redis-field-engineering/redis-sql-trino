@@ -5,7 +5,7 @@
 	<parent>
 		<groupId>io.trino</groupId>
 		<artifactId>trino-root</artifactId>
-		<version>396</version>
+		<version>397</version>
 	</parent>
 
 	<groupId>com.redis</groupId>
@@ -18,7 +18,7 @@
 		<lettucemod.version>3.1.5</lettucemod.version>
 		<lettuce.version>6.2.0.RELEASE</lettuce.version>
 		<testcontainers-redis.version>1.6.2</testcontainers-redis.version>
-		<ulid.version>5.0.0</ulid.version>
+		<ulid.version>5.0.2</ulid.version>
 
 		<air.check.skip-license>true</air.check.skip-license>
 		<air.check.skip-checkstyle>true</air.check.skip-checkstyle>
