@@ -10,8 +10,7 @@ project:
     groupId: com.redis
     version: 8
     multiProject: true
-  extraProperties:
-    inceptionYear: 2020
+  inceptionYear: 2020
   tags:
     - 'redis'
     - 'redisearch'
