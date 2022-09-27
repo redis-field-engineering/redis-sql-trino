@@ -2,7 +2,8 @@ project:
   name: redis-sql
   description: SQL interface for RediSearch
   longDescription: SQL interface and JDBC driver for RediSearch
-  website: https://github.com/redis-field-engineering/redis-sql
+  links:
+    homepage: https://github.com/redis-field-engineering/redis-sql
   authors:
     - Julien Ruaux
   license: MIT
