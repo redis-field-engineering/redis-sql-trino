@@ -44,7 +44,7 @@ public class TestRediSearchQueryBuilder {
 				Domain.create(ValueSet.ofRanges(equal(createUnboundedVarcharType(), utf8Slice("hello")),
 						equal(createUnboundedVarcharType(), utf8Slice("world"))), false)));
 		String query = new RediSearchQueryBuilder().buildQuery(tupleDomain);
-		String expected = "(@col2:{world}|@col2:{hello})";
+		String expected = "@col2:{world | hello}";
 		assertEquals(query, expected);
 
 	}
