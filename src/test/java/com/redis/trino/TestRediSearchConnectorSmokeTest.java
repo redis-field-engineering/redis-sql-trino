@@ -191,4 +191,14 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 		assertQuery("SELECT name, regionkey FROM nation WHERE name LIKE 'EGY%'");
 	}
 
+	@Test
+	public void testInPredicate() {
+		assertQuery("SELECT name, regionkey FROM nation WHERE name in ('EGYPT', 'FRANCE')");
+	}
+
+	@Test
+	public void testInPredicateNumeric() {
+		assertQuery("SELECT name, regionkey FROM nation WHERE regionKey in (1, 2, 3)");
+	}
+
 }

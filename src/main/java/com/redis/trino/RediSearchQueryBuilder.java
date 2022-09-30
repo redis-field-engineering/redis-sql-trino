@@ -55,6 +55,7 @@ import com.redis.lettucemod.search.Reducers.Min;
 import com.redis.lettucemod.search.Reducers.Sum;
 import com.redis.lettucemod.search.querybuilder.Node;
 import com.redis.lettucemod.search.querybuilder.QueryBuilder;
+import com.redis.lettucemod.search.querybuilder.QueryNode;
 import com.redis.lettucemod.search.querybuilder.Value;
 import com.redis.lettucemod.search.querybuilder.Values;
 import com.redis.lettucemod.util.RedisModulesUtils;
@@ -151,13 +152,25 @@ public class RediSearchQueryBuilder {
 				}
 			}
 		}
-		if (singleValues.size() == 1) {
-			disjuncts.add(QueryBuilder.intersect(columnName, value(Iterables.getOnlyElement(singleValues), column)));
-		} else if (singleValues.size() > 1) {
-			disjuncts.add(QueryBuilder.union(columnName,
-					singleValues.stream().map(v -> value(v, column)).toArray(Value[]::new)));
-		}
+		singleValues(column, singleValues).ifPresent(disjuncts::add);
 		return Optional.of(QueryBuilder.union(disjuncts.toArray(Node[]::new)));
+	}
+
+	private Optional<QueryNode> singleValues(RediSearchColumnHandle column, Set<Object> singleValues) {
+		if (singleValues.isEmpty()) {
+			return Optional.empty();
+		}
+		if (singleValues.size() == 1) {
+			return Optional.of(
+					QueryBuilder.intersect(column.getName(), value(Iterables.getOnlyElement(singleValues), column)));
+		}
+		if (column.getType() instanceof VarcharType && column.getFieldType() == Field.Type.TAG) {
+			// Takes care of IN: col IN ('value1', 'value2', ...)
+			return Optional
+					.of(QueryBuilder.intersect(column.getName(), Values.tags(singleValues.toArray(String[]::new))));
+		}
+		Value[] values = singleValues.stream().map(v -> value(v, column)).toArray(Value[]::new);
+		return Optional.of(QueryBuilder.union(column.getName(), values));
 	}
 
 	private Value value(Object trinoNativeValue, RediSearchColumnHandle column) {
