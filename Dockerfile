@@ -4,7 +4,7 @@ FROM docker.io/library/maven:3.8.6-openjdk-18 AS builder
 WORKDIR /root/trino-redisearch
 COPY . /root/trino-redisearch
 ENV MAVEN_FAST_INSTALL="-DskipTests -Dair.check.skip-all=true -Dmaven.javadoc.skip=true -B -q -T C1"
-RUN mvn install $MAVEN_FAST_INSTALL
+RUN mvn package $MAVEN_FAST_INSTALL
 
 FROM trinodb/trino:${TRINO_VERSION}
 
