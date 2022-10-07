@@ -40,6 +40,7 @@ public class RediSearchConfig {
 
 	public static final String DEFAULT_SCHEMA = "default";
 	public static final long DEFAULT_LIMIT = 10000;
+	public static final long DEFAULT_CURSOR_COUNT = 1000;
 	public static final Duration DEFAULT_TABLE_CACHE_EXPIRATION = Duration.ofHours(1);
 	public static final Duration DEFAULT_TABLE_CACHE_REFRESH = Duration.ofMinutes(1);
 
@@ -48,14 +49,12 @@ public class RediSearchConfig {
 	private Optional<String> username = Optional.empty();
 	private Optional<String> password = Optional.empty();
 	private boolean insecure;
-	private long timeout; // Use Lettuce default
-	private boolean caseInsensitiveNameMatching;
+	private boolean caseInsensitiveNames;
 	private long defaultLimit = DEFAULT_LIMIT;
-	private long cursorCount; // Use RediSearch default
+	private long cursorCount = DEFAULT_CURSOR_COUNT;
 	private long tableCacheExpiration = DEFAULT_TABLE_CACHE_EXPIRATION.toSeconds();
 	private long tableCacheRefresh = DEFAULT_TABLE_CACHE_REFRESH.toSeconds();
 	private boolean cluster;
-	private boolean tls;
 	private File caCertPath;
 	private File keyPath;
 	private File certPath;
@@ -80,6 +79,17 @@ public class RediSearchConfig {
 	@ConfigDescription("Default search limit number to use")
 	public RediSearchConfig setDefaultLimit(long defaultLimit) {
 		this.defaultLimit = defaultLimit;
+		return this;
+	}
+
+	public boolean isCaseInsensitiveNames() {
+		return caseInsensitiveNames;
+	}
+
+	@Config("redisearch.case-insensitive-names")
+	@ConfigDescription("Case-insensitive name-matching")
+	public RediSearchConfig setCaseInsensitiveNames(boolean caseInsensitiveNames) {
+		this.caseInsensitiveNames = caseInsensitiveNames;
 		return this;
 	}
 
@@ -154,14 +164,14 @@ public class RediSearchConfig {
 		return this;
 	}
 
-	public boolean isCaseInsensitiveNameMatching() {
-		return caseInsensitiveNameMatching;
+	public boolean isCluster() {
+		return cluster;
 	}
 
-	@Config("redisearch.case-insensitive-name-matching")
-	@ConfigDescription("Case-insensitive name-matching")
-	public RediSearchConfig setCaseInsensitiveNameMatching(boolean caseInsensitiveNameMatching) {
-		this.caseInsensitiveNameMatching = caseInsensitiveNameMatching;
+	@Config("redisearch.cluster")
+	@ConfigDescription("Connect to a Redis Cluster")
+	public RediSearchConfig setCluster(boolean cluster) {
+		this.cluster = cluster;
 		return this;
 	}
 
@@ -176,57 +186,14 @@ public class RediSearchConfig {
 		return this;
 	}
 
-	@Min(0)
-	public long getTimeout() {
-		return timeout;
-	}
-
-	@Config("redisearch.timeout")
-	@ConfigDescription("Redis command timeout in seconds")
-	public RediSearchConfig setTimeout(long timeout) {
-		this.timeout = timeout;
-		return this;
-	}
-
-	public boolean isTls() {
-		return tls;
-	}
-
-	@Config("redisearch.tls.enabled")
-	@ConfigDescription("Establish a secure TLS connection")
-	public RediSearchConfig setTls(boolean tls) {
-		this.tls = tls;
-		return this;
-	}
-
-	public boolean isCluster() {
-		return cluster;
-	}
-
-	@Config("redisearch.cluster")
-	@ConfigDescription("Connect to a Redis Cluster")
-	public RediSearchConfig setCluster(boolean cluster) {
-		this.cluster = cluster;
-		return this;
-	}
-
 	public Optional<@FileExists File> getCaCertPath() {
 		return Optional.ofNullable(caCertPath);
 	}
 
-	@Config("redisearch.tls.ca-cert-path")
+	@Config("redisearch.cacert-path")
+	@ConfigDescription("X.509 CA certificate file to verify with")
 	public RediSearchConfig setCaCertPath(File path) {
 		this.caCertPath = path;
-		return this;
-	}
-
-	public Optional<@FileExists File> getCertPath() {
-		return Optional.ofNullable(certPath);
-	}
-
-	@Config("redisearch.tls.cert-path")
-	public RediSearchConfig setCertPath(File path) {
-		this.certPath = path;
 		return this;
 	}
 
@@ -234,7 +201,8 @@ public class RediSearchConfig {
 		return Optional.ofNullable(keyPath);
 	}
 
-	@Config("redisearch.tls.key-path")
+	@Config("redisearch.key-path")
+	@ConfigDescription("PKCS#8 private key file to authenticate with (PEM format)")
 	public RediSearchConfig setKeyPath(File path) {
 		this.keyPath = path;
 		return this;
@@ -244,10 +212,22 @@ public class RediSearchConfig {
 		return Optional.ofNullable(keyPassword);
 	}
 
-	@Config("redisearch.tls.key-password")
+	@Config("redisearch.key-password")
 	@ConfigSecuritySensitive
+	@ConfigDescription("Password of the private key file, or null if it's not password-protected")
 	public RediSearchConfig setKeyPassword(String password) {
 		this.keyPassword = password;
+		return this;
+	}
+
+	public Optional<@FileExists File> getCertPath() {
+		return Optional.ofNullable(certPath);
+	}
+
+	@Config("redisearch.cert-path")
+	@ConfigDescription("X.509 certificate chain file to authenticate with (PEM format)")
+	public RediSearchConfig setCertPath(File path) {
+		this.certPath = path;
 		return this;
 	}
 

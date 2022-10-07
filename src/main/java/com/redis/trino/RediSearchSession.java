@@ -123,14 +123,10 @@ public class RediSearchSession {
 	private RedisURI redisURI(RediSearchConfig config) {
 		RedisURIBuilder uri = RedisURIBuilder.create();
 		uri.uriString(config.getUri());
-		uri.ssl(config.isTls());
 		config.getUsername().ifPresent(uri::username);
 		config.getPassword().ifPresent(p -> uri.password(p.toCharArray()));
 		if (config.isInsecure()) {
 			uri.sslVerifyMode(SslVerifyMode.NONE);
-		}
-		if (config.getTimeout() > 0) {
-			uri.timeoutInSeconds(config.getTimeout());
 		}
 		return uri.build();
 	}
@@ -198,7 +194,7 @@ public class RediSearchSession {
 
 	private String toRemoteTableName(String tableName) {
 		verify(tableName.equals(tableName.toLowerCase(ENGLISH)), "tableName not in lower-case: %s", tableName);
-		if (!config.isCaseInsensitiveNameMatching()) {
+		if (!config.isCaseInsensitiveNames()) {
 			return tableName;
 		}
 		for (String remoteTableName : getAllTables()) {

@@ -17,10 +17,11 @@ public class TestRediSearchConfig {
 	@Test
 	public void testDefaults() {
 		assertRecordedDefaults(recordDefaults(RediSearchConfig.class).setUri(null).setInsecure(false).setUsername(null)
-				.setPassword(null).setTimeout(0).setTls(false).setDefaultSchema(RediSearchConfig.DEFAULT_SCHEMA)
-				.setDefaultLimit(RediSearchConfig.DEFAULT_LIMIT).setCaseInsensitiveNameMatching(false).setCursorCount(0)
+				.setPassword(null).setDefaultSchema(RediSearchConfig.DEFAULT_SCHEMA)
+				.setDefaultLimit(RediSearchConfig.DEFAULT_LIMIT).setCaseInsensitiveNames(false).setCursorCount(0)
 				.setTableCacheExpiration(RediSearchConfig.DEFAULT_TABLE_CACHE_EXPIRATION.toSeconds())
-				.setTableCacheRefresh(RediSearchConfig.DEFAULT_TABLE_CACHE_REFRESH.toSeconds()).setCluster(false).setCaCertPath(null).setKeyPassword(null).setKeyPath(null).setCertPath(null));
+				.setTableCacheRefresh(RediSearchConfig.DEFAULT_TABLE_CACHE_REFRESH.toSeconds()).setCluster(false)
+				.setCaCertPath(null).setKeyPassword(null).setKeyPath(null).setCertPath(null));
 	}
 
 	@Test
