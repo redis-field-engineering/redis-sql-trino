@@ -97,7 +97,7 @@ The allowed configuration values are:
 == Docker Example
 
 .Clone the project
-[source,console]
+[source,console,subs="verbatim,attributes"]
 ----
 git clone {project-url}.git
 cd {project-name}
