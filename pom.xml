@@ -22,6 +22,7 @@
 
 		<air.check.skip-license>true</air.check.skip-license>
 		<air.check.skip-checkstyle>true</air.check.skip-checkstyle>
+		<air.check.skip-jacoco>false</air.check.skip-jacoco>
 	</properties>
 
 	<dependencies>
