@@ -16,7 +16,7 @@ image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/b
 Redis SQL is a https://trino.io[Trino] connector which allows access to RediSearch data from Trino.
 This document describes how to set up the RediSearch Connector to run SQL queries against RediSearch.
 
-image::redis-sql.gif[Redis SQL]
+image::https://asciinema.org/a/526185.svg[Redis SQL]
 
 NOTE: RediSearch 2.0 or later is required.
 
