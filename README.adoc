@@ -122,14 +122,12 @@ docker run --add-host=host.docker.internal:host-gateway jruaux/riot-file -h host
 ----
 
 .Run the Trino CLI
-+
 [source,console]
 ----
 docker exec -it trino trino --catalog redisearch --schema default
 ----
 
 .Run a SQL query
-+
 [source,console]
 ----
 trino:default> select * from beers;
