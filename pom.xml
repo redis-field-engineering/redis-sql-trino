@@ -10,7 +10,7 @@
 
 	<groupId>com.redis</groupId>
 	<artifactId>trino-redisearch</artifactId>
-	<version>0.2.6-SNAPSHOT</version>
+	<version>0.2.5-380</version>
 	<description>Trino - RediSearch Connector</description>
 	<packaging>trino-plugin</packaging>
 
