@@ -91,4 +91,4 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           push: ${{ github.event_name != 'pull_request' }}
-          tags: jruaux/trino-redisearch:latest
+          tags: jruaux/trino-redisearch:early-access
