@@ -29,7 +29,6 @@ import static com.google.common.base.Verify.verifyNotNull;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.airlift.slice.SliceUtf8.getCodePointAt;
 import static io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
-import static io.trino.spi.expression.StandardFunctions.LIKE_FUNCTION_NAME;
 import static java.util.Objects.requireNonNull;
 
 import java.util.ArrayList;
@@ -80,6 +79,7 @@ import io.trino.spi.connector.TableNotFoundException;
 import io.trino.spi.expression.Call;
 import io.trino.spi.expression.ConnectorExpression;
 import io.trino.spi.expression.Constant;
+import io.trino.spi.expression.StandardFunctions;
 import io.trino.spi.expression.Variable;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
@@ -337,7 +337,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	}
 
 	protected static boolean isSupportedLikeCall(Call call) {
-		if (!LIKE_FUNCTION_NAME.equals(call.getFunctionName())) {
+		if (!StandardFunctions.LIKE_PATTERN_FUNCTION_NAME.equals(call.getFunctionName())) {
 			return false;
 		}
 

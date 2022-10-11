@@ -14,6 +14,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
         with:
+          ref: 'trino-380'
           fetch-depth: 0
 
       - name: Set up Java
@@ -61,7 +62,7 @@ jobs:
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --global user.name "GitHub Action"
           git commit -a -m "Releasing version $VERSION"
-          git push origin master
+          git push origin trino-380
 
       - name: JReleaser output
         if: always()
