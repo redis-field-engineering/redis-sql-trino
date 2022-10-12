@@ -204,7 +204,7 @@ node.data-dir={trino-datadir}
 Create a JVM config file.
 
 .etc/jvm.config
-[source,properties]
+[source,console]
 ----
 -server
 -Xmx16G

@@ -450,6 +450,10 @@
 						<project-url>${project.url}</project-url>
 						<project-version>${project.version}</project-version>
 						<sourcedir>${project.build.sourceDirectory}</sourcedir>
+						<artifact-id>${project.artifactId}</artifact-id>
+						<trino-dir>/usr/lib/trino</trino-dir>
+						<trino-datadir>/var/trino</trino-datadir>
+						<trino-version>${project.parent.version}</trino-version>
 					</attributes>
 				</configuration>
 				<executions>

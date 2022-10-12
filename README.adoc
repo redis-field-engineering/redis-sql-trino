@@ -6,10 +6,6 @@
 :project-version:   0.2.5
 :project-url:       https://github.com/{project-owner}/{project-name}
 :documentation-url: https://{project-owner}.github.io/{project-name}
-:artifact-id:       trino-redisearch
-:trino-dir:         /usr/lib/trino
-:trino-datadir:     /var/trino
-:trino-version:     395
 
 
 image:{project-url}/actions/workflows/early-access.yml/badge.svg["Build Status", link="{project-url}/actions/workflows/early-access.yml"]
