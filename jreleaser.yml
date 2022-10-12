@@ -1,7 +1,7 @@
 project:
   name: redis-sql
-  description: SQL interface for RediSearch
-  longDescription: SQL interface and JDBC driver for RediSearch
+  description: Trino Connector for RediSearch
+  longDescription: Trino Connector for RediSearch  
   links:
     homepage: https://github.com/redis-field-engineering/redis-sql
   authors:
@@ -56,7 +56,7 @@ announce:
     message: '🚀 Redis SQL {{projectVersion}} has been released! {{releaseNotesUrl}}'
 
 distributions:
-  trino-redisearch:
+  redis-sql:
     artifacts:
       - path: target/{{distributionName}}-{{projectVersion}}.zip
         transform: '{{distributionName}}-{{projectEffectiveVersion}}.zip'
