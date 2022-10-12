@@ -24,7 +24,7 @@ jobs:
       - name: Set up Java
         uses: actions/setup-java@v1
         with:
-          java-version: 18
+          java-version: 17
 
       - uses: actions/cache@v2
         with:
@@ -57,11 +57,12 @@ jobs:
           JRELEASER_GPG_PUBLIC_KEY: ${{ secrets.GPG_PUBLIC_KEY}}
           JRELEASER_GPG_SECRET_KEY: ${{ secrets.GPG_SECRET_KEY }}
           JRELEASER_SLACK_WEBHOOK: ${{ secrets.JRELEASER_SLACK_WEBHOOK }}
-          
+
       - name: Commit release version
         run: |
           VERSION=${{ github.event.inputs.version }}
           sed -i -e "s/^\:project-version\:\ .*/:project-version: $VERSION/g" README.adoc
+          git add pom.xml
           git add README.adoc
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --global user.name "GitHub Action"
@@ -94,3 +95,9 @@ jobs:
         with:
           push: ${{ github.event_name != 'pull_request' }}
           tags: jruaux/trino-redisearch:latest,jruaux/trino-redisearch:${{ github.event.inputs.version }}
+
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GIT_ACCESS_TOKEN }}
+          publish_dir: ./target/generated-docs

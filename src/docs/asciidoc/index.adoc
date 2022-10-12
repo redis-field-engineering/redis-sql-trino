@@ -1,0 +1,291 @@
+= {project-name}
+:author: Julien Ruaux <julien@redis.com>
+:revnumber: {project-version}
+:docinfo1:
+
+== Introduction
+
+{project-name} is a https://trino.io[Trino] connector which allows access to RediSearch data from Trino.
+
+This guide provides documentation and usage information across the following topics:
+
+* <<Installation,Installation>>
+* <<Configuration,Configuration>>
+* <<Clients,Clients>>
+* <<Walkthrough,Walkthrough>>
+
+== Installation
+
+=== Trino
+
+Trino installation instructions are available at https://trino.io/docs/current/installation.html[https://trino.io/docs/current/installation.html].
+
+=== RediSearch connector
+
+Download {project-url}/releases/latest[latest release] and unzip without any directory structure under `<trino>/plugin/redisearch`.
+
+Create a RediSearch connector configuration file and change/add <<properties,properties>> as needed.
+
+== Configuration
+
+To configure the RediSearch connector, create a catalog properties file and change/add properties as needed.
+
+.etc/catalog/redisearch.properties
+[source,properties]
+----
+connector.name=redisearch
+redisearch.uri=redis://localhost:6379
+----
+
+[[properties]]
+.Connector properties
+[cols="1,1,1"]
+|===
+|Property name|Description|Default
+
+|`redisearch.default-schema-name`
+|The schema that contains all tables defined without a qualifying schema name.
+|`default`
+
+|`redisearch.case-insensitive-names`
+|Match index names case insensitively.
+|`false`
+
+|`redisearch.default-limit`
+|Max number of documents returned by FT.SEARCH and FT.AGGREGATE when no limit is present in the SQL query.
+|`10000`
+
+|`redisearch.cursor-count`
+|Number of rows read during each https://redis.io/docs/stack/search/reference/aggregations/#cursor-api[aggregation cursor] fetch.
+|`1000`
+|===
+
+.Redis connection properties
+[cols="1,1,1"]
+|===
+|Property name|Description|Default
+
+|`redisearch.uri`
+|A Redis connection string. https://github.com/lettuce-io/lettuce-core/wiki/Redis-URI-and-connection-details#uri-syntax[Redis URI syntax].
+|
+
+|`redisearch.username`
+|Redis connection username.
+|
+
+|`redisearch.password`
+|Redis connection password.
+|
+
+|`redisearch.cluster`
+|Connect to a Redis Cluster.
+|`false`
+
+|===
+
+The RediSearch connector provides additional security options to support Redis servers with TLS mode.
+
+.TLS properties
+[cols="1,1,1"]
+|===
+|Property name|Description|Default
+
+|`redisearch.insecure`
+|Allow insecure connections (e.g. invalid certificates) when using SSL.
+|`false`
+
+|`redisearch.cacert-path`
+|X.509 CA certificate file to verify with.
+|
+
+|`redisearch.key-path`
+|PKCS#8 private key file to authenticate with (PEM format).
+|
+
+|`redisearch.key-password`
+|Password of the private key file, or null if it's not password-protected.
+|
+
+|`redisearch.cert-path`
+|X.509 certificate chain file to authenticate with (PEM format).
+|
+|===
+
+
+== Clients
+
+=== JDBC Driver
+
+The Trino JDBC driver allows users to access Trino from Java-based applications, and other non-Java applications running in a JVM.
+
+Refer to the https://trino.io/docs/current/client/jdbc.html[Trino documentation] for setup instructions. 
+
+The following is an example of a JDBC URL used to create a connection to Redis SQL:
+
+[source]
+----
+jdbc:trino://example.net:8080/redisearch/default
+----
+
+=== Tableau
+
+Refer to the https://help.tableau.com/current/pro/desktop/en-us/examples_presto.htm[Tableau documentation] for setup instructions.
+
+=== Trino CLI
+
+Refer to the https://trino.io/docs/current/client/cli.html[Trino CLI documentation] for setup instructions.
+
+== Build
+
+Run these commands to build the Trino connector for RediSearch from source (requires Java 17+):
+
+[source,console,subs="verbatim,attributes"]
+----
+git clone {project-url}.git
+cd {project-name}
+./mvnw clean package -DskipTests
+----
+
+
+[[Walkthrough]]
+== Complete Walkthrough
+
+Follow these step-by-step instructions to deploy a single-node Trino server on Ubuntu.
+
+Trino requires a 64-bit version of Java 17.
+It is recommended to use https://www.azul.com/downloads/?package=jdk[Azul Zulu] as the JDK.
+
+.Install Java
+[source,console]
+----
+$ java -version
+openjdk version "17.0.4.1" 2022-08-12 LTS
+OpenJDK Runtime Environment Zulu17.36+17-CA (build 17.0.4.1+1-LTS)
+OpenJDK 64-Bit Server VM Zulu17.36+17-CA (build 17.0.4.1+1-LTS, mixed mode, sharing)
+----
+
+Download the Trino server tarball and unpack it.
+
+.Install Trino
+[source,console,subs="verbatim,attributes"]
+----
+wget https://repo1.maven.org/maven2/io/trino/trino-server/{trino-version}/trino-server-{trino-version}.tar.gz
+mkdir {trino-dir}
+tar xzvf trino-server-{trino-version}.tar.gz --directory {trino-dir} --strip-components 1
+----
+
+Trino needs a data directory for storing logs, etc.
+It is recommended to create a data directory outside of the installation directory, which allows it to be easily preserved when upgrading Trino.
+
+.Create a data directory
+[source,console,subs="verbatim,attributes"]
+----
+mkdir -p {trino-datadir}
+----
+
+Create an `etc` directory inside the installation directory to hold configuration files.
+
+.Create etc directory
+[source,console,subs="verbatim,attributes"]
+----
+mkdir {trino-dir}/etc
+----
+
+Create a node properties file.
+
+.etc/node.properties
+[source,properties,subs="verbatim,attributes"]
+----
+node.environment=production
+node.id=ffffffff-ffff-ffff-ffff-ffffffffffff
+node.data-dir={trino-datadir}
+----
+
+Create a JVM config file.
+
+.etc/jvm.config
+[source,properties]
+----
+-server
+-Xmx16G
+-XX:InitialRAMPercentage=80
+-XX:MaxRAMPercentage=80
+-XX:G1HeapRegionSize=32M
+-XX:+ExplicitGCInvokesConcurrent
+-XX:+ExitOnOutOfMemoryError
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:-OmitStackTraceInFastThrow
+-XX:ReservedCodeCacheSize=512M
+-XX:PerMethodRecompilationCutoff=10000
+-XX:PerBytecodeRecompilationCutoff=10000
+-Djdk.attach.allowAttachSelf=true
+-Djdk.nio.maxCachedBufferSize=2000000
+-XX:+UnlockDiagnosticVMOptions
+-XX:+UseAESCTRIntrinsics
+----
+
+Create a config properties file.
+
+.etc/config.properties
+[source,properties]
+----
+coordinator=true
+node-scheduler.include-coordinator=true
+http-server.http.port=8080
+discovery.uri=http://localhost:8080
+----
+
+Create a logging configuration file.
+
+.etc/log.properties
+[source,properties]
+----
+io.trino=INFO
+----
+
+Download latest {project-url}/releases/latest[release] and unzip without any directory structure under `plugin/redisearch`.
+
+.Install RediSearch plugin
+[source,console,subs="verbatim,attributes"]
+----
+wget {project-url}/releases/download/v{trino-version}/{artifact-id}-{trino-version}.zip
+unzip -j {artifact-id}-{project-version}.zip -d {trino-dir}/plugin/redisearch
+----
+
+Create a RediSearch connector configuration file.
+
+.etc/catalog/redisearch.properties
+[source,properties]
+----
+connector.name=redisearch
+redisearch.uri=redis://localhost:6379
+----
+
+Change and/or add <<properties,properties>> as needed.
+
+Start the Trino server.
+
+.Run Trino server
+[source,console,subs="verbatim,attributes"]
+----
+{trino-dir}/bin/launcher run
+----
+
+Download https://repo1.maven.org/maven2/io/trino/trino-cli/{trino-version}/trino-cli-{trino-version}-executable.jar[trino-cli-{trino-version}-executable.jar], rename it to `trino`, make it executable with `chmod +x`, and run it to show the version of the CLI.
+
+.Install Trino CLI
+[source,console,subs="verbatim,attributes"]
+----
+wget https://repo1.maven.org/maven2/io/trino/trino-cli/{trino-version}/trino-cli-{trino-version}-executable.jar
+mv trino-cli-{trino-version}-executable.jar trino
+chmod +x trino
+----
+
+Connect to Trino using the CLI and run a SQL query.
+
+.Run Trino CLI
+[source,console]
+----
+./trino --catalog redisearch --schema default
+trino:default> select * from mySearchIndex;
+----

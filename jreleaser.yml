@@ -9,7 +9,7 @@ project:
   license: MIT
   java:
     groupId: com.redis
-    version: 8
+    version: 17
     multiProject: true
   inceptionYear: 2020
   tags:
@@ -60,3 +60,8 @@ distributions:
     artifacts:
       - path: target/{{distributionName}}-{{projectVersion}}.zip
         transform: '{{distributionName}}-{{projectEffectiveVersion}}.zip'
+
+files:
+  artifacts:
+    - path: target/generated-docs/{{projectName}}-{{projectVersion}}.pdf
+      transform: '{{projectName}}-{{projectEffectiveVersion}}.pdf'
