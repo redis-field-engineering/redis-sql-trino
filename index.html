@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="generator" content="Asciidoctor 2.0.10">
+<meta name="author" content="Julien Ruaux &lt;julien@redis.com&gt;">
+<title>Redis SQL</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
+<link rel="stylesheet" href="./asciidoctor.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+</head>
+<body class="article toc2 toc-left">
+<div id="header">
+<h1>Redis SQL</h1>
+<div class="details">
+<span id="author" class="author">Julien Ruaux &lt;julien@redis.com&gt;</span><br>
+<span id="revnumber">version 0.2.6</span>
+</div>
+<div id="toc" class="toc2">
+<div id="toctitle">Table of Contents</div>
+<ul class="sectlevel1">
+<li><a href="#introduction">1. Introduction</a></li>
+<li><a href="#installation">2. Installation</a>
+<ul class="sectlevel2">
+<li><a href="#trino">2.1. Trino</a></li>
+<li><a href="#redisearch-connector">2.2. RediSearch connector</a></li>
+</ul>
+</li>
+<li><a href="#configuration">3. Configuration</a></li>
+<li><a href="#clients">4. Clients</a>
+<ul class="sectlevel2">
+<li><a href="#jdbc-driver">4.1. JDBC Driver</a></li>
+<li><a href="#tableau">4.2. Tableau</a></li>
+<li><a href="#trino-cli">4.3. Trino CLI</a></li>
+</ul>
+</li>
+<li><a href="#build">5. Build</a></li>
+<li><a href="#Walkthrough">6. Complete Walkthrough</a></li>
+</ul>
+</div>
+</div>
+<div id="content">
+<div class="sect1">
+<h2 id="introduction"><a class="anchor" href="#introduction"></a>1. Introduction</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Redis SQL is a <a href="https://trino.io">Trino</a> connector which allows access to RediSearch data from Trino.</p>
+</div>
+<div class="paragraph">
+<p>This guide provides documentation and usage information across the following topics:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><a href="#installation">Installation</a></p>
+</li>
+<li>
+<p><a href="#configuration">Configuration</a></p>
+</li>
+<li>
+<p><a href="#clients">Clients</a></p>
+</li>
+<li>
+<p><a href="#Walkthrough">Walkthrough</a></p>
+</li>
+</ul>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="installation"><a class="anchor" href="#installation"></a>2. Installation</h2>
+<div class="sectionbody">
+<div class="sect2">
+<h3 id="trino"><a class="anchor" href="#trino"></a>2.1. Trino</h3>
+<div class="paragraph">
+<p>Trino installation instructions are available at <a href="https://trino.io/docs/current/installation.html">https://trino.io/docs/current/installation.html</a>.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="redisearch-connector"><a class="anchor" href="#redisearch-connector"></a>2.2. RediSearch connector</h3>
+<div class="paragraph">
+<p>Download <a href="https://github.com/redis-field-engineering/redis-sql/releases/latest">latest release</a> and unzip without any directory structure under <code>&lt;trino&gt;/plugin/redisearch</code>.</p>
+</div>
+<div class="paragraph">
+<p>Create a RediSearch connector configuration file and change/add <a href="#properties">properties</a> as needed.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="configuration"><a class="anchor" href="#configuration"></a>3. Configuration</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>To configure the RediSearch connector, create a catalog properties file and change/add properties as needed.</p>
+</div>
+<div class="listingblock">
+<div class="title">etc/catalog/redisearch.properties</div>
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="properties" class="language-properties hljs">connector.name=redisearch
+redisearch.uri=redis://localhost:6379</code></pre>
+</div>
+</div>
+<table id="properties" class="tableblock frame-all grid-all stretch">
+<caption class="title">Table 1. Connector properties</caption>
+<colgroup>
+<col style="width: 33.3333%;">
+<col style="width: 33.3333%;">
+<col style="width: 33.3334%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Property name</th>
+<th class="tableblock halign-left valign-top">Description</th>
+<th class="tableblock halign-left valign-top">Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.default-schema-name</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">The schema that contains all tables defined without a qualifying schema name.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>default</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.case-insensitive-names</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Match index names case insensitively.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>false</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.default-limit</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Max number of documents returned by FT.SEARCH and FT.AGGREGATE when no limit is present in the SQL query.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>10000</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.cursor-count</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Number of rows read during each <a href="https://redis.io/docs/stack/search/reference/aggregations/#cursor-api">aggregation cursor</a> fetch.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>1000</code></p></td>
+</tr>
+</tbody>
+</table>
+<table class="tableblock frame-all grid-all stretch">
+<caption class="title">Table 2. Redis connection properties</caption>
+<colgroup>
+<col style="width: 33.3333%;">
+<col style="width: 33.3333%;">
+<col style="width: 33.3334%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Property name</th>
+<th class="tableblock halign-left valign-top">Description</th>
+<th class="tableblock halign-left valign-top">Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.uri</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">A Redis connection string. <a href="https://github.com/lettuce-io/lettuce-core/wiki/Redis-URI-and-connection-details#uri-syntax">Redis URI syntax</a>.</p></td>
+<td class="tableblock halign-left valign-top"></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.username</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Redis connection username.</p></td>
+<td class="tableblock halign-left valign-top"></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.password</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Redis connection password.</p></td>
+<td class="tableblock halign-left valign-top"></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.cluster</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Connect to a Redis Cluster.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>false</code></p></td>
+</tr>
+</tbody>
+</table>
+<div class="paragraph">
+<p>The RediSearch connector provides additional security options to support Redis servers with TLS mode.</p>
+</div>
+<table class="tableblock frame-all grid-all stretch">
+<caption class="title">Table 3. TLS properties</caption>
+<colgroup>
+<col style="width: 33.3333%;">
+<col style="width: 33.3333%;">
+<col style="width: 33.3334%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Property name</th>
+<th class="tableblock halign-left valign-top">Description</th>
+<th class="tableblock halign-left valign-top">Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.insecure</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Allow insecure connections (e.g. invalid certificates) when using SSL.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>false</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.cacert-path</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">X.509 CA certificate file to verify with.</p></td>
+<td class="tableblock halign-left valign-top"></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.key-path</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">PKCS#8 private key file to authenticate with (PEM format).</p></td>
+<td class="tableblock halign-left valign-top"></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.key-password</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Password of the private key file, or null if it&#8217;s not password-protected.</p></td>
+<td class="tableblock halign-left valign-top"></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.cert-path</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">X.509 certificate chain file to authenticate with (PEM format).</p></td>
+<td class="tableblock halign-left valign-top"></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="sect1">
+<h2 id="clients"><a class="anchor" href="#clients"></a>4. Clients</h2>
+<div class="sectionbody">
+<div class="sect2">
+<h3 id="jdbc-driver"><a class="anchor" href="#jdbc-driver"></a>4.1. JDBC Driver</h3>
+<div class="paragraph">
+<p>The Trino JDBC driver allows users to access Trino from Java-based applications, and other non-Java applications running in a JVM.</p>
+</div>
+<div class="paragraph">
+<p>Refer to the <a href="https://trino.io/docs/current/client/jdbc.html">Trino documentation</a> for setup instructions.</p>
+</div>
+<div class="paragraph">
+<p>The following is an example of a JDBC URL used to create a connection to Redis SQL:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-none hljs">jdbc:trino://example.net:8080/redisearch/default</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="tableau"><a class="anchor" href="#tableau"></a>4.2. Tableau</h3>
+<div class="paragraph">
+<p>Refer to the <a href="https://help.tableau.com/current/pro/desktop/en-us/examples_presto.htm">Tableau documentation</a> for setup instructions.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="trino-cli"><a class="anchor" href="#trino-cli"></a>4.3. Trino CLI</h3>
+<div class="paragraph">
+<p>Refer to the <a href="https://trino.io/docs/current/client/cli.html">Trino CLI documentation</a> for setup instructions.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="build"><a class="anchor" href="#build"></a>5. Build</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Run these commands to build the Trino connector for RediSearch from source (requires Java 17+):</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">git clone https://github.com/redis-field-engineering/redis-sql.git
+cd Redis SQL
+./mvnw clean package -DskipTests</code></pre>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="Walkthrough"><a class="anchor" href="#Walkthrough"></a>6. Complete Walkthrough</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Follow these step-by-step instructions to deploy a single-node Trino server on Ubuntu.</p>
+</div>
+<div class="paragraph">
+<p>Trino requires a 64-bit version of Java 17.
+It is recommended to use <a href="https://www.azul.com/downloads/?package=jdk">Azul Zulu</a> as the JDK.</p>
+</div>
+<div class="listingblock">
+<div class="title">Install Java</div>
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">$ java -version
+openjdk version "17.0.4.1" 2022-08-12 LTS
+OpenJDK Runtime Environment Zulu17.36+17-CA (build 17.0.4.1+1-LTS)
+OpenJDK 64-Bit Server VM Zulu17.36+17-CA (build 17.0.4.1+1-LTS, mixed mode, sharing)</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Download the Trino server tarball and unpack it.</p>
+</div>
+<div class="listingblock">
+<div class="title">Install Trino</div>
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">wget https://repo1.maven.org/maven2/io/trino/trino-server/{trino-version}/trino-server-{trino-version}.tar.gz
+mkdir {trino-dir}
+tar xzvf trino-server-{trino-version}.tar.gz --directory {trino-dir} --strip-components 1</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Trino needs a data directory for storing logs, etc.
+It is recommended to create a data directory outside of the installation directory, which allows it to be easily preserved when upgrading Trino.</p>
+</div>
+<div class="listingblock">
+<div class="title">Create a data directory</div>
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">mkdir -p {trino-datadir}</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Create an <code>etc</code> directory inside the installation directory to hold configuration files.</p>
+</div>
+<div class="listingblock">
+<div class="title">Create etc directory</div>
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">mkdir {trino-dir}/etc</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Create a node properties file.</p>
+</div>
+<div class="listingblock">
+<div class="title">etc/node.properties</div>
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="properties" class="language-properties hljs">node.environment=production
+node.id=ffffffff-ffff-ffff-ffff-ffffffffffff
+node.data-dir={trino-datadir}</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Create a JVM config file.</p>
+</div>
+<div class="listingblock">
+<div class="title">etc/jvm.config</div>
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="properties" class="language-properties hljs">-server
+-Xmx16G
+-XX:InitialRAMPercentage=80
+-XX:MaxRAMPercentage=80
+-XX:G1HeapRegionSize=32M
+-XX:+ExplicitGCInvokesConcurrent
+-XX:+ExitOnOutOfMemoryError
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:-OmitStackTraceInFastThrow
+-XX:ReservedCodeCacheSize=512M
+-XX:PerMethodRecompilationCutoff=10000
+-XX:PerBytecodeRecompilationCutoff=10000
+-Djdk.attach.allowAttachSelf=true
+-Djdk.nio.maxCachedBufferSize=2000000
+-XX:+UnlockDiagnosticVMOptions
+-XX:+UseAESCTRIntrinsics</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Create a config properties file.</p>
+</div>
+<div class="listingblock">
+<div class="title">etc/config.properties</div>
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="properties" class="language-properties hljs">coordinator=true
+node-scheduler.include-coordinator=true
+http-server.http.port=8080
+discovery.uri=http://localhost:8080</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Create a logging configuration file.</p>
+</div>
+<div class="listingblock">
+<div class="title">etc/log.properties</div>
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="properties" class="language-properties hljs">io.trino=INFO</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Download latest <a href="https://github.com/redis-field-engineering/redis-sql/releases/latest">release</a> and unzip without any directory structure under <code>plugin/redisearch</code>.</p>
+</div>
+<div class="listingblock">
+<div class="title">Install RediSearch plugin</div>
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">wget https://github.com/redis-field-engineering/redis-sql/releases/download/v{trino-version}/{artifact-id}-{trino-version}.zip
+unzip -j {artifact-id}-0.2.6.zip -d {trino-dir}/plugin/redisearch</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Create a RediSearch connector configuration file.</p>
+</div>
+<div class="listingblock">
+<div class="title">etc/catalog/redisearch.properties</div>
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="properties" class="language-properties hljs">connector.name=redisearch
+redisearch.uri=redis://localhost:6379</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Change and/or add <a href="#properties">properties</a> as needed.</p>
+</div>
+<div class="paragraph">
+<p>Start the Trino server.</p>
+</div>
+<div class="listingblock">
+<div class="title">Run Trino server</div>
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">{trino-dir}/bin/launcher run</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Download <a href="https://repo1.maven.org/maven2/io/trino/trino-cli/{trino-version}/trino-cli-{trino-version}-executable.jar">trino-cli-{trino-version}-executable.jar</a>, rename it to <code>trino</code>, make it executable with <code>chmod +x</code>, and run it to show the version of the CLI.</p>
+</div>
+<div class="listingblock">
+<div class="title">Install Trino CLI</div>
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">wget https://repo1.maven.org/maven2/io/trino/trino-cli/{trino-version}/trino-cli-{trino-version}-executable.jar
+mv trino-cli-{trino-version}-executable.jar trino
+chmod +x trino</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Connect to Trino using the CLI and run a SQL query.</p>
+</div>
+<div class="listingblock">
+<div class="title">Run Trino CLI</div>
+<div class="content">
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">./trino --catalog redisearch --schema default
+trino:default&gt; select * from mySearchIndex;</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="footer">
+<div id="footer-text">
+Version 0.2.6<br>
+Last updated 2022-10-12 06:25:11 UTC
+</div>
+</div>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.6/styles/github.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.6/highlight.min.js"></script>
+<script>hljs.initHighlighting()</script>
+</body>
+</html>
