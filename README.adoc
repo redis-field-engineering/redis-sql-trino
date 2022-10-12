@@ -61,5 +61,5 @@ docker exec -it trino trino --catalog redisearch --schema default
 .Run a SQL query
 [source,console]
 ----
-trino:default> select * from beers;
+trino:default> SELECT * FROM beers;
 ----
