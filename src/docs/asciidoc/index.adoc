@@ -1,5 +1,4 @@
 = {project-name}
-:author: Julien Ruaux <julien@redis.com>
 :revnumber: {project-version}
 :docinfo1:
 
@@ -22,7 +21,9 @@ Trino installation instructions are available at https://trino.io/docs/current/i
 
 === RediSearch connector
 
-Download {project-url}/releases/latest[latest release] and unzip without any directory structure under `<trino>/plugin/redisearch`.
+Download {project-url}/releases/latest[latest release] and unzip without any directory structure under:
+
+`<trino>/plugin/redisearch`
 
 Create a RediSearch connector configuration file and change/add <<properties,properties>> as needed.
 

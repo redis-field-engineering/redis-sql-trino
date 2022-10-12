@@ -9,10 +9,10 @@
 	</parent>
 
 	<groupId>com.redis</groupId>
-	<artifactId>trino-redisearch</artifactId>
-	<version>0.2.7-SNAPSHOT</version>
+	<artifactId>redis-sql</artifactId>
+	<version>0.2.6</version>
 	<name>Redis SQL</name>
-	<description>Trino - RediSearch Connector</description>
+	<description>Trino connector for RediSearch</description>
 	<packaging>trino-plugin</packaging>
 	<url>https://github.com/${github.owner}/${github.repo}</url>
 	<inceptionYear>2022</inceptionYear>
@@ -435,14 +435,6 @@
 				</dependencies>
 				<configuration>
 					<attributes>
-						<icons>font</icons>
-						<sectanchors>true</sectanchors>
-						<source-highlighter>coderay</source-highlighter>
-						<coderay-linenums-mode>table</coderay-linenums-mode>
-						<toc>left</toc>
-						<numbered>true</numbered>
-						<linkattrs>true</linkattrs>
-						<linkcss>true</linkcss>
 						<github-owner>${github.owner}</github-owner>
 						<github-repo>${github.repo}</github-repo>
 						<project-artifact>${project.artifactId}</project-artifact>
@@ -468,11 +460,18 @@
 							<attributes>
 								<source-highlighter>highlightjs</source-highlighter>
 								<toc>left</toc>
+								<sectanchors>true</sectanchors>
+								<numbered>true</numbered>
 								<toclevels>2</toclevels>
 								<sectanchors>true</sectanchors>
 								<!-- set the idprefix to blank -->
 								<idprefix />
 								<idseparator>-</idseparator>
+								<linkattrs>true</linkattrs>
+								<linkcss>true</linkcss>
+								<icons>font</icons>
+								<source-highlighter>coderay</source-highlighter>
+								<coderay-linenums-mode>table</coderay-linenums-mode>
 							</attributes>
 						</configuration>
 					</execution>
