@@ -297,9 +297,9 @@ OpenJDK 64-Bit Server VM Zulu17.36+17-CA (build 17.0.4.1+1-LTS, mixed mode, shar
 <div class="listingblock">
 <div class="title">Install Trino</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">wget https://repo1.maven.org/maven2/io/trino/trino-server/{trino-version}/trino-server-{trino-version}.tar.gz
-mkdir {trino-dir}
-tar xzvf trino-server-{trino-version}.tar.gz --directory {trino-dir} --strip-components 1</code></pre>
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">wget https://repo1.maven.org/maven2/io/trino/trino-server/395/trino-server-395.tar.gz
+mkdir /usr/lib/trino
+tar xzvf trino-server-395.tar.gz --directory /usr/lib/trino --strip-components 1</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -309,7 +309,7 @@ It is recommended to create a data directory outside of the installation directo
 <div class="listingblock">
 <div class="title">Create a data directory</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">mkdir -p {trino-datadir}</code></pre>
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">mkdir -p /var/trino</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -318,7 +318,7 @@ It is recommended to create a data directory outside of the installation directo
 <div class="listingblock">
 <div class="title">Create etc directory</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">mkdir {trino-dir}/etc</code></pre>
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">mkdir /usr/lib/trino/etc</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -329,7 +329,7 @@ It is recommended to create a data directory outside of the installation directo
 <div class="content">
 <pre class="highlightjs highlight"><code data-lang="properties" class="language-properties hljs">node.environment=production
 node.id=ffffffff-ffff-ffff-ffff-ffffffffffff
-node.data-dir={trino-datadir}</code></pre>
+node.data-dir=/var/trino</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -338,7 +338,7 @@ node.data-dir={trino-datadir}</code></pre>
 <div class="listingblock">
 <div class="title">etc/jvm.config</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="properties" class="language-properties hljs">-server
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">-server
 -Xmx16G
 -XX:InitialRAMPercentage=80
 -XX:MaxRAMPercentage=80
@@ -383,8 +383,8 @@ discovery.uri=http://localhost:8080</code></pre>
 <div class="listingblock">
 <div class="title">Install RediSearch plugin</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">wget https://github.com/redis-field-engineering/redis-sql/releases/download/v{trino-version}/{artifact-id}-{trino-version}.zip
-unzip -j {artifact-id}-0.2.6.zip -d {trino-dir}/plugin/redisearch</code></pre>
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">wget https://github.com/redis-field-engineering/redis-sql/releases/download/v395/trino-redisearch-395.zip
+unzip -j trino-redisearch-0.2.6.zip -d /usr/lib/trino/plugin/redisearch</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -406,17 +406,17 @@ redisearch.uri=redis://localhost:6379</code></pre>
 <div class="listingblock">
 <div class="title">Run Trino server</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">{trino-dir}/bin/launcher run</code></pre>
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">/usr/lib/trino/bin/launcher run</code></pre>
 </div>
 </div>
 <div class="paragraph">
-<p>Download <a href="https://repo1.maven.org/maven2/io/trino/trino-cli/{trino-version}/trino-cli-{trino-version}-executable.jar">trino-cli-{trino-version}-executable.jar</a>, rename it to <code>trino</code>, make it executable with <code>chmod +x</code>, and run it to show the version of the CLI.</p>
+<p>Download <a href="https://repo1.maven.org/maven2/io/trino/trino-cli/395/trino-cli-395-executable.jar">trino-cli-395-executable.jar</a>, rename it to <code>trino</code>, make it executable with <code>chmod +x</code>, and run it to show the version of the CLI.</p>
 </div>
 <div class="listingblock">
 <div class="title">Install Trino CLI</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">wget https://repo1.maven.org/maven2/io/trino/trino-cli/{trino-version}/trino-cli-{trino-version}-executable.jar
-mv trino-cli-{trino-version}-executable.jar trino
+<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">wget https://repo1.maven.org/maven2/io/trino/trino-cli/395/trino-cli-395-executable.jar
+mv trino-cli-395-executable.jar trino
 chmod +x trino</code></pre>
 </div>
 </div>
@@ -436,7 +436,7 @@ trino:default&gt; select * from mySearchIndex;</code></pre>
 <div id="footer">
 <div id="footer-text">
 Version 0.2.6<br>
-Last updated 2022-10-12 06:25:11 UTC
+Last updated 2022-10-12 06:35:54 UTC
 </div>
 </div>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.6/styles/github.min.css">
