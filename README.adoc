@@ -49,7 +49,7 @@ docker exec redis /usr/local/bin/redis-cli FT.CREATE beers ON HASH PREFIX 1 beer
 .Add documents to the index
 [source,console]
 ----
-docker run --add-host=host.docker.internal:host-gateway jruaux/riot-file -h host.docker.internal import https://storage.googleapis.com/jrx/beers.json hset --keyspace beer --keys id
+docker run --add-host=host.docker.internal:host-gateway fieldengineering/riot-file -h host.docker.internal import https://storage.googleapis.com/jrx/beers.json hset --keyspace beer --keys id
 ----
 
 .Run the Trino CLI

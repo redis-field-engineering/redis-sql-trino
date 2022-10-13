@@ -458,20 +458,17 @@
 						<configuration>
 							<backend>html5</backend>
 							<attributes>
-								<source-highlighter>highlightjs</source-highlighter>
-								<toc>left</toc>
-								<sectanchors>true</sectanchors>
-								<numbered>true</numbered>
-								<toclevels>2</toclevels>
-								<sectanchors>true</sectanchors>
-								<!-- set the idprefix to blank -->
+								<coderay-linenums-mode>table</coderay-linenums-mode>
+								<icons>font</icons>
 								<idprefix />
 								<idseparator>-</idseparator>
 								<linkattrs>true</linkattrs>
 								<linkcss>true</linkcss>
-								<icons>font</icons>
+								<numbered>true</numbered>
+								<sectanchors>true</sectanchors>
 								<source-highlighter>coderay</source-highlighter>
-								<coderay-linenums-mode>table</coderay-linenums-mode>
+								<toc>left</toc>
+								<toclevels>2</toclevels>
 							</attributes>
 						</configuration>
 					</execution>
