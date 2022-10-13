@@ -32,6 +32,7 @@ import static java.lang.String.format;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 
+import java.io.File;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -113,10 +114,10 @@ public class RediSearchSession {
 	private AbstractRedisClient client(RediSearchConfig config) {
 		ClientBuilder builder = ClientBuilder.create(redisURI(config));
 		builder.cluster(config.isCluster());
-		builder.key(config.getKeyPath());
-		config.getCertPath().ifPresent(builder::keyCert);
+		config.getKeyPath().map(File::new).ifPresent(builder::key);
+		config.getCertPath().map(File::new).ifPresent(builder::keyCert);
 		config.getKeyPassword().ifPresent(p -> builder.keyPassword(p.toCharArray()));
-		builder.trustManager(config.getCaCertPath());
+		config.getCaCertPath().map(File::new).ifPresent(builder::trustManager);
 		return builder.build();
 	}
 

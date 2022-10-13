@@ -1,5 +1,5 @@
 connector.name=redisearch
-redisearch.uri=${REDISEARCH_USERNAME}
+redisearch.uri=${REDISEARCH_URI}
 redisearch.username=${REDISEARCH_USERNAME}
 redisearch.password=${REDISEARCH_PASSWORD}
 redisearch.cluster=${REDISEARCH_CLUSTER}

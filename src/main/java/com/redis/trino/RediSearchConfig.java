@@ -23,7 +23,6 @@
  */
 package com.redis.trino;
 
-import java.io.File;
 import java.time.Duration;
 import java.util.Optional;
 
@@ -34,7 +33,6 @@ import javax.validation.constraints.Pattern;
 import io.airlift.configuration.Config;
 import io.airlift.configuration.ConfigDescription;
 import io.airlift.configuration.ConfigSecuritySensitive;
-import io.airlift.configuration.validation.FileExists;
 
 public class RediSearchConfig {
 
@@ -55,9 +53,9 @@ public class RediSearchConfig {
 	private long tableCacheExpiration = DEFAULT_TABLE_CACHE_EXPIRATION.toSeconds();
 	private long tableCacheRefresh = DEFAULT_TABLE_CACHE_REFRESH.toSeconds();
 	private boolean cluster;
-	private File caCertPath;
-	private File keyPath;
-	private File certPath;
+	private String caCertPath;
+	private String keyPath;
+	private String certPath;
 	private String keyPassword;
 
 	@Min(0)
@@ -186,25 +184,32 @@ public class RediSearchConfig {
 		return this;
 	}
 
-	public Optional<@FileExists File> getCaCertPath() {
-		return Optional.ofNullable(caCertPath);
+	public Optional<String> getCaCertPath() {
+		return optionalPath(caCertPath);
+	}
+
+	private Optional<String> optionalPath(String path) {
+		if (path == null || path.isEmpty()) {
+			return Optional.empty();
+		}
+		return Optional.of(path);
 	}
 
 	@Config("redisearch.cacert-path")
 	@ConfigDescription("X.509 CA certificate file to verify with")
-	public RediSearchConfig setCaCertPath(File path) {
-		this.caCertPath = path;
+	public RediSearchConfig setCaCertPath(String caCertPath) {
+		this.caCertPath = caCertPath;
 		return this;
 	}
 
-	public Optional<@FileExists File> getKeyPath() {
-		return Optional.ofNullable(keyPath);
+	public Optional<String> getKeyPath() {
+		return optionalPath(keyPath);
 	}
 
 	@Config("redisearch.key-path")
 	@ConfigDescription("PKCS#8 private key file to authenticate with (PEM format)")
-	public RediSearchConfig setKeyPath(File path) {
-		this.keyPath = path;
+	public RediSearchConfig setKeyPath(String keyPath) {
+		this.keyPath = keyPath;
 		return this;
 	}
 
@@ -215,19 +220,19 @@ public class RediSearchConfig {
 	@Config("redisearch.key-password")
 	@ConfigSecuritySensitive
 	@ConfigDescription("Password of the private key file, or null if it's not password-protected")
-	public RediSearchConfig setKeyPassword(String password) {
-		this.keyPassword = password;
+	public RediSearchConfig setKeyPassword(String keyPassword) {
+		this.keyPassword = keyPassword;
 		return this;
 	}
 
-	public Optional<@FileExists File> getCertPath() {
-		return Optional.ofNullable(certPath);
+	public Optional<String> getCertPath() {
+		return optionalPath(certPath);
 	}
 
 	@Config("redisearch.cert-path")
 	@ConfigDescription("X.509 certificate chain file to authenticate with (PEM format)")
-	public RediSearchConfig setCertPath(File path) {
-		this.certPath = path;
+	public RediSearchConfig setCertPath(String certPath) {
+		this.certPath = certPath;
 		return this;
 	}
 
