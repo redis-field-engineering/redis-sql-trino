@@ -5,7 +5,6 @@
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 2.0.10">
-<meta name="author" content="Julien Ruaux &lt;julien@redis.com&gt;">
 <title>Redis SQL</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
 <link rel="stylesheet" href="./asciidoctor.css">
@@ -15,8 +14,7 @@
 <div id="header">
 <h1>Redis SQL</h1>
 <div class="details">
-<span id="author" class="author">Julien Ruaux &lt;julien@redis.com&gt;</span><br>
-<span id="revnumber">version 0.2.6</span>
+<span id="revnumber">version 0.2.7</span>
 </div>
 <div id="toc" class="toc2">
 <div id="toctitle">Table of Contents</div>
@@ -81,7 +79,10 @@
 <div class="sect2">
 <h3 id="redisearch-connector"><a class="anchor" href="#redisearch-connector"></a>2.2. RediSearch connector</h3>
 <div class="paragraph">
-<p>Download <a href="https://github.com/redis-field-engineering/redis-sql/releases/latest">latest release</a> and unzip without any directory structure under <code>&lt;trino&gt;/plugin/redisearch</code>.</p>
+<p>Download <a href="https://github.com/redis-field-engineering/redis-sql/releases/latest">latest release</a> and unzip without any directory structure under:</p>
+</div>
+<div class="paragraph">
+<p><code>&lt;trino&gt;/plugin/redisearch</code></p>
 </div>
 <div class="paragraph">
 <p>Create a RediSearch connector configuration file and change/add <a href="#properties">properties</a> as needed.</p>
@@ -98,7 +99,7 @@
 <div class="listingblock">
 <div class="title">etc/catalog/redisearch.properties</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="properties" class="language-properties hljs">connector.name=redisearch
+<pre class="CodeRay highlight"><code data-lang="properties">connector.name=redisearch
 redisearch.uri=redis://localhost:6379</code></pre>
 </div>
 </div>
@@ -239,7 +240,7 @@ redisearch.uri=redis://localhost:6379</code></pre>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="highlightjs highlight"><code class="language-none hljs">jdbc:trino://example.net:8080/redisearch/default</code></pre>
+<pre class="CodeRay highlight"><code>jdbc:trino://example.net:8080/redisearch/default</code></pre>
 </div>
 </div>
 </div>
@@ -265,7 +266,7 @@ redisearch.uri=redis://localhost:6379</code></pre>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">git clone https://github.com/redis-field-engineering/redis-sql.git
+<pre class="CodeRay highlight"><code data-lang="console">git clone https://github.com/redis-field-engineering/redis-sql.git
 cd Redis SQL
 ./mvnw clean package -DskipTests</code></pre>
 </div>
@@ -285,8 +286,8 @@ It is recommended to use <a href="https://www.azul.com/downloads/?package=jdk">A
 <div class="listingblock">
 <div class="title">Install Java</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">$ java -version
-openjdk version "17.0.4.1" 2022-08-12 LTS
+<pre class="CodeRay highlight"><code data-lang="console">$ java -version
+openjdk version &quot;17.0.4.1&quot; 2022-08-12 LTS
 OpenJDK Runtime Environment Zulu17.36+17-CA (build 17.0.4.1+1-LTS)
 OpenJDK 64-Bit Server VM Zulu17.36+17-CA (build 17.0.4.1+1-LTS, mixed mode, sharing)</code></pre>
 </div>
@@ -297,9 +298,9 @@ OpenJDK 64-Bit Server VM Zulu17.36+17-CA (build 17.0.4.1+1-LTS, mixed mode, shar
 <div class="listingblock">
 <div class="title">Install Trino</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">wget https://repo1.maven.org/maven2/io/trino/trino-server/395/trino-server-395.tar.gz
+<pre class="CodeRay highlight"><code data-lang="console">wget https://repo1.maven.org/maven2/io/trino/trino-server/403/trino-server-403.tar.gz
 mkdir /usr/lib/trino
-tar xzvf trino-server-395.tar.gz --directory /usr/lib/trino --strip-components 1</code></pre>
+tar xzvf trino-server-403.tar.gz --directory /usr/lib/trino --strip-components 1</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -309,7 +310,7 @@ It is recommended to create a data directory outside of the installation directo
 <div class="listingblock">
 <div class="title">Create a data directory</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">mkdir -p /var/trino</code></pre>
+<pre class="CodeRay highlight"><code data-lang="console">mkdir -p /var/trino</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -318,7 +319,7 @@ It is recommended to create a data directory outside of the installation directo
 <div class="listingblock">
 <div class="title">Create etc directory</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">mkdir /usr/lib/trino/etc</code></pre>
+<pre class="CodeRay highlight"><code data-lang="console">mkdir /usr/lib/trino/etc</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -327,7 +328,7 @@ It is recommended to create a data directory outside of the installation directo
 <div class="listingblock">
 <div class="title">etc/node.properties</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="properties" class="language-properties hljs">node.environment=production
+<pre class="CodeRay highlight"><code data-lang="properties">node.environment=production
 node.id=ffffffff-ffff-ffff-ffff-ffffffffffff
 node.data-dir=/var/trino</code></pre>
 </div>
@@ -338,7 +339,7 @@ node.data-dir=/var/trino</code></pre>
 <div class="listingblock">
 <div class="title">etc/jvm.config</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">-server
+<pre class="CodeRay highlight"><code data-lang="console">-server
 -Xmx16G
 -XX:InitialRAMPercentage=80
 -XX:MaxRAMPercentage=80
@@ -362,7 +363,7 @@ node.data-dir=/var/trino</code></pre>
 <div class="listingblock">
 <div class="title">etc/config.properties</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="properties" class="language-properties hljs">coordinator=true
+<pre class="CodeRay highlight"><code data-lang="properties">coordinator=true
 node-scheduler.include-coordinator=true
 http-server.http.port=8080
 discovery.uri=http://localhost:8080</code></pre>
@@ -374,7 +375,7 @@ discovery.uri=http://localhost:8080</code></pre>
 <div class="listingblock">
 <div class="title">etc/log.properties</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="properties" class="language-properties hljs">io.trino=INFO</code></pre>
+<pre class="CodeRay highlight"><code data-lang="properties">io.trino=INFO</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -383,8 +384,8 @@ discovery.uri=http://localhost:8080</code></pre>
 <div class="listingblock">
 <div class="title">Install RediSearch plugin</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">wget https://github.com/redis-field-engineering/redis-sql/releases/download/v395/trino-redisearch-395.zip
-unzip -j trino-redisearch-0.2.6.zip -d /usr/lib/trino/plugin/redisearch</code></pre>
+<pre class="CodeRay highlight"><code data-lang="console">wget https://github.com/redis-field-engineering/redis-sql/releases/download/v403/redis-sql-403.zip
+unzip -j redis-sql-0.2.7.zip -d /usr/lib/trino/plugin/redisearch</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -393,7 +394,7 @@ unzip -j trino-redisearch-0.2.6.zip -d /usr/lib/trino/plugin/redisearch</code></
 <div class="listingblock">
 <div class="title">etc/catalog/redisearch.properties</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="properties" class="language-properties hljs">connector.name=redisearch
+<pre class="CodeRay highlight"><code data-lang="properties">connector.name=redisearch
 redisearch.uri=redis://localhost:6379</code></pre>
 </div>
 </div>
@@ -406,17 +407,17 @@ redisearch.uri=redis://localhost:6379</code></pre>
 <div class="listingblock">
 <div class="title">Run Trino server</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">/usr/lib/trino/bin/launcher run</code></pre>
+<pre class="CodeRay highlight"><code data-lang="console">/usr/lib/trino/bin/launcher run</code></pre>
 </div>
 </div>
 <div class="paragraph">
-<p>Download <a href="https://repo1.maven.org/maven2/io/trino/trino-cli/395/trino-cli-395-executable.jar">trino-cli-395-executable.jar</a>, rename it to <code>trino</code>, make it executable with <code>chmod +x</code>, and run it to show the version of the CLI.</p>
+<p>Download <a href="https://repo1.maven.org/maven2/io/trino/trino-cli/403/trino-cli-403-executable.jar">trino-cli-403-executable.jar</a>, rename it to <code>trino</code>, make it executable with <code>chmod +x</code>, and run it to show the version of the CLI.</p>
 </div>
 <div class="listingblock">
 <div class="title">Install Trino CLI</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">wget https://repo1.maven.org/maven2/io/trino/trino-cli/395/trino-cli-395-executable.jar
-mv trino-cli-395-executable.jar trino
+<pre class="CodeRay highlight"><code data-lang="console">wget https://repo1.maven.org/maven2/io/trino/trino-cli/403/trino-cli-403-executable.jar
+mv trino-cli-403-executable.jar trino
 chmod +x trino</code></pre>
 </div>
 </div>
@@ -426,7 +427,7 @@ chmod +x trino</code></pre>
 <div class="listingblock">
 <div class="title">Run Trino CLI</div>
 <div class="content">
-<pre class="highlightjs highlight"><code data-lang="console" class="language-console hljs">./trino --catalog redisearch --schema default
+<pre class="CodeRay highlight"><code data-lang="console">./trino --catalog redisearch --schema default
 trino:default&gt; select * from mySearchIndex;</code></pre>
 </div>
 </div>
@@ -435,12 +436,10 @@ trino:default&gt; select * from mySearchIndex;</code></pre>
 </div>
 <div id="footer">
 <div id="footer-text">
-Version 0.2.6<br>
-Last updated 2022-10-12 06:35:54 UTC
+Version 0.2.7<br>
+Last updated 2022-11-17 00:33:01 UTC
 </div>
 </div>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.6/styles/github.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.6/highlight.min.js"></script>
-<script>hljs.initHighlighting()</script>
+<link rel="stylesheet" href="./coderay-asciidoctor.css">
 </body>
 </html>
