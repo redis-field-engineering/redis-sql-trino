@@ -5,7 +5,7 @@
 	<parent>
 		<groupId>io.trino</groupId>
 		<artifactId>trino-root</artifactId>
-		<version>395</version>
+		<version>403</version>
 	</parent>
 
 	<groupId>com.redis</groupId>
@@ -25,10 +25,11 @@
 	<properties>
 		<github.owner>redis-field-engineering</github.owner>
 		<github.repo>redis-sql</github.repo>
-		<lettucemod.version>3.1.5</lettucemod.version>
+		
+		<lettucemod.version>3.1.6</lettucemod.version>
 		<lettuce.version>6.2.0.RELEASE</lettuce.version>
 		<testcontainers-redis.version>1.6.2</testcontainers-redis.version>
-		<ulid.version>5.0.2</ulid.version>
+		<ulid.version>5.1.0</ulid.version>
 
 		<air.check.skip-license>true</air.check.skip-license>
 		<air.check.skip-checkstyle>true</air.check.skip-checkstyle>
@@ -36,7 +37,7 @@
 
 		<asciidoctor.maven.plugin.version>2.1.0</asciidoctor.maven.plugin.version>
 		<asciidoctorj.version>2.5.1</asciidoctorj.version>
-		<asciidoctorj.pdf.version>2.3.0</asciidoctorj.pdf.version>
+		<asciidoctorj.pdf.version>2.3.3</asciidoctorj.pdf.version>
 	</properties>
 	<issueManagement>
 		<system>github</system>
