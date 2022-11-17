@@ -10,7 +10,7 @@
 
 	<groupId>com.redis</groupId>
 	<artifactId>redis-sql</artifactId>
-	<version>0.2.7-SNAPSHOT</version>
+	<version>0.2.7</version>
 	<name>Redis SQL</name>
 	<description>Trino connector for RediSearch</description>
 	<packaging>trino-plugin</packaging>
