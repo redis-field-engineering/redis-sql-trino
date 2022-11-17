@@ -39,7 +39,7 @@ import io.trino.spi.connector.ConnectorSplit;
 
 public class RediSearchSplit implements ConnectorSplit {
 
-	private static final int INSTANCE_SIZE = ClassLayout.parseClass(RediSearchSplit.class).instanceSize();
+	private static final long INSTANCE_SIZE = ClassLayout.parseClass(RediSearchSplit.class).instanceSize();
 
 	private final List<HostAddress> addresses;
 

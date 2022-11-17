@@ -28,6 +28,7 @@ import javax.inject.Inject;
 import io.trino.spi.connector.ConnectorInsertTableHandle;
 import io.trino.spi.connector.ConnectorOutputTableHandle;
 import io.trino.spi.connector.ConnectorPageSink;
+import io.trino.spi.connector.ConnectorPageSinkId;
 import io.trino.spi.connector.ConnectorPageSinkProvider;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.ConnectorTransactionHandle;
@@ -43,14 +44,14 @@ public class RediSearchPageSinkProvider implements ConnectorPageSinkProvider {
 
 	@Override
 	public ConnectorPageSink createPageSink(ConnectorTransactionHandle transactionHandle, ConnectorSession session,
-			ConnectorOutputTableHandle outputTableHandle) {
+			ConnectorOutputTableHandle outputTableHandle, ConnectorPageSinkId pageSinkId) {
 		RediSearchOutputTableHandle handle = (RediSearchOutputTableHandle) outputTableHandle;
 		return new RediSearchPageSink(rediSearchSession, handle.getSchemaTableName(), handle.getColumns());
 	}
 
 	@Override
 	public ConnectorPageSink createPageSink(ConnectorTransactionHandle transactionHandle, ConnectorSession session,
-			ConnectorInsertTableHandle insertTableHandle) {
+			ConnectorInsertTableHandle insertTableHandle, ConnectorPageSinkId pageSinkId) {
 		RediSearchInsertTableHandle handle = (RediSearchInsertTableHandle) insertTableHandle;
 		return new RediSearchPageSink(rediSearchSession, handle.getSchemaTableName(), handle.getColumns());
 	}

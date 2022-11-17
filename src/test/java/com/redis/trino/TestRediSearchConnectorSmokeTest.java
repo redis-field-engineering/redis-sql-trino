@@ -16,11 +16,11 @@ import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
 
 import com.google.common.base.Throwables;
+import com.redis.lettucemod.Beers;
 import com.redis.lettucemod.api.sync.RedisModulesCommands;
 import com.redis.lettucemod.search.CreateOptions;
 import com.redis.lettucemod.search.CreateOptions.DataType;
 import com.redis.lettucemod.search.Field;
-import com.redis.lettucemod.test.Beers;
 
 import io.airlift.log.Logger;
 import io.trino.spi.TrinoException;
