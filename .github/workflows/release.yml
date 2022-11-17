@@ -62,7 +62,7 @@ jobs:
       - name: Commit release version
         run: |
           VERSION=${{ github.event.inputs.version }}
-          sed -i -e "s/^\:project-version\:\ .*/:project-version: $VERSION/g" README.adoc
+          sed -i -e "s/^\:project-version\:\ \ \ .*/:project-version:   $VERSION/g" README.adoc
           git add pom.xml
           git add README.adoc
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"

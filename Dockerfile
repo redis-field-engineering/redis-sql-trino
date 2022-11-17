@@ -1,4 +1,4 @@
-ARG TRINO_VERSION=395
+ARG TRINO_VERSION=403
 
 FROM docker.io/library/maven:3.8.6-openjdk-18 AS builder
 WORKDIR /root/redis-sql
