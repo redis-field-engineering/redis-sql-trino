@@ -18,6 +18,7 @@ jobs:
       - name: Set up Java
         uses: actions/setup-java@v3
         with:
+          distribution: zulu
           java-version: 17
 
       - uses: actions/cache@v2
