@@ -32,12 +32,13 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.type.Type;
 
-public class TermAggregation {
+public class RediSearchAggregationTerm {
+
 	private final String term;
 	private final Type type;
 
 	@JsonCreator
-	public TermAggregation(@JsonProperty("term") String term, @JsonProperty("type") Type type) {
+	public RediSearchAggregationTerm(@JsonProperty("term") String term, @JsonProperty("type") Type type) {
 		this.term = term;
 		this.type = type;
 	}
@@ -52,9 +53,9 @@ public class TermAggregation {
 		return type;
 	}
 
-	public static Optional<TermAggregation> fromColumnHandle(ColumnHandle columnHandle) {
+	public static Optional<RediSearchAggregationTerm> fromColumnHandle(ColumnHandle columnHandle) {
 		RediSearchColumnHandle column = (RediSearchColumnHandle) columnHandle;
-		return Optional.of(new TermAggregation(column.getName(), column.getType()));
+		return Optional.of(new RediSearchAggregationTerm(column.getName(), column.getType()));
 	}
 
 	@Override
@@ -65,7 +66,7 @@ public class TermAggregation {
 		if (o == null || getClass() != o.getClass()) {
 			return false;
 		}
-		TermAggregation that = (TermAggregation) o;
+		RediSearchAggregationTerm that = (RediSearchAggregationTerm) o;
 		return Objects.equals(term, that.term) && Objects.equals(type, that.type);
 	}
 

@@ -50,8 +50,8 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	private final TupleDomain<ColumnHandle> constraint;
 	private final OptionalLong limit;
 	// for group by fields
-	private final List<TermAggregation> termAggregations;
-	private final List<MetricAggregation> metricAggregations;
+	private final List<RediSearchAggregationTerm> aggregationTerms;
+	private final List<RediSearchAggregation> aggregations;
 	private final Map<String, String> wildcards;
 
 	public RediSearchTableHandle(Type type, SchemaTableName schemaTableName) {
@@ -63,15 +63,15 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	public RediSearchTableHandle(@JsonProperty("type") Type type,
 			@JsonProperty("schemaTableName") SchemaTableName schemaTableName,
 			@JsonProperty("constraint") TupleDomain<ColumnHandle> constraint, @JsonProperty("limit") OptionalLong limit,
-			@JsonProperty("aggTerms") List<TermAggregation> termAggregations,
-			@JsonProperty("aggregates") List<MetricAggregation> metricAggregations,
+			@JsonProperty("aggTerms") List<RediSearchAggregationTerm> aggregationTerms,
+			@JsonProperty("aggregates") List<RediSearchAggregation> aggregates,
 			@JsonProperty("wildcards") Map<String, String> wildcards) {
 		this.type = requireNonNull(type, "type is null");
 		this.schemaTableName = requireNonNull(schemaTableName, "schemaTableName is null");
 		this.constraint = requireNonNull(constraint, "constraint is null");
 		this.limit = requireNonNull(limit, "limit is null");
-		this.termAggregations = requireNonNull(termAggregations, "aggTerms is null");
-		this.metricAggregations = requireNonNull(metricAggregations, "aggregates is null");
+		this.aggregationTerms = requireNonNull(aggregationTerms, "aggTerms is null");
+		this.aggregations = requireNonNull(aggregates, "aggregates is null");
 		this.wildcards = requireNonNull(wildcards, "wildcards is null");
 	}
 
@@ -96,13 +96,13 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	}
 
 	@JsonProperty
-	public List<TermAggregation> getTermAggregations() {
-		return termAggregations;
+	public List<RediSearchAggregationTerm> getAggregationTerms() {
+		return aggregationTerms;
 	}
 
 	@JsonProperty
-	public List<MetricAggregation> getMetricAggregations() {
-		return metricAggregations;
+	public List<RediSearchAggregation> getAggregations() {
+		return aggregations;
 	}
 
 	@JsonProperty

@@ -266,7 +266,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 		return Optional.of(new LimitApplicationResult<>(new RediSearchTableHandle(handle.getType(),
 				handle.getSchemaTableName(), handle.getConstraint(), OptionalLong.of(limit),
-				handle.getTermAggregations(), handle.getMetricAggregations(), handle.getWildcards()), true, false));
+				handle.getAggregationTerms(), handle.getAggregations(), handle.getWildcards()), true, false));
 	}
 
 	@Override
@@ -329,7 +329,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		}
 
 		handle = new RediSearchTableHandle(handle.getType(), handle.getSchemaTableName(), newDomain, handle.getLimit(),
-				handle.getTermAggregations(), handle.getMetricAggregations(), newWildcards);
+				handle.getAggregationTerms(), handle.getAggregations(), newWildcards);
 
 		return Optional.of(new ConstraintApplicationResult<>(handle, TupleDomain.withColumnDomains(unsupported),
 				newExpression, false));
@@ -420,19 +420,19 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		RediSearchTableHandle table = (RediSearchTableHandle) handle;
 		// Global aggregation is represented by [[]]
 		verify(!groupingSets.isEmpty(), "No grouping sets provided");
-		if (!table.getTermAggregations().isEmpty()) {
+		if (!table.getAggregationTerms().isEmpty()) {
 			return Optional.empty();
 		}
 		ImmutableList.Builder<ConnectorExpression> projections = ImmutableList.builder();
 		ImmutableList.Builder<Assignment> resultAssignments = ImmutableList.builder();
-		ImmutableList.Builder<MetricAggregation> metricAggregations = ImmutableList.builder();
-		ImmutableList.Builder<TermAggregation> termAggregations = ImmutableList.builder();
+		ImmutableList.Builder<RediSearchAggregation> aggregations = ImmutableList.builder();
+		ImmutableList.Builder<RediSearchAggregationTerm> terms = ImmutableList.builder();
 		for (int i = 0; i < aggregates.size(); i++) {
 			AggregateFunction function = aggregates.get(i);
 			String colName = SYNTHETIC_COLUMN_NAME_PREFIX + i;
-			Optional<MetricAggregation> metricAggregation = MetricAggregation.handleAggregation(function, assignments,
+			Optional<RediSearchAggregation> aggregation = RediSearchAggregation.handleAggregation(function, assignments,
 					colName);
-			if (metricAggregation.isEmpty()) {
+			if (aggregation.isEmpty()) {
 				return Optional.empty();
 			}
 			io.trino.spi.type.Type outputType = function.getOutputType();
@@ -440,21 +440,22 @@ public class RediSearchMetadata implements ConnectorMetadata {
 					RediSearchSession.toFieldType(outputType), false, true);
 			projections.add(new Variable(colName, function.getOutputType()));
 			resultAssignments.add(new Assignment(colName, newColumn, function.getOutputType()));
-			metricAggregations.add(metricAggregation.get());
+			aggregations.add(aggregation.get());
 		}
 		for (ColumnHandle columnHandle : groupingSets.get(0)) {
-			Optional<TermAggregation> termAggregation = TermAggregation.fromColumnHandle(columnHandle);
+			Optional<RediSearchAggregationTerm> termAggregation = RediSearchAggregationTerm
+					.fromColumnHandle(columnHandle);
 			if (termAggregation.isEmpty()) {
 				return Optional.empty();
 			}
-			termAggregations.add(termAggregation.get());
+			terms.add(termAggregation.get());
 		}
-		ImmutableList<MetricAggregation> metrics = metricAggregations.build();
-		if (metrics.isEmpty()) {
+		ImmutableList<RediSearchAggregation> aggregationList = aggregations.build();
+		if (aggregationList.isEmpty()) {
 			return Optional.empty();
 		}
 		RediSearchTableHandle tableHandle = new RediSearchTableHandle(Type.AGGREGATE, table.getSchemaTableName(),
-				table.getConstraint(), table.getLimit(), termAggregations.build(), metrics, table.getWildcards());
+				table.getConstraint(), table.getLimit(), terms.build(), aggregationList, table.getWildcards());
 		return Optional.of(new AggregationApplicationResult<>(tableHandle, projections.build(),
 				resultAssignments.build(), Map.of(), false));
 	}

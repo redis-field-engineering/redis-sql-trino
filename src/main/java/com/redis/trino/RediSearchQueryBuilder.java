@@ -74,11 +74,11 @@ public class RediSearchQueryBuilder {
 
 	private static final Logger log = Logger.get(RediSearchQueryBuilder.class);
 
-	private static final Map<String, BiFunction<String, String, Reducer>> CONVERTERS = Map.of(MetricAggregation.MAX,
-			(alias, field) -> Max.property(field).as(alias).build(), MetricAggregation.MIN,
-			(alias, field) -> Min.property(field).as(alias).build(), MetricAggregation.SUM,
-			(alias, field) -> Sum.property(field).as(alias).build(), MetricAggregation.AVG,
-			(alias, field) -> Avg.property(field).as(alias).build(), MetricAggregation.COUNT,
+	private static final Map<String, BiFunction<String, String, Reducer>> CONVERTERS = Map.of(RediSearchAggregation.MAX,
+			(alias, field) -> Max.property(field).as(alias).build(), RediSearchAggregation.MIN,
+			(alias, field) -> Min.property(field).as(alias).build(), RediSearchAggregation.SUM,
+			(alias, field) -> Sum.property(field).as(alias).build(), RediSearchAggregation.AVG,
+			(alias, field) -> Avg.property(field).as(alias).build(), RediSearchAggregation.COUNT,
 			(alias, field) -> Count.as(alias));
 
 	public String buildQuery(TupleDomain<ColumnHandle> tupleDomain) {
@@ -231,18 +231,18 @@ public class RediSearchQueryBuilder {
 		throw new IllegalArgumentException("Unhandled type: " + type);
 	}
 
-	private Reducer reducer(MetricAggregation aggregation) {
+	private Reducer reducer(RediSearchAggregation aggregation) {
 		Optional<RediSearchColumnHandle> column = aggregation.getColumnHandle();
 		String field = column.isPresent() ? column.get().getName() : null;
 		return CONVERTERS.get(aggregation.getFunctionName()).apply(aggregation.getAlias(), field);
 	}
 
 	public Optional<Group> group(RediSearchTableHandle table) {
-		List<TermAggregation> terms = table.getTermAggregations();
-		List<MetricAggregation> aggregates = table.getMetricAggregations();
+		List<RediSearchAggregationTerm> terms = table.getAggregationTerms();
+		List<RediSearchAggregation> aggregates = table.getAggregations();
 		List<String> groupFields = new ArrayList<>();
 		if (terms != null && !terms.isEmpty()) {
-			groupFields = terms.stream().map(TermAggregation::getTerm).collect(Collectors.toList());
+			groupFields = terms.stream().map(RediSearchAggregationTerm::getTerm).collect(Collectors.toList());
 		}
 		List<Reducer> reducers = aggregates.stream().map(this::reducer).collect(Collectors.toList());
 		if (reducers.isEmpty()) {

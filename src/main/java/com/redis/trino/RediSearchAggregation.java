@@ -44,7 +44,7 @@ import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.expression.Variable;
 import io.trino.spi.type.Type;
 
-public class MetricAggregation {
+public class RediSearchAggregation {
 
 	public static final String MAX = "max";
 	public static final String MIN = "min";
@@ -59,7 +59,7 @@ public class MetricAggregation {
 	private final String alias;
 
 	@JsonCreator
-	public MetricAggregation(@JsonProperty("functionName") String functionName,
+	public RediSearchAggregation(@JsonProperty("functionName") String functionName,
 			@JsonProperty("outputType") Type outputType,
 			@JsonProperty("columnHandle") Optional<RediSearchColumnHandle> columnHandle,
 			@JsonProperty("alias") String alias) {
@@ -93,26 +93,21 @@ public class MetricAggregation {
 		return NUMERIC_TYPES.contains(type);
 	}
 
-	public static Optional<MetricAggregation> handleAggregation(AggregateFunction function,
+	public static Optional<RediSearchAggregation> handleAggregation(AggregateFunction function,
 			Map<String, ColumnHandle> assignments, String alias) {
 		if (!SUPPORTED_AGGREGATION_FUNCTIONS.contains(function.getFunctionName())) {
 			return Optional.empty();
 		}
-		// check
-		// 1. Function input can be found in assignments
-		// 2. Target type of column being aggregate must be numeric type
-		// 3. ColumnHandle support predicates(since text treats as VARCHAR, but text can
-		// not be treats as term in es by default
 		Optional<RediSearchColumnHandle> parameterColumnHandle = function.getArguments().stream()
 				.filter(Variable.class::isInstance).map(Variable.class::cast).map(Variable::getName)
 				.filter(assignments::containsKey).findFirst().map(assignments::get)
 				.map(RediSearchColumnHandle.class::cast)
-				.filter(column -> MetricAggregation.isNumericType(column.getType()));
-		// only count can accept empty ElasticsearchColumnHandle
-		if (!COUNT.equals(function.getFunctionName()) && parameterColumnHandle.isEmpty()) {
+				.filter(column -> RediSearchAggregation.isNumericType(column.getType()));
+		// only count can accept empty RediSearchColumnHandle
+		if (parameterColumnHandle.isEmpty() && !COUNT.equals(function.getFunctionName())) {
 			return Optional.empty();
 		}
-		return Optional.of(new MetricAggregation(function.getFunctionName(), function.getOutputType(),
+		return Optional.of(new RediSearchAggregation(function.getFunctionName(), function.getOutputType(),
 				parameterColumnHandle, alias));
 	}
 
@@ -124,7 +119,7 @@ public class MetricAggregation {
 		if (o == null || getClass() != o.getClass()) {
 			return false;
 		}
-		MetricAggregation that = (MetricAggregation) o;
+		RediSearchAggregation that = (RediSearchAggregation) o;
 		return Objects.equals(functionName, that.functionName) && Objects.equals(outputType, that.outputType)
 				&& Objects.equals(columnHandle, that.columnHandle) && Objects.equals(alias, that.alias);
 	}
