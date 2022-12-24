@@ -238,8 +238,8 @@ public class RediSearchQueryBuilder {
 	}
 
 	public Optional<Group> group(RediSearchTableHandle table) {
-		List<RediSearchAggregationTerm> terms = table.getAggregationTerms();
-		List<RediSearchAggregation> aggregates = table.getAggregations();
+		List<RediSearchAggregationTerm> terms = table.getTermAggregations();
+		List<RediSearchAggregation> aggregates = table.getMetricAggregations();
 		List<String> groupFields = new ArrayList<>();
 		if (terms != null && !terms.isEmpty()) {
 			groupFields = terms.stream().map(RediSearchAggregationTerm::getTerm).collect(Collectors.toList());

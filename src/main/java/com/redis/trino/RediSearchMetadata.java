@@ -266,7 +266,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 		return Optional.of(new LimitApplicationResult<>(new RediSearchTableHandle(handle.getType(),
 				handle.getSchemaTableName(), handle.getConstraint(), OptionalLong.of(limit),
-				handle.getAggregationTerms(), handle.getAggregations(), handle.getWildcards()), true, false));
+				handle.getTermAggregations(), handle.getMetricAggregations(), handle.getWildcards()), true, false));
 	}
 
 	@Override
@@ -329,7 +329,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		}
 
 		handle = new RediSearchTableHandle(handle.getType(), handle.getSchemaTableName(), newDomain, handle.getLimit(),
-				handle.getAggregationTerms(), handle.getAggregations(), newWildcards);
+				handle.getTermAggregations(), handle.getMetricAggregations(), newWildcards);
 
 		return Optional.of(new ConstraintApplicationResult<>(handle, TupleDomain.withColumnDomains(unsupported),
 				newExpression, false));
@@ -420,7 +420,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		RediSearchTableHandle table = (RediSearchTableHandle) handle;
 		// Global aggregation is represented by [[]]
 		verify(!groupingSets.isEmpty(), "No grouping sets provided");
-		if (!table.getAggregationTerms().isEmpty()) {
+		if (!table.getTermAggregations().isEmpty()) {
 			return Optional.empty();
 		}
 		ImmutableList.Builder<ConnectorExpression> projections = ImmutableList.builder();
