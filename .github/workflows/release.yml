@@ -102,3 +102,12 @@ jobs:
         with:
           github_token: ${{ secrets.GIT_ACCESS_TOKEN }}
           publish_dir: ./target/generated-docs
+          
+      - name: Commit next development version
+        run: |
+          ./mvnw build-helper:parse-version versions:set -DnewVersion=\${parsedVersion.majorVersion}.\${parsedVersion.minorVersion}.\${parsedVersion.nextIncrementalVersion}-SNAPSHOT
+          git add pom.xml
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "GitHub Action"
+          git commit -a -m "build: Bump for next development cycle"
+          git push origin ${{ github.event.inputs.ref }}
