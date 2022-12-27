@@ -109,8 +109,24 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 
 	@Test
 	public void testNonIndexedFields() throws IOException {
+		try {
+			redisearch.getTestContext().sync().ftDropindexDeleteDocs(Beers.INDEX);
+		} catch (Exception e) {
+			// ignore
+		}
 		Beers.populateIndex(redisearch.getTestContext().getConnection());
 		getQueryRunner().execute("select id, last_mod from beers");
+	}
+
+	@Test
+	public void testBuiltinFields() throws IOException {
+		try {
+			redisearch.getTestContext().sync().ftDropindexDeleteDocs(Beers.INDEX);
+		} catch (Exception e) {
+			// ignore
+		}
+		Beers.populateIndex(redisearch.getTestContext().getConnection());
+		getQueryRunner().execute("select _id, _score from beers");
 	}
 
 	@SuppressWarnings("unchecked")

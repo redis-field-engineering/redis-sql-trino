@@ -58,8 +58,8 @@ public class RediSearchPageSource implements ConnectorPageSource {
 
 	public RediSearchPageSource(RediSearchSession rediSearchSession, RediSearchTableHandle tableHandle,
 			List<RediSearchColumnHandle> columns) {
-		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).collect(Collectors.toList());
-		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType).collect(Collectors.toList());
+		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).collect(Collectors.toUnmodifiableList());
+		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType).collect(Collectors.toUnmodifiableList());
 		this.cursor = rediSearchSession.search(tableHandle, columns).iterator();
 		this.currentDoc = null;
 		this.pageBuilder = new PageBuilder(columnTypes);
@@ -100,7 +100,8 @@ public class RediSearchPageSource implements ConnectorPageSource {
 			pageBuilder.declarePosition();
 			for (int column = 0; column < columnTypes.size(); column++) {
 				BlockBuilder output = pageBuilder.getBlockBuilder(column);
-				String value = currentDoc.get(columnNames.get(column));
+				String columnName = columnNames.get(column);
+				String value = currentValue(columnName);
 				if (value == null) {
 					output.appendNull();
 				} else {
@@ -112,6 +113,18 @@ public class RediSearchPageSource implements ConnectorPageSource {
 		Page page = pageBuilder.build();
 		pageBuilder.reset();
 		return page;
+	}
+
+	private String currentValue(String columnName) {
+		if (RediSearchBuiltinField.isBuiltinColumn(columnName)) {
+			if (RediSearchBuiltinField.ID.getName().equals(columnName)) {
+				return currentDoc.getId();
+			}
+			if (RediSearchBuiltinField.SCORE.getName().equals(columnName)) {
+				return String.valueOf(currentDoc.getScore());
+			}
+		}
+		return currentDoc.get(columnName);
 	}
 
 	public static JsonGenerator createJsonGenerator(JsonFactory factory, SliceOutput output) throws IOException {

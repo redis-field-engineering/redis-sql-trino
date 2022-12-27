@@ -217,25 +217,28 @@ public class RediSearchSession {
 			throw new TableNotFoundException(schemaTableName, format("Index '%s' not found", index), null);
 		}
 		Set<String> fields = new HashSet<>();
-		ImmutableList.Builder<RediSearchColumnHandle> columnHandles = ImmutableList.builder();
-		for (Field<String> field : indexInfo.get().getFields()) {
-			RediSearchColumnHandle column = buildColumnHandle(field);
+		ImmutableList.Builder<RediSearchColumnHandle> columns = ImmutableList.builder();
+		for (RediSearchBuiltinField builtinfield : RediSearchBuiltinField.values()) {
+			fields.add(builtinfield.getName());
+			columns.add(builtinfield.getColumnHandle());
+		}
+		for (Field<String> indexedField : indexInfo.get().getFields()) {
+			RediSearchColumnHandle column = buildColumnHandle(indexedField);
 			fields.add(column.getName());
-			columnHandles.add(column);
+			columns.add(column);
 		}
 		SearchResults<String, String> results = connection.sync().ftSearch(index, "*");
 		for (Document<String, String> doc : results) {
-			for (String field : doc.keySet()) {
-				if (fields.contains(field)) {
+			for (String docField : doc.keySet()) {
+				if (fields.contains(docField)) {
 					continue;
 				}
-				columnHandles
-						.add(new RediSearchColumnHandle(field, VarcharType.VARCHAR, Field.Type.TEXT, false, false));
-				fields.add(field);
+				columns.add(new RediSearchColumnHandle(docField, VarcharType.VARCHAR, Field.Type.TEXT, false, false));
+				fields.add(docField);
 			}
 		}
 		return new RediSearchTable(new RediSearchTableHandle(RediSearchTableHandle.Type.SEARCH, schemaTableName),
-				columnHandles.build());
+				columns.build());
 	}
 
 	private Optional<IndexInfo> indexInfo(String index) {
