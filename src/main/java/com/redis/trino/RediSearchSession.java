@@ -34,8 +34,10 @@ import static java.util.Objects.requireNonNull;
 
 import java.io.File;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -48,10 +50,12 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.UncheckedExecutionException;
 import com.redis.lettucemod.api.StatefulRedisModulesConnection;
+import com.redis.lettucemod.search.AggregateOperation;
 import com.redis.lettucemod.search.AggregateWithCursorResults;
 import com.redis.lettucemod.search.CreateOptions;
 import com.redis.lettucemod.search.Document;
 import com.redis.lettucemod.search.Field;
+import com.redis.lettucemod.search.Group;
 import com.redis.lettucemod.search.IndexInfo;
 import com.redis.lettucemod.search.SearchResults;
 import com.redis.lettucemod.util.ClientBuilder;
@@ -161,6 +165,12 @@ public class RediSearchSession {
 		return builder.build();
 	}
 
+	/**
+	 * 
+	 * @param schemaTableName SchemaTableName to load
+	 * @return RediSearchTable describing the RediSearch index
+	 * @throws TableNotFoundException if no index by that name was found
+	 */
 	public RediSearchTable getTable(SchemaTableName tableName) throws TableNotFoundException {
 		try {
 			return tableCache.getUnchecked(tableName);
@@ -172,13 +182,13 @@ public class RediSearchSession {
 
 	@SuppressWarnings("unchecked")
 	public void createTable(SchemaTableName schemaTableName, List<RediSearchColumnHandle> columns) {
-		String tableName = schemaTableName.getTableName();
-		if (!connection.sync().ftList().contains(tableName)) {
+		String index = index(schemaTableName);
+		if (!connection.sync().ftList().contains(index)) {
 			List<Field<String>> fields = columns.stream().filter(c -> !c.getName().equals("_id"))
-					.map(c -> buildField(c.getName(), c.getType())).collect(Collectors.toList());
+					.map(c -> buildField(c.getName(), c.getType())).collect(Collectors.toUnmodifiableList());
 			CreateOptions.Builder<String, String> options = CreateOptions.<String, String>builder();
-			options.prefix(tableName + ":");
-			connection.sync().ftCreate(tableName, options.build(), fields.toArray(Field[]::new));
+			options.prefix(index + ":");
+			connection.sync().ftCreate(index, options.build(), fields.toArray(Field[]::new));
 		}
 	}
 
@@ -210,19 +220,26 @@ public class RediSearchSession {
 		throw new TrinoException(NOT_SUPPORTED, "This connector does not support dropping columns");
 	}
 
-	private RediSearchTable loadTableSchema(SchemaTableName schemaTableName) {
+	/**
+	 * 
+	 * @param schemaTableName SchemaTableName to load
+	 * @return RediSearchTable describing the RediSearch index
+	 * @throws TableNotFoundException if no index by that name was found
+	 */
+	private RediSearchTable loadTableSchema(SchemaTableName schemaTableName) throws TableNotFoundException {
 		String index = schemaTableName.getTableName();
-		Optional<IndexInfo> indexInfo = indexInfo(index);
-		if (indexInfo.isEmpty()) {
+		Optional<IndexInfo> indexInfoOptional = indexInfo(index);
+		if (indexInfoOptional.isEmpty()) {
 			throw new TableNotFoundException(schemaTableName, format("Index '%s' not found", index), null);
 		}
+		IndexInfo indexInfo = indexInfoOptional.get();
 		Set<String> fields = new HashSet<>();
 		ImmutableList.Builder<RediSearchColumnHandle> columns = ImmutableList.builder();
 		for (RediSearchBuiltinField builtinfield : RediSearchBuiltinField.values()) {
 			fields.add(builtinfield.getName());
 			columns.add(builtinfield.getColumnHandle());
 		}
-		for (Field<String> indexedField : indexInfo.get().getFields()) {
+		for (Field<String> indexedField : indexInfo.getFields()) {
 			RediSearchColumnHandle column = buildColumnHandle(indexedField);
 			fields.add(column.getName());
 			columns.add(column);
@@ -237,8 +254,9 @@ public class RediSearchSession {
 				fields.add(docField);
 			}
 		}
-		return new RediSearchTable(new RediSearchTableHandle(RediSearchTableHandle.Type.SEARCH, schemaTableName),
-				columns.build());
+		RediSearchTableHandle tableHandle = new RediSearchTableHandle(RediSearchTableHandle.Type.SEARCH,
+				schemaTableName);
+		return new RediSearchTable(tableHandle, columns.build(), indexInfo);
 	}
 
 	private Optional<IndexInfo> indexInfo(String index) {
@@ -278,8 +296,7 @@ public class RediSearchSession {
 		return typeManager.fromSqlType(typeSignature.toString());
 	}
 
-	public SearchResults<String, String> search(RediSearchTableHandle tableHandle,
-			List<RediSearchColumnHandle> columns) {
+	public SearchResults<String, String> search(RediSearchTableHandle tableHandle, String[] columns) {
 		Search search = translator.search(tableHandle, columns);
 		log.info("Running %s", search);
 		return connection.sync().ftSearch(search.getIndex(), search.getQuery(), search.getOptions());
@@ -288,20 +305,32 @@ public class RediSearchSession {
 	public AggregateWithCursorResults<String> aggregate(RediSearchTableHandle table) {
 		Aggregation aggregation = translator.aggregate(table);
 		log.info("Running %s", aggregation);
-		return connection.sync().ftAggregate(aggregation.getIndex(), aggregation.getQuery(),
-				aggregation.getCursorOptions(), aggregation.getOptions());
+		AggregateWithCursorResults<String> results = connection.sync().ftAggregate(aggregation.getIndex(),
+				aggregation.getQuery(), aggregation.getCursorOptions(), aggregation.getOptions());
+		List<AggregateOperation<?, ?>> groupBys = aggregation.getOptions().getOperations().stream()
+				.filter(o -> o.getType() == AggregateOperation.Type.GROUP).collect(Collectors.toUnmodifiableList());
+		if (results.isEmpty() && !groupBys.isEmpty()) {
+			Group groupBy = (Group) groupBys.get(0);
+			Optional<String> as = groupBy.getReducers()[0].getAs();
+			if (as.isPresent()) {
+				Map<String, Object> doc = new HashMap<>();
+				doc.put(as.get(), 0);
+				results.add(doc);
+			}
+		}
+		return results;
 	}
 
 	public AggregateWithCursorResults<String> cursorRead(RediSearchTableHandle tableHandle, long cursor) {
-		String index = index(tableHandle);
+		String index = index(tableHandle.getSchemaTableName());
 		if (config.getCursorCount() > 0) {
 			return connection.sync().ftCursorRead(index, cursor, config.getCursorCount());
 		}
 		return connection.sync().ftCursorRead(index, cursor);
 	}
 
-	private String index(RediSearchTableHandle tableHandle) {
-		return tableHandle.getSchemaTableName().getTableName();
+	private String index(SchemaTableName schemaTableName) {
+		return schemaTableName.getTableName();
 	}
 
 	private Field<String> buildField(String columnName, Type columnType) {
@@ -381,7 +410,11 @@ public class RediSearchSession {
 	}
 
 	public void cursorDelete(RediSearchTableHandle tableHandle, long cursor) {
-		connection.sync().ftCursorDelete(index(tableHandle), cursor);
+		connection.sync().ftCursorDelete(index(tableHandle.getSchemaTableName()), cursor);
+	}
+
+	public Long deleteDocs(List<String> docIds) {
+		return connection.sync().del(docIds.toArray(String[]::new));
 	}
 
 }

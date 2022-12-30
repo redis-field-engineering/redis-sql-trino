@@ -1,15 +1,16 @@
 package com.redis.trino;
 
-import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_CREATE_TABLE;
-import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_INSERT;
 import static io.trino.tpch.TpchTable.CUSTOMER;
 import static io.trino.tpch.TpchTable.NATION;
 import static io.trino.tpch.TpchTable.ORDERS;
 import static io.trino.tpch.TpchTable.REGION;
 import static java.util.Objects.requireNonNull;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertTrue;
 
 import java.io.IOException;
+import java.util.List;
 
 import org.testng.SkipException;
 import org.testng.annotations.AfterClass;
@@ -28,13 +29,21 @@ import io.trino.sql.parser.ParsingException;
 import io.trino.testing.BaseConnectorSmokeTest;
 import io.trino.testing.QueryRunner;
 import io.trino.testing.TestingConnectorBehavior;
-import io.trino.testing.sql.TestTable;
 
 public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 
 	private static final Logger log = Logger.get(TestRediSearchConnectorSmokeTest.class);
 
 	private RediSearchServer redisearch;
+
+	private void populateBeers() throws IOException {
+		try {
+			redisearch.getTestContext().sync().ftDropindexDeleteDocs(Beers.INDEX);
+		} catch (Exception e) {
+			// ignore
+		}
+		Beers.populateIndex(redisearch.getTestContext().getConnection());
+	}
 
 	@Override
 	protected boolean hasBehavior(TestingConnectorBehavior connectorBehavior) {
@@ -69,7 +78,7 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 			return false;
 
 		case SUPPORTS_DELETE:
-			return false;
+			return true;
 
 		case SUPPORTS_RENAME_TABLE_ACROSS_SCHEMAS:
 			return false;
@@ -109,24 +118,25 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 
 	@Test
 	public void testNonIndexedFields() throws IOException {
-		try {
-			redisearch.getTestContext().sync().ftDropindexDeleteDocs(Beers.INDEX);
-		} catch (Exception e) {
-			// ignore
-		}
-		Beers.populateIndex(redisearch.getTestContext().getConnection());
+		populateBeers();
 		getQueryRunner().execute("select id, last_mod from beers");
 	}
 
 	@Test
 	public void testBuiltinFields() throws IOException {
+		populateBeers();
+		getQueryRunner().execute("select _id, _score from beers");
+	}
+
+	@Test
+	public void testCountEmptyIndex() throws IOException {
 		try {
 			redisearch.getTestContext().sync().ftDropindexDeleteDocs(Beers.INDEX);
 		} catch (Exception e) {
 			// ignore
 		}
-		Beers.populateIndex(redisearch.getTestContext().getConnection());
-		getQueryRunner().execute("select _id, _score from beers");
+		Beers.createIndex(redisearch.getTestContext().getConnection());
+		assertQuery("SELECT count(*) FROM beers", "VALUES 0");
 	}
 
 	@SuppressWarnings("unchecked")
@@ -150,24 +160,19 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 		throw new SkipException("Not supported by RediSearch connector");
 	}
 
-	@SuppressWarnings("resource")
 	@Test
-	public void testInsert() {
-		if (!hasBehavior(SUPPORTS_INSERT)) {
-			assertQueryFails("INSERT INTO region (regionkey) VALUES (42)", "This connector does not support inserts");
-			return;
+	public void testInsertIndex() throws IOException {
+		try {
+			redisearch.getTestContext().sync().ftDropindexDeleteDocs(Beers.INDEX);
+		} catch (Exception e) {
+			// ignore
 		}
-
-		if (!hasBehavior(SUPPORTS_CREATE_TABLE)) {
-			throw new AssertionError(
-					"Cannot test INSERT without CREATE TABLE, the test needs to be implemented in a connector-specific way");
-		}
-
-		try (TestTable table = new TestTable(getQueryRunner()::execute, "test_insert_", "(a bigint, b double)")) {
-			assertUpdate("INSERT INTO " + table.getName() + " (a, b) VALUES (42, -38.5)", 1);
-			assertThat(query("SELECT CAST(a AS bigint), b FROM " + table.getName()))
-					.matches("VALUES (BIGINT '42', -385e-1)");
-		}
+		Beers.createIndex(redisearch.getTestContext().getConnection());
+		assertUpdate("INSERT INTO beers (id, name) VALUES ('abc', 'mybeer')", 1);
+		assertThat(query("SELECT id, name FROM beers")).matches("VALUES (VARCHAR 'abc', VARCHAR 'mybeer')");
+		List<String> keys = redisearch.getTestContext().sync().keys("beer:*");
+		assertEquals(keys.size(), 1);
+		assertTrue(keys.get(0).startsWith("beer:"));
 	}
 
 	@AfterClass(alwaysRun = true)

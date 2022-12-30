@@ -222,13 +222,13 @@ public class RediSearchTranslator {
 
 	}
 
-	public Search search(RediSearchTableHandle tableHandle, List<RediSearchColumnHandle> columns) {
+	public Search search(RediSearchTableHandle tableHandle, String[] columnNames) {
 		String index = index(tableHandle);
 		String query = queryBuilder.buildQuery(tableHandle.getConstraint(), tableHandle.getWildcards());
 		Builder<String, String> options = SearchOptions.builder();
 		options.withScores(true);
 		options.limit(Limit.offset(0).num(limit(tableHandle)));
-		options.returnFields(columns.stream().map(RediSearchColumnHandle::getName).toArray(String[]::new));
+		options.returnFields(columnNames);
 		return Search.builder().index(index).query(query).options(options.build()).build();
 	}
 

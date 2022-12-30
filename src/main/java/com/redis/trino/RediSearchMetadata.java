@@ -29,6 +29,8 @@ import static com.google.common.base.Verify.verifyNotNull;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.airlift.slice.SliceUtf8.getCodePointAt;
 import static io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
+import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
+import static io.trino.spi.connector.RetryMode.NO_RETRIES;
 import static io.trino.spi.expression.StandardFunctions.LIKE_FUNCTION_NAME;
 import static java.util.Objects.requireNonNull;
 
@@ -242,6 +244,25 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			ConnectorInsertTableHandle insertHandle, Collection<Slice> fragments,
 			Collection<ComputedStatistics> computedStatistics) {
 		return Optional.empty();
+	}
+
+	@Override
+	public RediSearchColumnHandle getDeleteRowIdColumnHandle(ConnectorSession session,
+			ConnectorTableHandle tableHandle) {
+		return RediSearchBuiltinField.ID.getColumnHandle();
+	}
+
+	@Override
+	public RediSearchTableHandle beginDelete(ConnectorSession session, ConnectorTableHandle tableHandle,
+			RetryMode retryMode) {
+		if (retryMode != NO_RETRIES) {
+			throw new TrinoException(NOT_SUPPORTED, "This connector does not support query retries");
+		}
+		return (RediSearchTableHandle) tableHandle;
+	}
+
+	@Override
+	public void finishDelete(ConnectorSession session, ConnectorTableHandle tableHandle, Collection<Slice> fragments) {
 	}
 
 	@Override

@@ -43,6 +43,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 
@@ -51,6 +52,9 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.primitives.Shorts;
 import com.google.common.primitives.SignedBytes;
 import com.redis.lettucemod.api.StatefulRedisModulesConnection;
+import com.redis.lettucemod.search.CreateOptions;
+import com.redis.lettucemod.search.CreateOptions.DataType;
+import com.redis.lettucemod.search.IndexInfo;
 
 import io.airlift.slice.Slice;
 import io.lettuce.core.LettuceFutures;
@@ -78,26 +82,27 @@ import io.trino.spi.type.VarcharType;
 
 public class RediSearchPageSink implements ConnectorPageSink {
 
-	private final RediSearchSession rediSearchSession;
+	private final RediSearchSession session;
 	private final SchemaTableName schemaTableName;
 	private final List<RediSearchColumnHandle> columns;
 	private final UlidFactory factory = UlidFactory.newInstance(new Random());
 
 	public RediSearchPageSink(RediSearchSession rediSearchSession, SchemaTableName schemaTableName,
 			List<RediSearchColumnHandle> columns) {
-		this.rediSearchSession = rediSearchSession;
+		this.session = rediSearchSession;
 		this.schemaTableName = schemaTableName;
 		this.columns = columns;
 	}
 
 	@Override
 	public CompletableFuture<?> appendPage(Page page) {
-		StatefulRedisModulesConnection<String, String> connection = rediSearchSession.getConnection();
+		String prefix = prefix().orElse(schemaTableName.getTableName());
+		StatefulRedisModulesConnection<String, String> connection = session.getConnection();
 		connection.setAutoFlushCommands(false);
 		List<RedisFuture<?>> futures = new ArrayList<>();
 		for (int position = 0; position < page.getPositionCount(); position++) {
 			Map<String, String> map = new HashMap<>();
-			String key = schemaTableName.getTableName() + ":" + factory.create().toString();
+			String key = prefix + ":" + factory.create().toString();
 			for (int channel = 0; channel < page.getChannelCount(); channel++) {
 				RediSearchColumnHandle column = columns.get(channel);
 				Block block = page.getBlock(channel);
@@ -113,6 +118,31 @@ public class RediSearchPageSink implements ConnectorPageSink {
 		LettuceFutures.awaitAll(connection.getTimeout(), futures.toArray(new RedisFuture[0]));
 		connection.setAutoFlushCommands(true);
 		return NOT_BLOCKED;
+	}
+
+	private Optional<String> prefix() {
+		try {
+			RediSearchTable table = session.getTable(schemaTableName);
+			IndexInfo indexInfo = table.getIndexInfo();
+			CreateOptions<String, String> options = indexInfo.getIndexOptions();
+			Optional<DataType> on = options.getOn();
+			if (on.isEmpty() || on.get() != DataType.HASH) {
+				return Optional.empty();
+			}
+			if (options.getPrefixes().isEmpty()) {
+				return Optional.empty();
+			}
+			String prefix = options.getPrefixes().get(0);
+			if (prefix.equals("*")) {
+				return Optional.empty();
+			}
+			if (prefix.endsWith(":")) {
+				return Optional.of(prefix.substring(0, prefix.length() - 1));
+			}
+			return Optional.of(prefix);
+		} catch (Exception e) {
+			return Optional.empty();
+		}
 	}
 
 	private String getObjectValue(Type type, Block block, int position) {
