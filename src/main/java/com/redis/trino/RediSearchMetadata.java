@@ -26,11 +26,10 @@ package com.redis.trino;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.base.Verify.verifyNotNull;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.airlift.slice.SliceUtf8.getCodePointAt;
 import static io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
-import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
-import static io.trino.spi.connector.RetryMode.NO_RETRIES;
 import static io.trino.spi.expression.StandardFunctions.LIKE_FUNCTION_NAME;
 import static java.util.Objects.requireNonNull;
 
@@ -205,9 +204,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	@Override
 	public ConnectorOutputTableHandle beginCreateTable(ConnectorSession session, ConnectorTableMetadata tableMetadata,
 			Optional<ConnectorTableLayout> layout, RetryMode retryMode) {
-		if (retryMode != RetryMode.NO_RETRIES) {
-			throw new TrinoException(StandardErrorCode.NOT_SUPPORTED, "This connector does not support query retries");
-		}
+		checkRetry(retryMode);
 		List<RediSearchColumnHandle> columns = buildColumnHandles(tableMetadata);
 
 		rediSearchSession.createTable(tableMetadata.getTable(), columns);
@@ -216,6 +213,12 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 		return new RediSearchOutputTableHandle(tableMetadata.getTable(),
 				columns.stream().filter(c -> !c.isHidden()).collect(Collectors.toList()));
+	}
+
+	private void checkRetry(RetryMode retryMode) {
+		if (retryMode != RetryMode.NO_RETRIES) {
+			throw new TrinoException(StandardErrorCode.NOT_SUPPORTED, "This connector does not support retries");
+		}
 	}
 
 	@Override
@@ -229,9 +232,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	@Override
 	public ConnectorInsertTableHandle beginInsert(ConnectorSession session, ConnectorTableHandle tableHandle,
 			List<ColumnHandle> insertedColumns, RetryMode retryMode) {
-		if (retryMode != RetryMode.NO_RETRIES) {
-			throw new TrinoException(StandardErrorCode.NOT_SUPPORTED, "This connector does not support query retries");
-		}
+		checkRetry(retryMode);
 		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
 		List<RediSearchColumnHandle> columns = rediSearchSession.getTable(table.getSchemaTableName()).getColumns();
 
@@ -255,14 +256,34 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	@Override
 	public RediSearchTableHandle beginDelete(ConnectorSession session, ConnectorTableHandle tableHandle,
 			RetryMode retryMode) {
-		if (retryMode != NO_RETRIES) {
-			throw new TrinoException(NOT_SUPPORTED, "This connector does not support query retries");
-		}
+		checkRetry(retryMode);
 		return (RediSearchTableHandle) tableHandle;
 	}
 
 	@Override
 	public void finishDelete(ConnectorSession session, ConnectorTableHandle tableHandle, Collection<Slice> fragments) {
+		// Do nothing
+	}
+
+	@Override
+	public RediSearchColumnHandle getUpdateRowIdColumnHandle(ConnectorSession session, ConnectorTableHandle tableHandle,
+			List<ColumnHandle> updatedColumns) {
+		return RediSearchBuiltinField.ID.getColumnHandle();
+	}
+
+	@Override
+	public RediSearchTableHandle beginUpdate(ConnectorSession session, ConnectorTableHandle tableHandle,
+			List<ColumnHandle> updatedColumns, RetryMode retryMode) {
+		checkRetry(retryMode);
+		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
+		return new RediSearchTableHandle(table.getType(), table.getSchemaTableName(), table.getConstraint(),
+				table.getLimit(), table.getTermAggregations(), table.getMetricAggregations(), table.getWildcards(),
+				updatedColumns.stream().map(RediSearchColumnHandle.class::cast).collect(toImmutableList()));
+	}
+
+	@Override
+	public void finishUpdate(ConnectorSession session, ConnectorTableHandle tableHandle, Collection<Slice> fragments) {
+		// Do nothing
 	}
 
 	@Override
@@ -285,9 +306,11 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			return Optional.empty();
 		}
 
-		return Optional.of(new LimitApplicationResult<>(new RediSearchTableHandle(handle.getType(),
-				handle.getSchemaTableName(), handle.getConstraint(), OptionalLong.of(limit),
-				handle.getTermAggregations(), handle.getMetricAggregations(), handle.getWildcards()), true, false));
+		return Optional.of(new LimitApplicationResult<>(
+				new RediSearchTableHandle(handle.getType(), handle.getSchemaTableName(), handle.getConstraint(),
+						OptionalLong.of(limit), handle.getTermAggregations(), handle.getMetricAggregations(),
+						handle.getWildcards(), handle.getUpdatedColumns()),
+				true, false));
 	}
 
 	@Override
@@ -350,7 +373,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		}
 
 		handle = new RediSearchTableHandle(handle.getType(), handle.getSchemaTableName(), newDomain, handle.getLimit(),
-				handle.getTermAggregations(), handle.getMetricAggregations(), newWildcards);
+				handle.getTermAggregations(), handle.getMetricAggregations(), newWildcards, handle.getUpdatedColumns());
 
 		return Optional.of(new ConstraintApplicationResult<>(handle, TupleDomain.withColumnDomains(unsupported),
 				newExpression, false));
@@ -476,7 +499,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			return Optional.empty();
 		}
 		RediSearchTableHandle tableHandle = new RediSearchTableHandle(Type.AGGREGATE, table.getSchemaTableName(),
-				table.getConstraint(), table.getLimit(), terms.build(), aggregationList, table.getWildcards());
+				table.getConstraint(), table.getLimit(), terms.build(), aggregationList, table.getWildcards(),
+				table.getUpdatedColumns());
 		return Optional.of(new AggregationApplicationResult<>(tableHandle, projections.build(),
 				resultAssignments.build(), Map.of(), false));
 	}

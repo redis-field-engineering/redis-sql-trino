@@ -1,5 +1,7 @@
 package com.redis.trino;
 
+import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_INSERT;
+import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_UPDATE;
 import static io.trino.tpch.TpchTable.CUSTOMER;
 import static io.trino.tpch.TpchTable.NATION;
 import static io.trino.tpch.TpchTable.ORDERS;
@@ -29,6 +31,7 @@ import io.trino.sql.parser.ParsingException;
 import io.trino.testing.BaseConnectorSmokeTest;
 import io.trino.testing.QueryRunner;
 import io.trino.testing.TestingConnectorBehavior;
+import io.trino.testing.sql.TestTable;
 
 public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 
@@ -49,22 +52,18 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	protected boolean hasBehavior(TestingConnectorBehavior connectorBehavior) {
 		switch (connectorBehavior) {
 		case SUPPORTS_CREATE_SCHEMA:
-			return false;
-
 		case SUPPORTS_CREATE_VIEW:
 			return false;
 
 		case SUPPORTS_CREATE_TABLE:
 			return true;
 
-		case SUPPORTS_RENAME_TABLE:
-			return false;
-
 		case SUPPORTS_ARRAY:
 			return false;
 
 		case SUPPORTS_DROP_COLUMN:
 		case SUPPORTS_RENAME_COLUMN:
+		case SUPPORTS_RENAME_TABLE:
 			return false;
 
 		case SUPPORTS_COMMENT_ON_TABLE:
@@ -78,13 +77,12 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 			return false;
 
 		case SUPPORTS_DELETE:
+		case SUPPORTS_INSERT:
+		case SUPPORTS_UPDATE:
 			return true;
 
 		case SUPPORTS_RENAME_TABLE_ACROSS_SCHEMAS:
 			return false;
-
-		case SUPPORTS_INSERT:
-			return true;
 
 		case SUPPORTS_LIMIT_PUSHDOWN:
 			return true;
@@ -220,6 +218,33 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	@Test
 	public void testInPredicateNumeric() {
 		assertQuery("SELECT name, regionkey FROM nation WHERE regionKey in (1, 2, 3)");
+	}
+
+	@SuppressWarnings("resource")
+	@Test
+	public void testUpdate() {
+		if (!hasBehavior(SUPPORTS_UPDATE)) {
+			// Note this change is a no-op, if actually run
+			assertQueryFails("UPDATE nation SET nationkey = nationkey + regionkey WHERE regionkey < 1",
+					"This connector does not support updates");
+			return;
+		}
+
+		if (!hasBehavior(SUPPORTS_INSERT)) {
+			throw new AssertionError("Cannot test UPDATE without INSERT");
+		}
+
+		try (TestTable table = new TestTable(getQueryRunner()::execute, "test_update_",
+				getCreateTableDefaultDefinition())) {
+			assertUpdate("INSERT INTO " + table.getName() + " (a, b) SELECT regionkey, regionkey * 2.5 FROM region",
+					"SELECT count(*) FROM region");
+			assertThat(query("SELECT CAST(a AS bigint), b FROM " + table.getName()))
+					.matches(expectedValues("(0, 0.0), (1, 2.5), (2, 5.0), (3, 7.5), (4, 10.0)"));
+
+			assertUpdate("UPDATE " + table.getName() + " SET b = b + 1.2 WHERE a % 2 = 0", 3);
+			assertThat(query("SELECT CAST(a AS bigint), b FROM " + table.getName()))
+					.matches(expectedValues("(0, 1.2), (1, 2.5), (2, 6.2), (3, 7.5), (4, 11.2)"));
+		}
 	}
 
 }

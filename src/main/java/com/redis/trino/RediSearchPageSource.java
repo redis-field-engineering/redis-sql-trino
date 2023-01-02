@@ -30,23 +30,30 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
+import com.redis.lettucemod.api.StatefulRedisModulesConnection;
+import com.redis.lettucemod.api.async.RedisModulesAsyncCommands;
 import com.redis.lettucemod.search.Document;
 
 import io.airlift.slice.Slice;
 import io.airlift.slice.SliceOutput;
+import io.lettuce.core.LettuceFutures;
+import io.lettuce.core.RedisFuture;
 import io.trino.spi.Page;
 import io.trino.spi.PageBuilder;
 import io.trino.spi.block.Block;
 import io.trino.spi.block.BlockBuilder;
 import io.trino.spi.connector.UpdatablePageSource;
 import io.trino.spi.type.Type;
+import io.trino.spi.type.VarcharType;
 
 public class RediSearchPageSource implements UpdatablePageSource {
 
@@ -54,6 +61,7 @@ public class RediSearchPageSource implements UpdatablePageSource {
 
 	private final RediSearchPageSourceResultWriter writer = new RediSearchPageSourceResultWriter();
 	private final RediSearchSession session;
+	private final RediSearchTableHandle table;
 	private final Iterator<Document<String, String>> cursor;
 	private final String[] columnNames;
 	private final List<Type> columnTypes;
@@ -66,9 +74,10 @@ public class RediSearchPageSource implements UpdatablePageSource {
 	public RediSearchPageSource(RediSearchSession session, RediSearchTableHandle table,
 			List<RediSearchColumnHandle> columns) {
 		this.session = session;
+		this.table = table;
 		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).toArray(String[]::new);
 		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType)
-				.collect(Collectors.toUnmodifiableList());
+				.collect(Collectors.toList());
 		this.cursor = session.search(table, columnNames).iterator();
 		this.currentDoc = null;
 		this.pageBuilder = new PageBuilder(columnTypes);
@@ -127,12 +136,43 @@ public class RediSearchPageSource implements UpdatablePageSource {
 	@Override
 	public void deleteRows(Block rowIds) {
 		List<String> docIds = new ArrayList<>(rowIds.getPositionCount());
-		for (int i = 0; i < rowIds.getPositionCount(); i++) {
-			int len = rowIds.getSliceLength(i);
-			Slice slice = rowIds.getSlice(i, 0, len);
-			docIds.add(slice.toStringUtf8());
+		for (int position = 0; position < rowIds.getPositionCount(); position++) {
+			docIds.add(VarcharType.VARCHAR.getSlice(rowIds, position).toStringUtf8());
 		}
 		session.deleteDocs(docIds);
+	}
+
+	@Override
+	public void updateRows(Page page, List<Integer> columnValueAndRowIdChannels) {
+		int rowIdChannel = columnValueAndRowIdChannels.get(columnValueAndRowIdChannels.size() - 1);
+		List<Integer> columnChannelMapping = columnValueAndRowIdChannels.subList(0,
+				columnValueAndRowIdChannels.size() - 1);
+		StatefulRedisModulesConnection<String, String> connection = session.getConnection();
+		connection.setAutoFlushCommands(false);
+		RedisModulesAsyncCommands<String, String> commands = connection.async();
+		List<RedisFuture<?>> futures = new ArrayList<>();
+		for (int position = 0; position < page.getPositionCount(); position++) {
+			Block rowIdBlock = page.getBlock(rowIdChannel);
+			if (rowIdBlock.isNull(position)) {
+				continue;
+			}
+			String key = VarcharType.VARCHAR.getSlice(rowIdBlock, position).toStringUtf8();
+			Map<String, String> map = new HashMap<>();
+			for (int channel = 0; channel < columnChannelMapping.size(); channel++) {
+				RediSearchColumnHandle column = table.getUpdatedColumns().get(columnChannelMapping.get(channel));
+				Block block = page.getBlock(channel);
+				if (block.isNull(position)) {
+					continue;
+				}
+				String value = RediSearchPageSink.value(column.getType(), block, position);
+				map.put(column.getName(), value);
+			}
+			RedisFuture<Long> future = commands.hset(key, map);
+			futures.add(future);
+		}
+		connection.flushCommands();
+		LettuceFutures.awaitAll(connection.getTimeout(), futures.toArray(new RedisFuture[0]));
+		connection.setAutoFlushCommands(true);
 	}
 
 	private String currentValue(String columnName) {

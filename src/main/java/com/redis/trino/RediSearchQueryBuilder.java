@@ -242,9 +242,9 @@ public class RediSearchQueryBuilder {
 		List<RediSearchAggregation> aggregates = table.getMetricAggregations();
 		List<String> groupFields = new ArrayList<>();
 		if (terms != null && !terms.isEmpty()) {
-			groupFields = terms.stream().map(RediSearchAggregationTerm::getTerm).collect(Collectors.toUnmodifiableList());
+			groupFields = terms.stream().map(RediSearchAggregationTerm::getTerm).collect(Collectors.toList());
 		}
-		List<Reducer> reducers = aggregates.stream().map(this::reducer).collect(Collectors.toUnmodifiableList());
+		List<Reducer> reducers = aggregates.stream().map(this::reducer).collect(Collectors.toList());
 		if (reducers.isEmpty()) {
 			return Optional.empty();
 		}

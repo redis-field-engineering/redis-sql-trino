@@ -185,7 +185,7 @@ public class RediSearchSession {
 		String index = index(schemaTableName);
 		if (!connection.sync().ftList().contains(index)) {
 			List<Field<String>> fields = columns.stream().filter(c -> !c.getName().equals("_id"))
-					.map(c -> buildField(c.getName(), c.getType())).collect(Collectors.toUnmodifiableList());
+					.map(c -> buildField(c.getName(), c.getType())).collect(Collectors.toList());
 			CreateOptions.Builder<String, String> options = CreateOptions.<String, String>builder();
 			options.prefix(index + ":");
 			connection.sync().ftCreate(index, options.build(), fields.toArray(Field[]::new));
@@ -308,7 +308,7 @@ public class RediSearchSession {
 		AggregateWithCursorResults<String> results = connection.sync().ftAggregate(aggregation.getIndex(),
 				aggregation.getQuery(), aggregation.getCursorOptions(), aggregation.getOptions());
 		List<AggregateOperation<?, ?>> groupBys = aggregation.getOptions().getOperations().stream()
-				.filter(o -> o.getType() == AggregateOperation.Type.GROUP).collect(Collectors.toUnmodifiableList());
+				.filter(o -> o.getType() == AggregateOperation.Type.GROUP).collect(Collectors.toList());
 		if (results.isEmpty() && !groupBys.isEmpty()) {
 			Group groupBy = (Group) groupBys.get(0);
 			Optional<String> as = groupBy.getReducers()[0].getAs();

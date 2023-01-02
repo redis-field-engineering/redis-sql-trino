@@ -33,6 +33,7 @@ import java.util.OptionalLong;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.common.collect.ImmutableList;
 
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ConnectorTableHandle;
@@ -53,10 +54,12 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	private final List<RediSearchAggregationTerm> aggregationTerms;
 	private final List<RediSearchAggregation> aggregations;
 	private final Map<String, String> wildcards;
+	// UPDATE only
+	private final List<RediSearchColumnHandle> updatedColumns;
 
 	public RediSearchTableHandle(Type type, SchemaTableName schemaTableName) {
 		this(type, schemaTableName, TupleDomain.all(), OptionalLong.empty(), Collections.emptyList(),
-				Collections.emptyList(), Map.of());
+				Collections.emptyList(), Map.of(), Collections.emptyList());
 	}
 
 	@JsonCreator
@@ -65,7 +68,8 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 			@JsonProperty("constraint") TupleDomain<ColumnHandle> constraint, @JsonProperty("limit") OptionalLong limit,
 			@JsonProperty("aggTerms") List<RediSearchAggregationTerm> termAggregations,
 			@JsonProperty("aggregates") List<RediSearchAggregation> metricAggregations,
-			@JsonProperty("wildcards") Map<String, String> wildcards) {
+			@JsonProperty("wildcards") Map<String, String> wildcards,
+			@JsonProperty("updatedColumns") List<RediSearchColumnHandle> updatedColumns) {
 		this.type = requireNonNull(type, "type is null");
 		this.schemaTableName = requireNonNull(schemaTableName, "schemaTableName is null");
 		this.constraint = requireNonNull(constraint, "constraint is null");
@@ -73,6 +77,7 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 		this.aggregationTerms = requireNonNull(termAggregations, "aggTerms is null");
 		this.aggregations = requireNonNull(metricAggregations, "aggregates is null");
 		this.wildcards = requireNonNull(wildcards, "wildcards is null");
+		this.updatedColumns = ImmutableList.copyOf(requireNonNull(updatedColumns, "updatedColumns is null"));
 	}
 
 	@JsonProperty
@@ -110,9 +115,14 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 		return wildcards;
 	}
 
+	@JsonProperty
+	public List<RediSearchColumnHandle> getUpdatedColumns() {
+		return updatedColumns;
+	}
+
 	@Override
 	public int hashCode() {
-		return Objects.hash(schemaTableName, constraint, limit);
+		return Objects.hash(schemaTableName, constraint, limit, updatedColumns);
 	}
 
 	@Override
@@ -125,7 +135,8 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 		}
 		RediSearchTableHandle other = (RediSearchTableHandle) obj;
 		return Objects.equals(this.schemaTableName, other.schemaTableName)
-				&& Objects.equals(this.constraint, other.constraint) && Objects.equals(this.limit, other.limit);
+				&& Objects.equals(this.constraint, other.constraint) && Objects.equals(this.limit, other.limit)
+				&& Objects.equals(updatedColumns, other.updatedColumns);
 	}
 
 	@Override

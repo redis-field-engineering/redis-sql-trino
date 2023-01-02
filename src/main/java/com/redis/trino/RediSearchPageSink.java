@@ -52,6 +52,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.primitives.Shorts;
 import com.google.common.primitives.SignedBytes;
 import com.redis.lettucemod.api.StatefulRedisModulesConnection;
+import com.redis.lettucemod.api.async.RedisModulesAsyncCommands;
 import com.redis.lettucemod.search.CreateOptions;
 import com.redis.lettucemod.search.CreateOptions.DataType;
 import com.redis.lettucemod.search.IndexInfo;
@@ -82,6 +83,7 @@ import io.trino.spi.type.VarcharType;
 
 public class RediSearchPageSink implements ConnectorPageSink {
 
+	private static final String KEY_SEPARATOR = ":";
 	private final RediSearchSession session;
 	private final SchemaTableName schemaTableName;
 	private final List<RediSearchColumnHandle> columns;
@@ -96,22 +98,24 @@ public class RediSearchPageSink implements ConnectorPageSink {
 
 	@Override
 	public CompletableFuture<?> appendPage(Page page) {
-		String prefix = prefix().orElse(schemaTableName.getTableName());
+		String prefix = prefix().orElse(schemaTableName.getTableName() + KEY_SEPARATOR);
 		StatefulRedisModulesConnection<String, String> connection = session.getConnection();
 		connection.setAutoFlushCommands(false);
+		RedisModulesAsyncCommands<String, String> commands = connection.async();
 		List<RedisFuture<?>> futures = new ArrayList<>();
 		for (int position = 0; position < page.getPositionCount(); position++) {
+			String key = prefix + factory.create().toString();
 			Map<String, String> map = new HashMap<>();
-			String key = prefix + ":" + factory.create().toString();
 			for (int channel = 0; channel < page.getChannelCount(); channel++) {
 				RediSearchColumnHandle column = columns.get(channel);
 				Block block = page.getBlock(channel);
 				if (block.isNull(position)) {
 					continue;
 				}
-				map.put(column.getName(), getObjectValue(columns.get(channel).getType(), block, position));
+				String value = value(column.getType(), block, position);
+				map.put(column.getName(), value);
 			}
-			RedisFuture<Long> future = connection.async().hset(key, map);
+			RedisFuture<Long> future = commands.hset(key, map);
 			futures.add(future);
 		}
 		connection.flushCommands();
@@ -136,16 +140,16 @@ public class RediSearchPageSink implements ConnectorPageSink {
 			if (prefix.equals("*")) {
 				return Optional.empty();
 			}
-			if (prefix.endsWith(":")) {
-				return Optional.of(prefix.substring(0, prefix.length() - 1));
+			if (prefix.endsWith(KEY_SEPARATOR)) {
+				return Optional.of(prefix);
 			}
-			return Optional.of(prefix);
+			return Optional.of(prefix + KEY_SEPARATOR);
 		} catch (Exception e) {
 			return Optional.empty();
 		}
 	}
 
-	private String getObjectValue(Type type, Block block, int position) {
+	public static String value(Type type, Block block, int position) {
 		if (type.equals(BooleanType.BOOLEAN)) {
 			return String.valueOf(type.getBoolean(block, position));
 		}
@@ -205,5 +209,6 @@ public class RediSearchPageSink implements ConnectorPageSink {
 
 	@Override
 	public void abort() {
+		// Do nothing
 	}
 }
