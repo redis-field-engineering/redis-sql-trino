@@ -14,6 +14,7 @@ import static org.testng.Assert.assertTrue;
 import java.io.IOException;
 import java.util.List;
 
+import org.awaitility.Awaitility;
 import org.testng.SkipException;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
@@ -40,12 +41,22 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	private RediSearchServer redisearch;
 
 	private void populateBeers() throws IOException {
+		deleteBeers();
+		Beers.populateIndex(redisearch.getTestContext().getConnection());
+	}
+
+	private void createBeersIndex() {
+		deleteBeers();
+		Beers.createIndex(redisearch.getTestContext().getConnection());
+	}
+
+	private void deleteBeers() {
 		try {
 			redisearch.getTestContext().sync().ftDropindexDeleteDocs(Beers.INDEX);
 		} catch (Exception e) {
 			// ignore
 		}
-		Beers.populateIndex(redisearch.getTestContext().getConnection());
+		Awaitility.await().until(() -> redisearch.getTestContext().sync().dbsize() == 0);
 	}
 
 	@Override
@@ -128,12 +139,7 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 
 	@Test
 	public void testCountEmptyIndex() throws IOException {
-		try {
-			redisearch.getTestContext().sync().ftDropindexDeleteDocs(Beers.INDEX);
-		} catch (Exception e) {
-			// ignore
-		}
-		Beers.createIndex(redisearch.getTestContext().getConnection());
+		createBeersIndex();
 		assertQuery("SELECT count(*) FROM beers", "VALUES 0");
 	}
 
@@ -160,12 +166,7 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 
 	@Test
 	public void testInsertIndex() throws IOException {
-		try {
-			redisearch.getTestContext().sync().ftDropindexDeleteDocs(Beers.INDEX);
-		} catch (Exception e) {
-			// ignore
-		}
-		Beers.createIndex(redisearch.getTestContext().getConnection());
+		createBeersIndex();
 		assertUpdate("INSERT INTO beers (id, name) VALUES ('abc', 'mybeer')", 1);
 		assertThat(query("SELECT id, name FROM beers")).matches("VALUES (VARCHAR 'abc', VARCHAR 'mybeer')");
 		List<String> keys = redisearch.getTestContext().sync().keys("beer:*");
