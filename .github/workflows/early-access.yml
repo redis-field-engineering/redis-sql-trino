@@ -21,7 +21,7 @@ jobs:
           distribution: zulu
           java-version: 17
 
-      - uses: actions/cache@v2
+      - uses: actions/cache@v3
         with:
           path: ~/.m2/repository
           key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
@@ -43,7 +43,7 @@ jobs:
 
       - name: Version
         id: vars
-        run: echo ::set-output name=version::$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
+        run: echo version=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout) >> $GITHUB_OUTPUT
 
       - name: Assemble
         uses: jreleaser/release-action@v1
