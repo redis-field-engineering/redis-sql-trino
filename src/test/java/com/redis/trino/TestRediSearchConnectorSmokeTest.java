@@ -55,7 +55,8 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 		} catch (Exception e) {
 			// ignore
 		}
-		while (redisearch.getTestContext().sync().dbsize() > 0) {
+		long start = System.currentTimeMillis();
+		while (redisearch.getTestContext().sync().dbsize() > 0 && System.currentTimeMillis() < start + 3000) {
 			Thread.sleep(10);
 		}
 	}
