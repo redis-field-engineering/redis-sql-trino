@@ -40,25 +40,7 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	private RediSearchServer redisearch;
 
 	private void populateBeers() throws IOException, InterruptedException {
-		deleteBeers();
 		Beers.populateIndex(redisearch.getTestContext().getConnection());
-	}
-
-	private void createBeersIndex() throws InterruptedException {
-		deleteBeers();
-		Beers.createIndex(redisearch.getTestContext().getConnection());
-	}
-
-	private void deleteBeers() throws InterruptedException {
-		try {
-			redisearch.getTestContext().sync().ftDropindexDeleteDocs(Beers.INDEX);
-		} catch (Exception e) {
-			// ignore
-		}
-		long start = System.currentTimeMillis();
-		while (redisearch.getTestContext().sync().dbsize() > 0 && System.currentTimeMillis() < start + 3000) {
-			Thread.sleep(10);
-		}
 	}
 
 	@Override
@@ -128,21 +110,19 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	}
 
 	@Test
-	public void testNonIndexedFields() throws IOException, InterruptedException {
+	public void testRediSearchFields() throws IOException, InterruptedException {
 		populateBeers();
 		getQueryRunner().execute("select id, last_mod from beers");
-	}
-
-	@Test
-	public void testBuiltinFields() throws IOException, InterruptedException {
-		populateBeers();
 		getQueryRunner().execute("select _id, _score from beers");
 	}
 
+	@SuppressWarnings("unchecked")
 	@Test
 	public void testCountEmptyIndex() throws IOException, InterruptedException {
-		createBeersIndex();
-		assertQuery("SELECT count(*) FROM beers", "VALUES 0");
+		String index = "emptyidx";
+		CreateOptions<String, String> options = CreateOptions.<String, String>builder().prefix(index + ":").build();
+		redisearch.getTestContext().sync().ftCreate(index, options, Field.tag("field1").build());
+		assertQuery("SELECT count(*) FROM " + index, "VALUES 0");
 	}
 
 	@SuppressWarnings("unchecked")
@@ -166,14 +146,19 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 		throw new SkipException("Not supported by RediSearch connector");
 	}
 
+	@SuppressWarnings("unchecked")
 	@Test
 	public void testInsertIndex() throws IOException, InterruptedException {
-		createBeersIndex();
-		assertUpdate("INSERT INTO beers (id, name) VALUES ('abc', 'mybeer')", 1);
-		assertThat(query("SELECT id, name FROM beers")).matches("VALUES (VARCHAR 'abc', VARCHAR 'mybeer')");
-		List<String> keys = redisearch.getTestContext().sync().keys("beer:*");
+		String index = "insertidx";
+		String prefix = index + ":";
+		CreateOptions<String, String> options = CreateOptions.<String, String>builder().prefix(prefix).build();
+		redisearch.getTestContext().sync().ftCreate(index, options, Field.tag("id").build(), Field.tag("name").build());
+		assertUpdate(String.format("INSERT INTO %s (id, name) VALUES ('abc', 'mybeer')", index), 1);
+		assertThat(query(String.format("SELECT id, name FROM %s", index)))
+				.matches("VALUES (VARCHAR 'abc', VARCHAR 'mybeer')");
+		List<String> keys = redisearch.getTestContext().sync().keys(prefix + "*");
 		assertEquals(keys.size(), 1);
-		assertTrue(keys.get(0).startsWith("beer:"));
+		assertTrue(keys.get(0).startsWith(prefix));
 	}
 
 	@AfterClass(alwaysRun = true)
