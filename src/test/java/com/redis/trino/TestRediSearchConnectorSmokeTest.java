@@ -14,7 +14,6 @@ import static org.testng.Assert.assertTrue;
 import java.io.IOException;
 import java.util.List;
 
-import org.awaitility.Awaitility;
 import org.testng.SkipException;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
@@ -40,23 +39,25 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 
 	private RediSearchServer redisearch;
 
-	private void populateBeers() throws IOException {
+	private void populateBeers() throws IOException, InterruptedException {
 		deleteBeers();
 		Beers.populateIndex(redisearch.getTestContext().getConnection());
 	}
 
-	private void createBeersIndex() {
+	private void createBeersIndex() throws InterruptedException {
 		deleteBeers();
 		Beers.createIndex(redisearch.getTestContext().getConnection());
 	}
 
-	private void deleteBeers() {
+	private void deleteBeers() throws InterruptedException {
 		try {
 			redisearch.getTestContext().sync().ftDropindexDeleteDocs(Beers.INDEX);
 		} catch (Exception e) {
 			// ignore
 		}
-		Awaitility.await().until(() -> redisearch.getTestContext().sync().dbsize() == 0);
+		while (redisearch.getTestContext().sync().dbsize() > 0) {
+			Thread.sleep(10);
+		}
 	}
 
 	@Override
@@ -126,19 +127,19 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	}
 
 	@Test
-	public void testNonIndexedFields() throws IOException {
+	public void testNonIndexedFields() throws IOException, InterruptedException {
 		populateBeers();
 		getQueryRunner().execute("select id, last_mod from beers");
 	}
 
 	@Test
-	public void testBuiltinFields() throws IOException {
+	public void testBuiltinFields() throws IOException, InterruptedException {
 		populateBeers();
 		getQueryRunner().execute("select _id, _score from beers");
 	}
 
 	@Test
-	public void testCountEmptyIndex() throws IOException {
+	public void testCountEmptyIndex() throws IOException, InterruptedException {
 		createBeersIndex();
 		assertQuery("SELECT count(*) FROM beers", "VALUES 0");
 	}
@@ -165,7 +166,7 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	}
 
 	@Test
-	public void testInsertIndex() throws IOException {
+	public void testInsertIndex() throws IOException, InterruptedException {
 		createBeersIndex();
 		assertUpdate("INSERT INTO beers (id, name) VALUES ('abc', 'mybeer')", 1);
 		assertThat(query("SELECT id, name FROM beers")).matches("VALUES (VARCHAR 'abc', VARCHAR 'mybeer')");
