@@ -68,6 +68,7 @@ import io.airlift.log.Logger;
 import io.lettuce.core.AbstractRedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.SslVerifyMode;
+import io.lettuce.core.protocol.ProtocolVersion;
 import io.trino.spi.HostAddress;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ColumnMetadata;
@@ -122,6 +123,9 @@ public class RediSearchSession {
 		config.getCertPath().map(File::new).ifPresent(builder::keyCert);
 		config.getKeyPassword().ifPresent(p -> builder.keyPassword(p.toCharArray()));
 		config.getCaCertPath().map(File::new).ifPresent(builder::trustManager);
+		if (config.isResp2()) {
+			builder.protocolVersion(ProtocolVersion.RESP2);
+		}
 		return builder.build();
 	}
 

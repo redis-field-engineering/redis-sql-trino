@@ -82,6 +82,10 @@ redisearch.uri=redis://localhost:6379
 |Connect to a Redis Cluster.
 |`false`
 
+|`redisearch.resp2`
+|Force Redis protocol version to RESP2.
+|`false`
+
 |===
 
 The RediSearch connector provides additional security options to support Redis servers with TLS mode.
