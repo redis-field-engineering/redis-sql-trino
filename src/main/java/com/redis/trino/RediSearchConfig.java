@@ -57,6 +57,7 @@ public class RediSearchConfig {
 	private String keyPath;
 	private String certPath;
 	private String keyPassword;
+	private boolean resp2;
 
 	@Min(0)
 	public long getCursorCount() {
@@ -88,6 +89,17 @@ public class RediSearchConfig {
 	@ConfigDescription("Case-insensitive name-matching")
 	public RediSearchConfig setCaseInsensitiveNames(boolean caseInsensitiveNames) {
 		this.caseInsensitiveNames = caseInsensitiveNames;
+		return this;
+	}
+
+	public boolean isResp2() {
+		return resp2;
+	}
+
+	@Config("redisearch.resp2")
+	@ConfigDescription("Force Redis protocol version to RESP2")
+	public RediSearchConfig setResp2(boolean resp2) {
+		this.resp2 = resp2;
 		return this;
 	}
 
