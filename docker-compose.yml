@@ -2,7 +2,7 @@ version: '3.6'
 services:
 
   redis:
-    image: redislabs/redismod
+    image: redis/redis-stack
     hostname: redis
     container_name: redis
     ports:
