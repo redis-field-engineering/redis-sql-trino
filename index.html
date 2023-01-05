@@ -14,7 +14,7 @@
 <div id="header">
 <h1>Redis SQL</h1>
 <div class="details">
-<span id="revnumber">version 0.2.8</span>
+<span id="revnumber">version 0.2.9</span>
 </div>
 <div id="toc" class="toc2">
 <div id="toctitle">Table of Contents</div>
@@ -173,6 +173,11 @@ redisearch.uri=redis://localhost:6379</code></pre>
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.cluster</code></p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Connect to a Redis Cluster.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>false</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.resp2</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Force Redis protocol version to RESP2.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><code>false</code></p></td>
 </tr>
 </tbody>
@@ -385,7 +390,7 @@ discovery.uri=http://localhost:8080</code></pre>
 <div class="title">Install RediSearch plugin</div>
 <div class="content">
 <pre class="CodeRay highlight"><code data-lang="console">wget https://github.com/redis-field-engineering/redis-sql/releases/download/v403/redis-sql-403.zip
-unzip -j redis-sql-0.2.8.zip -d /usr/lib/trino/plugin/redisearch</code></pre>
+unzip -j redis-sql-0.2.9.zip -d /usr/lib/trino/plugin/redisearch</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -436,8 +441,8 @@ trino:default&gt; select * from mySearchIndex;</code></pre>
 </div>
 <div id="footer">
 <div id="footer-text">
-Version 0.2.8<br>
-Last updated 2023-01-02 04:22:34 UTC
+Version 0.2.9<br>
+Last updated 2023-01-05 07:26:29 UTC
 </div>
 </div>
 <link rel="stylesheet" href="./coderay-asciidoctor.css">
