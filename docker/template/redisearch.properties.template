@@ -2,6 +2,7 @@ connector.name=redisearch
 redisearch.uri=${REDISEARCH_URI}
 redisearch.username=${REDISEARCH_USERNAME}
 redisearch.password=${REDISEARCH_PASSWORD}
+redisearch.resp2=${REDISEARCH_RESP2}
 redisearch.cluster=${REDISEARCH_CLUSTER}
 redisearch.insecure=${REDISEARCH_INSECURE}
 redisearch.cacert-path=${REDISEARCH_CACERT_PATH}
