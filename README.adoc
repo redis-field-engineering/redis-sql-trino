@@ -49,7 +49,7 @@ Next, use Docker Compose to launch containers for Trino and Redis Stack:
 docker-compose up
 ----
 
-This example uses a small data set describing a collection of beers. To load the data set, you'll need to have https://developer.redis.com/riot/riot-file/index.html[riot-file] installed locally (see the https://developer.redis.com/riot/riot-file/index.html[riot-file] installation instructions.
+This example uses a small data set describing a collection of beers. To load the data set, you'll need to have https://developer.redis.com/riot/riot-file/index.html[riot-file] installed locally (see the https://developer.redis.com/riot/riot-file/index.html[riot-file] installation instructions).
 
 Next, use `riot-file` to import the sample data set into Redis:
 [source,console]
