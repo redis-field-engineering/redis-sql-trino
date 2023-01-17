@@ -96,12 +96,14 @@ You will also need either https://redis.io/docs/stack/[Redis Stack], https://red
 
 == Usage
 
-The example above uses the https://trino.io/docs/current/client/cli.html[Trino CLI] to access your data. Most real world applications will use the https://trino.io/docs/current/client/jdbc.html[Trino JDBC driver] to issue queries. See the https://redis-field-engineering.github.io/redis-sql/#clients[Redis SQL Trino] documentation for details.
+The example above uses the https://trino.io/docs/current/client/cli.html[Trino CLI] to access your data.
+
+ Most real world applications will use the https://trino.io/docs/current/client/jdbc.html[Trino JDBC driver] to issue queries. See the https://redis-field-engineering.github.io/redis-sql/#clients[Redis SQL Trino] documentation for details.
 
 == Support
 
-Redis SQL Trino is supported by the Redis Field Engineering team in the good faith effort basis. To report bugs, request features, or receive assistance, please {project-url}/issues[file an issue].
+Redis SQL Trino is supported by the Redis Field Engineering team on a good faith effort basis. To report bugs, request features, or receive assistance, please {project-url}/issues[file an issue].
 
 == License
 
-Redis SQL is licensed under the MIT License. Copyright (c) 2023, Redis, Inc.
+Redis SQL is licensed under the MIT License. Copyright (C) 2023 Redis, Inc.
