@@ -11,21 +11,101 @@
 image:{project-url}/actions/workflows/early-access.yml/badge.svg["Build Status", link="{project-url}/actions/workflows/early-access.yml"]
 image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg?token={codecov-token}["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
 
-Redis SQL is a https://trino.io[Trino] connector which allows access to RediSearch data from Trino.
+Redis SQL is a https://trino.io[Trino] connector for https://redis.io/docs/stack/[Redis Stack], https://redis.com/redis-enterprise-cloud/overview/[Redis Cloud], and https://redis.com/redis-enterprise-software/overview/[Redis Enterprise].
 
-NOTE: RediSearch 2.0 or later is required.
+Trino is a distributed SQL engine designed to efficiently query large amounts of data for data warehousing and analytics (OLAP) applications. The Redis SQL Trino connector that lets you use Trino to query your Redis data using SQL. This implementation takes advantage of the indexing and querying capabilites of Redis Stack. As such, this connector generally outperforms the https://trino.io/docs/current/connector/redis.html[standard Redis Trino connector], which cannot take advantage of these indexed queries.
 
-== Documentation
 
-Documentation is available at link:{documentation-url}[{documentation-url}].
+== Table of Contents
+
+:toc:
+
+== Background
+
+Redis is an in-memory data store designed to serve data with the fastest possible response times. For this reason, Redis is frequently used for caching OLTP-style application queries. Redis Stack is an extension to Redis that, among other things, lets you index your data and then efficiently query it using a custom query language. We built the Redis SQL Trino connector so that you can query Redis using any number of BI tools. For example, you can use this connector with Trino to query and visualize your Redis data in Tableau.
+
+== Quick start
+
+To understand how Redis SQL works, it's best to try it for yourself. View the screen recording or follow the steps below:
+
+image::https://asciinema.org/a/526185.svg[asciicast,link=https://asciinema.org/a/526185]
+
+First, clone this git repository:
+[source,console,subs="verbatim,attributes"]
+----
+git clone {project-url}.git
+cd {project-name}
+----
+
+Next, use Docker Compose to launch containers for Trino and Redis Stack:
+[source,console]
+----
+docker-compose up
+----
+
+This example uses a small data set describing a collection of beers. To load the data set, you'll need to have https://developer.redis.com/riot/riot-file/index.html[riot-file] installed locally (see the https://developer.redis.com/riot/riot-file/index.html[riot-file] installation instructions.
+
+Next, use `riot-file` to import the sample data set into Redis:
+[source,console]
+----
+riot-file -h localhost import https://storage.googleapis.com/jrx/beers.json hset --keyspace beer --keys id
+----
+
+Each beer is represented as a Redis hash. Start the Redis CLI to examine this data. For example, here's how you can view the "Beer Town Brown" record:
+[source,console]
+----
+docker exec -it redis /opt/redis-stack/bin/redis-cli
+127.0.0.1:6379> hgetall beer:190
+----
+
+Next, create an index on the beer data. While still in the Redis CLI, you can create the required index by running the following `FT.CREATE` command:
+[source,console]
+----
+127.0.0.1:6379> FT.CREATE beers ON HASH PREFIX 1 beer: SCHEMA id TAG SORTABLE brewery_id TAG SORTABLE name TEXT SORTABLE abv NUMERIC SORTABLE descript TEXT style_name TAG SORTABLE cat_name TAG SORTABLE
+----
+
+Now that you've indexed the data set, you can query it using SQL statements through Trino. Start the Trino CLI:
+[source,console]
+----
+docker exec -it trino trino --catalog redisearch --schema default
+----
+
+View "Beer Town Brown" using SQL:
+[source,console]
+----
+trino:default> select * from beers where id = '190';
+----
+
+Show all beers with an ABV greater than 3.2%:
+[source,console]
+----
+trino:default> select * from beers where abv > 3.2 order by abv desc;
+----
+
+== Installation
+
+To use Redis SQL Trino, you'll need a working Trino installation. See the https://trino.io/docs/current/installation.html[Trino installation and deplyoment guide] for details.
+
+Next, you'll need to install the Redis SQL Trino plugin and configure it. See https://redis-field-engineering.github.io/redis-sql/#redisearch-connector[plugin installation] and https://redis-field-engineering.github.io/redis-sql/#configuration[plugin configuration].
+
+== Usage
+
+The example above uses the https://trino.io/docs/current/client/cli.html[Trino CLI] to access your data. Most real world applications will use the https://trino.io/docs/current/client/jdbc.html[Trino JDBC driver] to issue queries. See the https://redis-field-engineering.github.io/redis-sql/#clients[Redis SQL Trino] documentation for details.
 
 == Support
 
-Contact us on the https://forum.redis.com/[Redis Forum] or create an issue on {project-url}/issues[Github] where we provide support on a good faith effort basis.
+Redis SQL Trino is supported by the Redis Field Engineering team in the good faith effort basis. To report bugs, request features, or receive assistance, please {project-url}/issues[file an issue].
+
+== License
+
+Redis SQL is licensed under the MIT License. Copyright (c) 2023, Redis, Inc.
+
+NOTE: RediSearch 2.0 or later is required.
+
+Complete documentation is available at link:{documentation-url}[{documentation-url}].
 
 == Docker Example
 
-image::https://asciinema.org/a/526185.svg[asciicast,link=https://asciinema.org/a/526185]
 
 .Clone the project
 [source,console,subs="verbatim,attributes"]
@@ -43,7 +123,7 @@ docker-compose up
 .Create a RediSearch index
 [source,console]
 ----
-docker exec redis /usr/local/bin/redis-cli FT.CREATE beers ON HASH PREFIX 1 beer: SCHEMA id TAG SORTABLE brewery_id TAG SORTABLE name TEXT SORTABLE abv NUMERIC SORTABLE descript TEXT style_name TAG SORTABLE cat_name TAG SORTABLE
+docker exec -it redis /opt/redis-stack/bin/redis-cli FT.CREATE beers ON HASH PREFIX 1 beer: SCHEMA id TAG SORTABLE brewery_id TAG SORTABLE name TEXT SORTABLE abv NUMERIC SORTABLE descript TEXT style_name TAG SORTABLE cat_name TAG SORTABLE
 ----
 
 .Add documents to the index
