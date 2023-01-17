@@ -100,7 +100,7 @@ You will also need either https://redis.io/docs/stack/[Redis Stack], https://red
 
 The example above uses the https://trino.io/docs/current/client/cli.html[Trino CLI] to access your data.
 
- Most real world applications will use the https://trino.io/docs/current/client/jdbc.html[Trino JDBC driver] to issue queries. See the https://redis-field-engineering.github.io/redis-sql/#clients[Redis SQL Trino] documentation for details.
+Most real world applications will use the https://trino.io/docs/current/client/jdbc.html[Trino JDBC driver] to issue queries. See the https://redis-field-engineering.github.io/redis-sql/#clients[Redis SQL Trino] documentation for details.
 
 == Support
 
