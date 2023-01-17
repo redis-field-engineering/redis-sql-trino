@@ -18,7 +18,7 @@ Trino is a distributed SQL engine designed to efficiently query large amounts of
 
 == Table of Contents
 
-:toc:
+* link:#background[Background]
 
 == Background
 
