@@ -13,12 +13,16 @@ image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/b
 
 Redis SQL is a https://trino.io[Trino] connector for https://redis.io/docs/stack/[Redis Stack], https://redis.com/redis-enterprise-cloud/overview/[Redis Cloud], and https://redis.com/redis-enterprise-software/overview/[Redis Enterprise].
 
-Trino is a distributed SQL engine designed to efficiently query large amounts of data for data warehousing and analytics (OLAP) applications. The Redis SQL Trino connector that lets you use Trino to query your Redis data using SQL. This implementation takes advantage of the indexing and querying capabilites of Redis Stack. As such, this connector generally outperforms the https://trino.io/docs/current/connector/redis.html[standard Redis Trino connector], which cannot take advantage of these indexed queries.
-
+Trino is a distributed SQL engine designed to efficiently query large amounts of data for data warehousing and analytics (OLAP) applications. The Redis SQL Trino connector lets you use Trino to query your Redis data using SQL. This implementation takes advantage of the indexing and querying capabilites of Redis Stack. As such, this connector generally outperforms the https://trino.io/docs/current/connector/redis.html[standard Redis Trino connector], which cannot take advantage of these indexed queries.
 
 == Table of Contents
 
 * link:#background[Background]
+* link:#quick-start[Quick start]
+* link:#installation[Installation]
+* link:#Usage[Usage]
+* link:#Support[Support]
+* link:#License[License]
 
 == Background
 
@@ -88,6 +92,8 @@ To use Redis SQL Trino, you'll need a working Trino installation. See the https:
 
 Next, you'll need to install the Redis SQL Trino plugin and configure it. See https://redis-field-engineering.github.io/redis-sql/#redisearch-connector[plugin installation] and https://redis-field-engineering.github.io/redis-sql/#configuration[plugin configuration].
 
+You will also need either https://redis.io/docs/stack/[Redis Stack], https://redis.com/redis-enterprise-cloud/overview/[Redis Cloud], or https://redis.com/redis-enterprise-software/overview/[Redis Enterprise].
+
 == Usage
 
 The example above uses the https://trino.io/docs/current/client/cli.html[Trino CLI] to access your data. Most real world applications will use the https://trino.io/docs/current/client/jdbc.html[Trino JDBC driver] to issue queries. See the https://redis-field-engineering.github.io/redis-sql/#clients[Redis SQL Trino] documentation for details.
@@ -99,47 +105,3 @@ Redis SQL Trino is supported by the Redis Field Engineering team in the good fai
 == License
 
 Redis SQL is licensed under the MIT License. Copyright (c) 2023, Redis, Inc.
-
-NOTE: RediSearch 2.0 or later is required.
-
-Complete documentation is available at link:{documentation-url}[{documentation-url}].
-
-== Docker Example
-
-
-.Clone the project
-[source,console,subs="verbatim,attributes"]
-----
-git clone {project-url}.git
-cd {project-name}
-----
-
-.Launch the containers
-[source,console]
-----
-docker-compose up
-----
-
-.Create a RediSearch index
-[source,console]
-----
-docker exec -it redis /opt/redis-stack/bin/redis-cli FT.CREATE beers ON HASH PREFIX 1 beer: SCHEMA id TAG SORTABLE brewery_id TAG SORTABLE name TEXT SORTABLE abv NUMERIC SORTABLE descript TEXT style_name TAG SORTABLE cat_name TAG SORTABLE
-----
-
-.Add documents to the index
-[source,console]
-----
-docker run --add-host=host.docker.internal:host-gateway fieldengineering/riot-file -h host.docker.internal import https://storage.googleapis.com/jrx/beers.json hset --keyspace beer --keys id
-----
-
-.Run the Trino CLI
-[source,console]
-----
-docker exec -it trino trino --catalog redisearch --schema default
-----
-
-.Run a SQL query
-[source,console]
-----
-trino:default> SELECT * FROM beers;
-----
