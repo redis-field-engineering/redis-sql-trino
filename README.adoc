@@ -26,7 +26,9 @@ Trino is a distributed SQL engine designed to efficiently query large amounts of
 
 == Background
 
-Redis is an in-memory data store designed to serve data with the fastest possible response times. For this reason, Redis is frequently used for caching OLTP-style application queries. Redis Stack is an extension to Redis that, among other things, lets you index your data and then efficiently query it using a custom query language. We built the Redis SQL Trino connector so that you can query Redis using any number of BI tools. For example, you can use this connector with Trino to query and visualize your Redis data in Tableau.
+Redis is an in-memory data store designed to serve data with the fastest possible response times. For this reason, Redis is frequently used for caching OLTP-style application queries. Redis Stack is an extension to Redis that, among other things, lets you index your data and then efficiently query it using a custom query language.
+
+We built the Redis SQL Trino connector so that you can query Redis using any number of BI tools. For example, you can use this connector with Trino to query and visualize your Redis data in Tableau.
 
 == Quick start
 
