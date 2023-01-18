@@ -7,7 +7,7 @@
 :project-url:       https://github.com/{project-owner}/{project-name}
 :documentation-url: https://{project-owner}.github.io/{project-name}
 
-image::images/redis-sql-light.png[RedisSQL, 100, 100]
+image::images/redis-sql-light.png[RedisSQL, 245, 218]
 
 image:{project-url}/actions/workflows/early-access.yml/badge.svg["Build Status", link="{project-url}/actions/workflows/early-access.yml"]
 image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg?token={codecov-token}["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
@@ -16,7 +16,7 @@ Redis SQL Trino is a SQL interface for https://redis.io/docs/stack/[Redis Stack]
 
 Trino is a distributed SQL engine designed to query large data sets distributed over one or more heterogeneous data sources. The Redis SQL Trino connector lets you use Trino to query your Redis data using SQL.
 
-This implementation levereges the indexing and querying capabilites of Redis Stack. As such, this connector generally outperforms the https://trino.io/docs/current/connector/redis.html[OSS Redis Trino connector], which cannot take advantage of these indexed queries.
+This implementation leverages the indexing and querying capabilites of Redis Stack. As such, this connector generally outperforms the https://trino.io/docs/current/connector/redis.html[OSS Redis Trino connector], which cannot take advantage of these indexed queries.
 
 == Table of Contents
 
