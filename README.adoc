@@ -7,7 +7,7 @@
 :project-url:       https://github.com/{project-owner}/{project-name}
 :documentation-url: https://{project-owner}.github.io/{project-name}
 
-image::images/redis-sql-light.png
+image::images/redis-sql-light.png[]
 
 image:{project-url}/actions/workflows/early-access.yml/badge.svg["Build Status", link="{project-url}/actions/workflows/early-access.yml"]
 image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg?token={codecov-token}["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
