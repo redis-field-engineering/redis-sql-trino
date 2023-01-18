@@ -57,7 +57,8 @@ This example uses a small data set describing a collection of beers. To load the
 Next, use `riot-file` to import the sample data set into Redis:
 [source,console]
 ----
-riot-file -h localhost import https://storage.googleapis.com/jrx/beers.json hset --keyspace beer --keys id
+riot-file -h localhost import https://storage.googleapis.com/jrx/beers.json \
+  hset --keyspace beer --keys id
 ----
 
 Each beer is represented as a Redis hash. Start the Redis CLI to examine this data. For example, here's how you can view the "Beer Town Brown" record:
