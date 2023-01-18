@@ -13,7 +13,7 @@ image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/b
 
 Redis SQL Trino is a SQL interface for https://redis.io/docs/stack/[Redis Stack], https://redis.com/redis-enterprise-cloud/overview/[Redis Cloud], and https://redis.com/redis-enterprise-software/overview/[Redis Enterprise].
 
-Trino is a distributed SQL engine designed to designed to query large data sets distributed over one or more heterogeneous data sources. The Redis SQL Trino connector lets you use Trino to query your Redis data using SQL.
+Trino is a distributed SQL engine designed to query large data sets distributed over one or more heterogeneous data sources. The Redis SQL Trino connector lets you use Trino to query your Redis data using SQL.
 
 This implementation levereges the indexing and querying capabilites of Redis Stack. As such, this connector generally outperforms the https://trino.io/docs/current/connector/redis.html[OSS Redis Trino connector], which cannot take advantage of these indexed queries.
 
@@ -30,11 +30,11 @@ This implementation levereges the indexing and querying capabilites of Redis Sta
 
 Redis is an in-memory data store designed to serve data with the fastest possible response times. For this reason, Redis is frequently used for caching OLTP-style application queries. Redis Stack is an extension to Redis that, among other things, lets you index your data and then efficiently query it using a custom query language.
 
-We built the Redis SQL Trino connector so that you can query Redis with SQL any number of BI tools. For example, you can use this connector with Trino to query and visualize your Redis data in Tableau.
+We built the Redis SQL Trino connector so that you can query Redis using SQL. This is useful for any application compatible with JDBC. For example, Redis SQL Trino lets you query and visualize your Redis data from Tableau.
 
 == Quick start
 
-To understand how Redis SQL works, it's best to try it for yourself. View the screen recording or follow the steps below:
+To understand how Redis SQL Trino works, it's best to try it for yourself. View the screen recording or follow the steps below:
 
 image::https://asciinema.org/a/526185.svg[asciicast,link=https://asciinema.org/a/526185]
 
@@ -92,7 +92,7 @@ trino:default> select * from beers where abv > 3.2 order by abv desc;
 
 == Installation
 
-To run Redis SQL Trino in production, you'll need Trino, a copy of the Redis SQL Trino connector, and a Redis Stack, Cloud, or Enterprise deployment.
+To run Redis SQL Trino in production, you'll need Trino, a copy of the Redis SQL Trino connector, and a https://redis.io/docs/stack/[Redis Stack], https://redis.com/redis-enterprise-cloud/overview/[Redis Cloud], and https://redis.com/redis-enterprise-software/overview/[Redis Enterprise] deployment.
 
 === Trino
 
@@ -102,11 +102,11 @@ See the https://trino.io/docs/current/installation.html[Trino installation and d
 
 === Redis SQL Trino Connector
 
-Next, you'll need to install the Redis SQL Trino plugin and configure it. See https://redis-field-engineering.github.io/redis-sql/#redisearch-connector[plugin installation] and https://redis-field-engineering.github.io/redis-sql/#configuration[plugin configuration].
+Next, you'll need to install the Redis SQL Trino plugin and configure it. See our documentation for https://redis-field-engineering.github.io/redis-sql/#redisearch-connector[plugin installation] and https://redis-field-engineering.github.io/redis-sql/#configuration[plugin configuration].
 
 === Redis installation
 
-For a self-managed deployment, or for testing locally, install https://redis.io/docs/stack/[Redis Stack]. If you need a fully-managed cloud-based deployment on AWS, GCP, or Azure, see https://redis.com/redis-enterprise-cloud/overview/[Redis Cloud]. For deployment in your own private cloud or data center, consider https://redis.com/redis-enterprise-software/overview/[Redis Enterprise].
+For a self-managed deployment, or for testing locally, install https://redis.io/docs/stack/[Redis Stack]. If you need a fully-managed, cloud-based deployment of Redis on AWS, GCP, or Azure, see https://redis.com/redis-enterprise-cloud/overview/[Redis Cloud]. For deployment in your own private cloud or data center, consider https://redis.com/redis-enterprise-software/overview/[Redis Enterprise].
 
 == Usage
 
