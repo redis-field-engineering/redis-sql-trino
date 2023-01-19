@@ -9,6 +9,12 @@
 
 image::images/redis-sql-banner-light.png[RedisSQL]
 
+++++
+<p align="center">
+  <img width="460" height="300" src="/images/redis-sql-banner-light.png">
+</p>
+++++
+
 image:{project-url}/actions/workflows/early-access.yml/badge.svg["Build Status", link="{project-url}/actions/workflows/early-access.yml"]
 image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg?token={codecov-token}["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
 
