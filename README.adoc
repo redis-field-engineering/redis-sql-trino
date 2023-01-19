@@ -8,8 +8,8 @@
 :documentation-url: https://{project-owner}.github.io/{project-name}
 
 ++++
-<p align="center">
-  <img src="/images/redis-sql-banner-light.png">
+<p align="left">
+  <img src="/images/redis-sql-banner-large-light.png">
 </p>
 ++++
 
