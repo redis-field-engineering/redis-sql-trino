@@ -7,8 +7,6 @@
 :project-url:       https://github.com/{project-owner}/{project-name}
 :documentation-url: https://{project-owner}.github.io/{project-name}
 
-image::images/redis-sql-banner-light.png[RedisSQL]
-
 ++++
 <p align="center">
   <img src="/images/redis-sql-banner-light.png">
