@@ -11,7 +11,7 @@ image::images/redis-sql-banner-light.png[RedisSQL]
 
 ++++
 <p align="center">
-  <img width="460" height="300" src="/images/redis-sql-banner-light.png">
+  <img src="/images/redis-sql-banner-light.png">
 </p>
 ++++
 
