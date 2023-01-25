@@ -1,9 +1,8 @@
 :linkattrs:
 :project-owner:     redis-field-engineering
-:project-name:      redis-sql
+:project-name:      redis-sql-trino
 :project-group:     com.redis
 :project-version:   0.2.9
-:project-url:       https://github.com/{project-owner}/{project-name}
 :documentation-url: https://{project-owner}.github.io/{project-name}
 
 ++++
@@ -18,7 +17,7 @@
 
 '''
 
-image:{project-url}/actions/workflows/early-access.yml/badge.svg["Build Status", link="{project-url}/actions/workflows/early-access.yml"]
+image:https://github.com/{project-owner}/{project-name}/actions/workflows/early-access.yml/badge.svg["Build Status", link="https://github.com/{project-owner}/{project-name}/actions/workflows/early-access.yml"]
 image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg?token={codecov-token}["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
 
 Redis SQL Trino lets lets you easily integrate with visualization frameworks — like Tableau and SuperSet — and platforms that support JDBC-compatible databases (e.g., Mulesoft). Query support includes SELECT statements across secondary indexes on both Redis hashes & JSON, aggregations (e.g., count, min, max, avg), ordering, and more.
@@ -49,7 +48,7 @@ image::https://asciinema.org/a/526185.svg[asciicast,link=https://asciinema.org/a
 First, clone this git repository:
 [source,console,subs="verbatim,attributes"]
 ----
-git clone {project-url}.git
+git clone https://github.com/{project-owner}/{project-name}.git
 cd {project-name}
 ----
 
@@ -117,7 +116,7 @@ See the https://trino.io/docs/current/installation.html[Trino installation and d
 
 === Redis SQL Trino Connector
 
-Next, you'll need to install the Redis SQL Trino plugin and configure it. See our documentation for https://redis-field-engineering.github.io/redis-sql/#redisearch-connector[plugin installation] and https://redis-field-engineering.github.io/redis-sql/#configuration[plugin configuration].
+Next, you'll need to install the Redis SQL Trino plugin and configure it. See our documentation for https://{project-owner}.github.io/{project-name}/#redisearch-connector[plugin installation] and https://{project-owner}.github.io/{project-name}/#configuration[plugin configuration].
 
 === Redis installation
 
@@ -127,11 +126,11 @@ For a self-managed deployment, or for testing locally, install https://redis.io/
 
 The example above uses the https://trino.io/docs/current/client/cli.html[Trino CLI] to access your data.
 
-Most real world applications will use the https://trino.io/docs/current/client/jdbc.html[Trino JDBC driver] to issue queries. See the https://redis-field-engineering.github.io/redis-sql/#clients[Redis SQL Trino] documentation for details.
+Most real world applications will use the https://trino.io/docs/current/client/jdbc.html[Trino JDBC driver] to issue queries. See the https://{project-owner}.github.io/{project-name}/#clients[Redis SQL Trino] documentation for details.
 
 == Support
 
-Redis SQL Trino is supported by Redis, Inc. on a good faith effort basis. To report bugs, request features, or receive assistance, please {project-url}/issues[file an issue].
+Redis SQL Trino is supported by Redis, Inc. on a good faith effort basis. To report bugs, request features, or receive assistance, please https://github.com/{project-owner}/{project-name}/issues[file an issue].
 
 == License
 
