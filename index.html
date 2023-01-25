@@ -5,16 +5,16 @@
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 2.0.10">
-<title>Redis SQL</title>
+<title>Redis SQL Trino</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
 <link rel="stylesheet" href="./asciidoctor.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
 </head>
 <body class="article toc2 toc-left">
 <div id="header">
-<h1>Redis SQL</h1>
+<h1>Redis SQL Trino</h1>
 <div class="details">
-<span id="revnumber">version 0.2.9</span>
+<span id="revnumber">version 0.3.0</span>
 </div>
 <div id="toc" class="toc2">
 <div id="toctitle">Table of Contents</div>
@@ -44,7 +44,7 @@
 <h2 id="introduction"><a class="anchor" href="#introduction"></a>1. Introduction</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>Redis SQL is a <a href="https://trino.io">Trino</a> connector which allows access to RediSearch data from Trino.</p>
+<p>Redis SQL Trino is a <a href="https://trino.io">Trino</a> connector which allows access to RediSearch data from Trino.</p>
 </div>
 <div class="paragraph">
 <p>This guide provides documentation and usage information across the following topics:</p>
@@ -79,7 +79,7 @@
 <div class="sect2">
 <h3 id="redisearch-connector"><a class="anchor" href="#redisearch-connector"></a>2.2. RediSearch connector</h3>
 <div class="paragraph">
-<p>Download <a href="https://github.com/redis-field-engineering/redis-sql/releases/latest">latest release</a> and unzip without any directory structure under:</p>
+<p>Download <a href="https://github.com/redis-field-engineering/redis-sql-trino/releases/latest">latest release</a> and unzip without any directory structure under:</p>
 </div>
 <div class="paragraph">
 <p><code>&lt;trino&gt;/plugin/redisearch</code></p>
@@ -271,8 +271,8 @@ redisearch.uri=redis://localhost:6379</code></pre>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="CodeRay highlight"><code data-lang="console">git clone https://github.com/redis-field-engineering/redis-sql.git
-cd Redis SQL
+<pre class="CodeRay highlight"><code data-lang="console">git clone https://github.com/redis-field-engineering/redis-sql-trino.git
+cd Redis SQL Trino
 ./mvnw clean package -DskipTests</code></pre>
 </div>
 </div>
@@ -384,13 +384,13 @@ discovery.uri=http://localhost:8080</code></pre>
 </div>
 </div>
 <div class="paragraph">
-<p>Download latest <a href="https://github.com/redis-field-engineering/redis-sql/releases/latest">release</a> and unzip without any directory structure under <code>plugin/redisearch</code>.</p>
+<p>Download latest <a href="https://github.com/redis-field-engineering/redis-sql-trino/releases/latest">release</a> and unzip without any directory structure under <code>plugin/redisearch</code>.</p>
 </div>
 <div class="listingblock">
 <div class="title">Install RediSearch plugin</div>
 <div class="content">
-<pre class="CodeRay highlight"><code data-lang="console">wget https://github.com/redis-field-engineering/redis-sql/releases/download/v403/redis-sql-403.zip
-unzip -j redis-sql-0.2.9.zip -d /usr/lib/trino/plugin/redisearch</code></pre>
+<pre class="CodeRay highlight"><code data-lang="console">wget https://github.com/redis-field-engineering/redis-sql-trino/releases/download/v403/redis-sql-trino-403.zip
+unzip -j redis-sql-trino-0.3.0.zip -d /usr/lib/trino/plugin/redisearch</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -441,8 +441,8 @@ trino:default&gt; select * from mySearchIndex;</code></pre>
 </div>
 <div id="footer">
 <div id="footer-text">
-Version 0.2.9<br>
-Last updated 2023-01-05 07:26:29 UTC
+Version 0.3.0<br>
+Last updated 2023-01-25 02:02:42 UTC
 </div>
 </div>
 <link rel="stylesheet" href="./coderay-asciidoctor.css">
