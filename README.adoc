@@ -1,16 +1,16 @@
 :linkattrs:
-:project-owner:     redis-field-engineering
-:project-name:      redis-sql-trino
-:project-group:     com.redis
-:project-version:   0.2.9
-:documentation-url: https://{project-owner}.github.io/{project-name}
+:project-owner:      redis-field-engineering
+:project-name:       redis-sql-trino
+:project-group:      com.redis
+:project-version:    0.2.9
+:name:               Redis SQL Trino
 
 ++++
 <p align="center">
-  <img alt="Redis SQL Trino" src=".github/images/redis-sql-trino-banner-lt.png">
+  <img alt="{name}" src=".github/images/redis-sql-trino-banner-lt.png">
 
   <p align="center">
-    Redis SQL Trino is a SQL interface for <a href='https://redis.io/docs/stack/'>Redis Stack</a>, <a href='https://redis.com/redis-enterprise-cloud/overview/'>Redis Cloud</a>, and <a href='https://redis.com/redis-enterprise-software/overview/'>Redis Enterprise</a>.
+    {name} is a SQL interface for <a href='https://redis.io/docs/stack/'>Redis Stack</a>, <a href='https://redis.com/redis-enterprise-cloud/overview/'>Redis Cloud</a>, and <a href='https://redis.com/redis-enterprise-software/overview/'>Redis Enterprise</a>.
   </p>
 </p>
 ++++
@@ -20,9 +20,9 @@
 image:https://github.com/{project-owner}/{project-name}/actions/workflows/early-access.yml/badge.svg["Build Status", link="https://github.com/{project-owner}/{project-name}/actions/workflows/early-access.yml"]
 image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg?token={codecov-token}["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
 
-Redis SQL Trino lets lets you easily integrate with visualization frameworks — like Tableau and SuperSet — and platforms that support JDBC-compatible databases (e.g., Mulesoft). Query support includes SELECT statements across secondary indexes on both Redis hashes & JSON, aggregations (e.g., count, min, max, avg), ordering, and more.
+{name} lets lets you easily integrate with visualization frameworks — like Tableau and SuperSet — and platforms that support JDBC-compatible databases (e.g., Mulesoft). Query support includes SELECT statements across secondary indexes on both Redis hashes & JSON, aggregations (e.g., count, min, max, avg), ordering, and more.
 
-Trino is a distributed SQL engine designed to query large data sets across one or more heterogeneous data sources. Though Trino does support a https://trino.io/docs/current/connector/redis.html[Redis OSS connector], this connector is limited to SCAN and subsequent HGET operations, which do not scale well in high-throughput scenarios. However, that is where Redis SQL Trino shines since it can pushdown the entire query to the data atomically which eliminates the waste of many network hops and subsequent operations.
+Trino is a distributed SQL engine designed to query large data sets across one or more heterogeneous data sources. Though Trino does support a https://trino.io/docs/current/connector/redis.html[Redis OSS connector], this connector is limited to SCAN and subsequent HGET operations, which do not scale well in high-throughput scenarios. However, that is where {name} shines since it can pushdown the entire query to the data atomically which eliminates the waste of many network hops and subsequent operations.
 
 == Table of Contents
 
@@ -37,11 +37,11 @@ Trino is a distributed SQL engine designed to query large data sets across one o
 
 Redis is an in-memory data store designed to serve data with the fastest possible response times. For this reason, Redis is frequently used for caching OLTP-style application queries and as a serving layer in data pipeline architectures (e.g., lambda architectures, online feature stores, etc.). Redis Stack is an extension to Redis that, among other things, lets you index your data on secondary attributes and then efficiently query it using a custom query language.
 
-We built the Redis SQL Trino connector so that you can query Redis using SQL. This is useful for any application compatible with JDBC. For example, Redis SQL Trino lets you query and visualize your Redis data from Tableau.
+We built the {name} connector so that you can query Redis using SQL. This is useful for any application compatible with JDBC. For example, {name} lets you query and visualize your Redis data from Tableau.
 
 == Quick start
 
-To understand how Redis SQL Trino works, it's best to try it for yourself. View the screen recording or follow the steps below:
+To understand how {name} works, it's best to try it for yourself. View the screen recording or follow the steps below:
 
 image::https://asciinema.org/a/526185.svg[asciicast,link=https://asciinema.org/a/526185]
 
@@ -102,10 +102,10 @@ trino:default> select * from beers where abv > 3.2 order by abv desc;
 
 == Installation
 
-To run Redis SQL Trino in production, you'll need:
+To run {name} in production, you'll need:
 
 * Trino
-* A copy of the Redis SQL Trino connector
+* A copy of the {name} connector
 * A https://redis.io/docs/stack/[Redis Stack], https://redis.com/redis-enterprise-cloud/overview/[Redis Cloud], and https://redis.com/redis-enterprise-software/overview/[Redis Enterprise] deployment
 
 === Trino
@@ -114,9 +114,9 @@ First, you'll need a working Trino installation.
 
 See the https://trino.io/docs/current/installation.html[Trino installation and deplyoment guide] for details. Trino recommends a https://trino.io/docs/current/installation/containers.html[container-based deployment] using your orchestration platform of choice. If you run Kubernetes, see the https://trino.io/docs/current/installation/kubernetes.html[Trino Helm chart].
 
-=== Redis SQL Trino Connector
+=== {name} Connector
 
-Next, you'll need to install the Redis SQL Trino plugin and configure it. See our documentation for https://{project-owner}.github.io/{project-name}/#redisearch-connector[plugin installation] and https://{project-owner}.github.io/{project-name}/#configuration[plugin configuration].
+Next, you'll need to install the {name} plugin and configure it. See our documentation for https://{project-owner}.github.io/{project-name}/#redisearch-connector[plugin installation] and https://{project-owner}.github.io/{project-name}/#configuration[plugin configuration].
 
 === Redis installation
 
@@ -126,12 +126,12 @@ For a self-managed deployment, or for testing locally, install https://redis.io/
 
 The example above uses the https://trino.io/docs/current/client/cli.html[Trino CLI] to access your data.
 
-Most real world applications will use the https://trino.io/docs/current/client/jdbc.html[Trino JDBC driver] to issue queries. See the https://{project-owner}.github.io/{project-name}/#clients[Redis SQL Trino] documentation for details.
+Most real world applications will use the https://trino.io/docs/current/client/jdbc.html[Trino JDBC driver] to issue queries. See the https://{project-owner}.github.io/{project-name}/#clients[{name}] documentation for details.
 
 == Support
 
-Redis SQL Trino is supported by Redis, Inc. on a good faith effort basis. To report bugs, request features, or receive assistance, please https://github.com/{project-owner}/{project-name}/issues[file an issue].
+{name} is supported by Redis, Inc. on a good faith effort basis. To report bugs, request features, or receive assistance, please https://github.com/{project-owner}/{project-name}/issues[file an issue].
 
 == License
 
-Redis SQL is licensed under the MIT License. Copyright (C) 2023 Redis, Inc.
+{name} is licensed under the MIT License. Copyright (C) 2023 Redis, Inc.
