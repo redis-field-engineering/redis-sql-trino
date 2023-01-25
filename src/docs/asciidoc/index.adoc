@@ -125,7 +125,7 @@ The Trino JDBC driver allows users to access Trino from Java-based applications,
 
 Refer to the https://trino.io/docs/current/client/jdbc.html[Trino documentation] for setup instructions. 
 
-The following is an example of a JDBC URL used to create a connection to Redis SQL:
+The following is an example of a JDBC URL used to create a connection to Redis SQL Trino:
 
 [source]
 ----
