@@ -92,6 +92,4 @@ jobs:
         with:
           push: ${{ github.event_name != 'pull_request' }}
           tags: fieldengineering/redis-sql-trino:early-access
-          platforms:
-            - linux/arm64
-              linux/amd64 
+          platforms: linux/amd64,linux/arm64
