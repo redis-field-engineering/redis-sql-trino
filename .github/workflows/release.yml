@@ -95,7 +95,7 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           push: ${{ github.event_name != 'pull_request' }}
-          tags: fieldengineering/redis-sql:latest,fieldengineering/redis-sql:${{ github.event.inputs.version }}
+          tags: fieldengineering/redis-sql-trino:latest,fieldengineering/redis-sql-trino:${{ github.event.inputs.version }}
 
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3

@@ -9,9 +9,9 @@
 	</parent>
 
 	<groupId>com.redis</groupId>
-	<artifactId>redis-sql</artifactId>
+	<artifactId>redis-sql-trino</artifactId>
 	<version>0.2.10-SNAPSHOT</version>
-	<name>Redis SQL</name>
+	<name>Redis SQL Trino</name>
 	<description>Trino connector for RediSearch</description>
 	<packaging>trino-plugin</packaging>
 	<url>https://github.com/${github.owner}/${github.repo}</url>
@@ -24,7 +24,7 @@
 	</scm>
 	<properties>
 		<github.owner>redis-field-engineering</github.owner>
-		<github.repo>redis-sql</github.repo>
+		<github.repo>redis-sql-trino</github.repo>
 
 		<lettucemod.version>3.2.0</lettucemod.version>
 		<lettuce.version>6.2.2.RELEASE</lettuce.version>
@@ -482,7 +482,7 @@
 						</goals>
 						<configuration>
 							<backend>pdf</backend>
-							<outputFile>redis-sql-${project.version}.pdf</outputFile>
+							<outputFile>redis-sql-trino-${project.version}.pdf</outputFile>
 							<attributes>
 								<doctype>book</doctype>
 								<title-page></title-page>

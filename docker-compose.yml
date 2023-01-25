@@ -10,7 +10,7 @@ services:
     restart: always
 
   trino:
-    image: fieldengineering/redis-sql
+    image: fieldengineering/redis-sql-trino
     hostname: trino
     container_name: trino
     ports:
