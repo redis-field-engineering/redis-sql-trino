@@ -2,17 +2,17 @@ package com.redis.trino;
 
 import java.io.Closeable;
 
-import com.redis.testcontainers.RedisModulesContainer;
+import com.redis.testcontainers.RedisStackContainer;
 import com.redis.testcontainers.junit.RedisTestContext;
 
 public class RediSearchServer implements Closeable {
 
-	private final RedisModulesContainer dockerContainer;
+	private final RedisStackContainer dockerContainer;
 	private final RedisTestContext context;
 
 	public RediSearchServer() {
-		this.dockerContainer = new RedisModulesContainer(
-				RedisModulesContainer.DEFAULT_IMAGE_NAME.withTag(RedisModulesContainer.DEFAULT_TAG));
+		this.dockerContainer = new RedisStackContainer(
+				RedisStackContainer.DEFAULT_IMAGE_NAME.withTag(RedisStackContainer.DEFAULT_TAG));
 		this.dockerContainer.start();
 		this.context = new RedisTestContext(dockerContainer);
 	}
