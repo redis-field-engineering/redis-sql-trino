@@ -7,10 +7,10 @@
 
 ++++
 <p align="center">
-  <img alt="{name}" src=".github/images/redis-sql-trino-banner-lt.png">
+  <img alt="Redis SQL Trino" src=".github/images/redis-sql-trino-banner-lt.png">
 
   <p align="center">
-    {name} is a SQL interface for <a href='https://redis.io/docs/stack/'>Redis Stack</a>, <a href='https://redis.com/redis-enterprise-cloud/overview/'>Redis Cloud</a>, and <a href='https://redis.com/redis-enterprise-software/overview/'>Redis Enterprise</a>.
+    Redis SQL Trino is a SQL interface for <a href='https://redis.io/docs/stack/'>Redis Stack</a>, <a href='https://redis.com/redis-enterprise-cloud/overview/'>Redis Cloud</a>, and <a href='https://redis.com/redis-enterprise-software/overview/'>Redis Enterprise</a>.
   </p>
 </p>
 ++++
