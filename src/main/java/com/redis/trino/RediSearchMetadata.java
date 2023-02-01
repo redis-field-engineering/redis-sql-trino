@@ -246,7 +246,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			Collection<ComputedStatistics> computedStatistics) {
 		return Optional.empty();
 	}
-	
+
 	@Override
 	public RediSearchColumnHandle getDeleteRowIdColumnHandle(ConnectorSession session,
 			ConnectorTableHandle tableHandle) {
