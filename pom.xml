@@ -26,9 +26,9 @@
 		<github.owner>redis-field-engineering</github.owner>
 		<github.repo>redis-sql-trino</github.repo>
 
-		<lettucemod.version>3.2.0</lettucemod.version>
+		<lettucemod.version>3.2.1</lettucemod.version>
 		<lettuce.version>6.2.2.RELEASE</lettuce.version>
-		<testcontainers-redis.version>1.6.2</testcontainers-redis.version>
+		<testcontainers-redis.version>1.6.3</testcontainers-redis.version>
 		<ulid.version>5.1.0</ulid.version>
 
 		<air.check.skip-license>true</air.check.skip-license>
@@ -362,12 +362,6 @@
 					<artifactId>jackson-databind</artifactId>
 				</exclusion>
 			</exclusions>
-		</dependency>
-
-		<dependency>
-			<groupId>javax.servlet</groupId>
-			<artifactId>javax.servlet-api</artifactId>
-			<scope>test</scope>
 		</dependency>
 
 		<dependency>

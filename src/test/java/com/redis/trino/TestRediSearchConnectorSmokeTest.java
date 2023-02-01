@@ -39,6 +39,12 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 
 	private RediSearchServer redisearch;
 
+	@Override
+	protected QueryRunner createQueryRunner() throws Exception {
+		redisearch = new RediSearchServer();
+		return RediSearchQueryRunner.createRediSearchQueryRunner(redisearch, CUSTOMER, NATION, ORDERS, REGION);
+	}
+
 	private void populateBeers() throws IOException, InterruptedException {
 		Beers.populateIndex(redisearch.getTestContext().getConnection());
 	}
@@ -101,12 +107,6 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	protected void assertQuery(String sql) {
 		log.info("assertQuery: %s", sql);
 		super.assertQuery(sql);
-	}
-
-	@Override
-	protected QueryRunner createQueryRunner() throws Exception {
-		redisearch = new RediSearchServer();
-		return RediSearchQueryRunner.createRediSearchQueryRunner(redisearch, CUSTOMER, NATION, ORDERS, REGION);
 	}
 
 	@Test

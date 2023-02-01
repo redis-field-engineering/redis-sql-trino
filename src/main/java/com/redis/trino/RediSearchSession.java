@@ -51,8 +51,10 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.UncheckedExecutionException;
 import com.redis.lettucemod.api.StatefulRedisModulesConnection;
 import com.redis.lettucemod.search.AggregateOperation;
+import com.redis.lettucemod.search.AggregateOptions;
 import com.redis.lettucemod.search.AggregateWithCursorResults;
 import com.redis.lettucemod.search.CreateOptions;
+import com.redis.lettucemod.search.CursorOptions;
 import com.redis.lettucemod.search.Document;
 import com.redis.lettucemod.search.Field;
 import com.redis.lettucemod.search.Group;
@@ -309,10 +311,13 @@ public class RediSearchSession {
 	public AggregateWithCursorResults<String> aggregate(RediSearchTableHandle table) {
 		Aggregation aggregation = translator.aggregate(table);
 		log.info("Running %s", aggregation);
-		AggregateWithCursorResults<String> results = connection.sync().ftAggregate(aggregation.getIndex(),
-				aggregation.getQuery(), aggregation.getCursorOptions(), aggregation.getOptions());
-		List<AggregateOperation<?, ?>> groupBys = aggregation.getOptions().getOperations().stream()
-				.filter(o -> o.getType() == AggregateOperation.Type.GROUP).collect(Collectors.toList());
+		String index = aggregation.getIndex();
+		String query = aggregation.getQuery();
+		CursorOptions cursor = aggregation.getCursorOptions();
+		AggregateOptions<String, String> options = aggregation.getOptions();
+		AggregateWithCursorResults<String> results = connection.sync().ftAggregate(index, query, cursor, options);
+		List<AggregateOperation<String, String>> groupBys = aggregation.getOptions().getOperations().stream()
+				.filter(this::isGroupOperation).collect(Collectors.toList());
 		if (results.isEmpty() && !groupBys.isEmpty()) {
 			Group groupBy = (Group) groupBys.get(0);
 			Optional<String> as = groupBy.getReducers()[0].getAs();
@@ -323,6 +328,10 @@ public class RediSearchSession {
 			}
 		}
 		return results;
+	}
+
+	private boolean isGroupOperation(AggregateOperation<String, String> operation) {
+		return operation.getType() == AggregateOperation.Type.GROUP;
 	}
 
 	public AggregateWithCursorResults<String> cursorRead(RediSearchTableHandle tableHandle, long cursor) {

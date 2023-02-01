@@ -12,7 +12,8 @@ public class RediSearchServer implements Closeable {
 
 	public RediSearchServer() {
 		this.dockerContainer = new RedisStackContainer(
-				RedisStackContainer.DEFAULT_IMAGE_NAME.withTag(RedisStackContainer.DEFAULT_TAG));
+				RedisStackContainer.DEFAULT_IMAGE_NAME.withTag(RedisStackContainer.DEFAULT_TAG))
+				.withEnv("REDISEARCH_ARGS", "MAXAGGREGATERESULTS 1000000");
 		this.dockerContainer.start();
 		this.context = new RedisTestContext(dockerContainer);
 	}
