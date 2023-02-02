@@ -27,6 +27,7 @@ Trino is a distributed SQL engine designed to query large data sets across one o
 == Table of Contents
 
 * link:#background[Background]
+* link:#requirements[Requirements]
 * link:#quick-start[Quick start]
 * link:#installation[Installation]
 * link:#Usage[Usage]
@@ -38,6 +39,16 @@ Trino is a distributed SQL engine designed to query large data sets across one o
 Redis is an in-memory data store designed to serve data with the fastest possible response times. For this reason, Redis is frequently used for caching OLTP-style application queries and as a serving layer in data pipeline architectures (e.g., lambda architectures, online feature stores, etc.). Redis Stack is an extension to Redis that, among other things, lets you index your data on secondary attributes and then efficiently query it using a custom query language.
 
 We built the {name} connector so that you can query Redis using SQL. This is useful for any application compatible with JDBC. For example, {name} lets you query and visualize your Redis data from Tableau.
+
+== Requirements
+
+{name} requires a Redis deployment that includes https://redis.io/docs/stack/search/https://redis.io/docs/stack/search/[RediSearch]. RediSearch is a https://redis.io/docs/reference/modules/[Redis module] that adds querying and secondary indexing to Redis.
+
+Redis deployments that bundle RediSearch include:
+
+* https://redis.com/try-free/[Redis Cloud]: Fully-managed, enterprise-grade Redis deployed on AWS, Azure, or GCP.
+* https://redis.com/redis-enterprise-software/overview/[Redis Enterprise]: Enterprise-grade Redis for on-premises and private cloud deployment.
+* https://redis.io/docs/stack/[Redis Stack]: Redis distribution that includes RediSearch, RedisJSON, RedisGraph, RedisTimeSeries, and RedisBloom.
 
 == Quick start
 
