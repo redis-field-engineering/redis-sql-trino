@@ -48,7 +48,6 @@ import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 
 import com.github.f4b6a3.ulid.UlidFactory;
-import com.google.common.collect.ImmutableList;
 import com.google.common.primitives.Shorts;
 import com.google.common.primitives.SignedBytes;
 import com.redis.lettucemod.api.StatefulRedisModulesConnection;
@@ -204,7 +203,7 @@ public class RediSearchPageSink implements ConnectorPageSink {
 
 	@Override
 	public CompletableFuture<Collection<Slice>> finish() {
-		return completedFuture(ImmutableList.of());
+		return completedFuture(List.of());
 	}
 
 	@Override

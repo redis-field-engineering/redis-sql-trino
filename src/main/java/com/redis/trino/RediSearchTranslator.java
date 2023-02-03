@@ -25,18 +25,11 @@ package com.redis.trino;
 
 import static java.util.Objects.requireNonNull;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
-
 import com.redis.lettucemod.search.AggregateOptions;
 import com.redis.lettucemod.search.CursorOptions;
 import com.redis.lettucemod.search.Limit;
 import com.redis.lettucemod.search.SearchOptions;
 import com.redis.lettucemod.search.SearchOptions.Builder;
-
-import io.lettuce.core.RedisURI;
-import io.trino.spi.HostAddress;
 
 public class RediSearchTranslator {
 
@@ -50,15 +43,6 @@ public class RediSearchTranslator {
 
 	public RediSearchConfig getConfig() {
 		return config;
-	}
-
-	public List<HostAddress> getAddresses() {
-		Optional<String> uri = config.getUri();
-		if (uri.isPresent()) {
-			RedisURI redisURI = RedisURI.create(uri.get());
-			return Collections.singletonList(HostAddress.fromParts(redisURI.getHost(), redisURI.getPort()));
-		}
-		return Collections.emptyList();
 	}
 
 	public static class Aggregation {
