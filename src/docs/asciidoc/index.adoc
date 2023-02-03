@@ -125,7 +125,7 @@ The Trino JDBC driver allows users to access Trino from Java-based applications,
 
 Refer to the https://trino.io/docs/current/client/jdbc.html[Trino documentation] for setup instructions. 
 
-The following is an example of a JDBC URL used to create a connection to Redis SQL Trino:
+The following is an example of a JDBC URL used to create a connection to {project-name}:
 
 [source]
 ----
@@ -157,10 +157,11 @@ cd {project-name}
 
 Follow these step-by-step instructions to deploy a single-node Trino server on Ubuntu.
 
+=== Install Java
+
 Trino requires a 64-bit version of Java 17.
 It is recommended to use https://www.azul.com/downloads/?package=jdk[Azul Zulu] as the JDK.
 
-.Install Java
 [source,console]
 ----
 $ java -version
@@ -169,9 +170,10 @@ OpenJDK Runtime Environment Zulu17.36+17-CA (build 17.0.4.1+1-LTS)
 OpenJDK 64-Bit Server VM Zulu17.36+17-CA (build 17.0.4.1+1-LTS, mixed mode, sharing)
 ----
 
+=== Set up Trino
+
 Download the Trino server tarball and unpack it.
 
-.Install Trino
 [source,console,subs="verbatim,attributes"]
 ----
 wget https://repo1.maven.org/maven2/io/trino/trino-server/{trino-version}/trino-server-{trino-version}.tar.gz
@@ -190,15 +192,14 @@ mkdir -p {trino-datadir}
 
 Create an `etc` directory inside the installation directory to hold configuration files.
 
-.Create etc directory
 [source,console,subs="verbatim,attributes"]
 ----
 mkdir {trino-dir}/etc
 ----
 
-Create a node properties file.
+Create a `node.properties` file.
 
-.etc/node.properties
+.{trino-dir}/etc/node.properties
 [source,properties,subs="verbatim,attributes"]
 ----
 node.environment=production
@@ -208,7 +209,7 @@ node.data-dir={trino-datadir}
 
 Create a JVM config file.
 
-.etc/jvm.config
+.{trino-dir}/etc/jvm.config
 [source,console]
 ----
 -server
@@ -231,7 +232,7 @@ Create a JVM config file.
 
 Create a config properties file.
 
-.etc/config.properties
+.{trino-dir}/etc/config.properties
 [source,properties]
 ----
 coordinator=true
@@ -242,24 +243,32 @@ discovery.uri=http://localhost:8080
 
 Create a logging configuration file.
 
-.etc/log.properties
+.{trino-dir}/etc/log.properties
 [source,properties]
 ----
 io.trino=INFO
 ----
 
-Download latest {project-url}/releases/latest[release] and unzip without any directory structure under `plugin/redisearch`.
+=== Set up {project-name}
 
-.Install RediSearch plugin
+Download latest {project-url}/releases/latest[release] and unzip without any directory structure under `plugin/redisearch`:
+
 [source,console,subs="verbatim,attributes"]
 ----
-wget {project-url}/releases/download/v{trino-version}/{artifact-id}-{trino-version}.zip
+wget {project-url}/releases/download/v{project-version}/{artifact-id}-{project-version}.zip
 unzip -j {artifact-id}-{project-version}.zip -d {trino-dir}/plugin/redisearch
 ----
 
-Create a RediSearch connector configuration file.
+Create a etc/catalog subdirectory:
 
-.etc/catalog/redisearch.properties
+[source,console,subs="verbatim,attributes"]
+----
+mkdir {trino-dir}/etc/catalog
+----
+
+Create a RediSearch connector configuration file:
+
+.{trino-dir}/etc/catalog/redisearch.properties
 [source,properties]
 ----
 connector.name=redisearch
@@ -268,29 +277,29 @@ redisearch.uri=redis://localhost:6379
 
 Change and/or add <<properties,properties>> as needed.
 
-Start the Trino server.
+=== Start Trino
 
-.Run Trino server
+Start the Trino server:
+
 [source,console,subs="verbatim,attributes"]
 ----
 {trino-dir}/bin/launcher run
 ----
 
-Download https://repo1.maven.org/maven2/io/trino/trino-cli/{trino-version}/trino-cli-{trino-version}-executable.jar[trino-cli-{trino-version}-executable.jar], rename it to `trino`, make it executable with `chmod +x`, and run it to show the version of the CLI.
+=== Run Trino CLI
 
-.Install Trino CLI
+Download and run https://repo1.maven.org/maven2/io/trino/trino-cli/{trino-version}/trino-cli-{trino-version}-executable.jar[trino-cli-{trino-version}-executable.jar]:
+
 [source,console,subs="verbatim,attributes"]
 ----
-wget https://repo1.maven.org/maven2/io/trino/trino-cli/{trino-version}/trino-cli-{trino-version}-executable.jar
-mv trino-cli-{trino-version}-executable.jar trino
-chmod +x trino
+wget https://repo1.maven.org/maven2/io/trino/trino-cli/{trino-version}/trino-cli-{trino-version}-executable.jar -O /usr/local/bin/trino
+chmod +x /usr/local/bin/trino
+trino --catalog redisearch --schema default
 ----
 
-Connect to Trino using the CLI and run a SQL query.
+Run a SQL query:
 
-.Run Trino CLI
 [source,console]
 ----
-./trino --catalog redisearch --schema default
 trino:default> select * from mySearchIndex;
 ----
