@@ -35,7 +35,15 @@
 </ul>
 </li>
 <li><a href="#build">5. Build</a></li>
-<li><a href="#Walkthrough">6. Complete Walkthrough</a></li>
+<li><a href="#Walkthrough">6. Complete Walkthrough</a>
+<ul class="sectlevel2">
+<li><a href="#install-java">6.1. Install Java</a></li>
+<li><a href="#set-up-trino">6.2. Set up Trino</a></li>
+<li><a href="#set-up-redis-sql-trino">6.3. Set up Redis SQL Trino</a></li>
+<li><a href="#start-trino">6.4. Start Trino</a></li>
+<li><a href="#run-trino-cli">6.5. Run Trino CLI</a></li>
+</ul>
+</li>
 </ul>
 </div>
 </div>
@@ -241,7 +249,7 @@ redisearch.uri=redis://localhost:6379</code></pre>
 <p>Refer to the <a href="https://trino.io/docs/current/client/jdbc.html">Trino documentation</a> for setup instructions.</p>
 </div>
 <div class="paragraph">
-<p>The following is an example of a JDBC URL used to create a connection to Redis SQL:</p>
+<p>The following is an example of a JDBC URL used to create a connection to Redis SQL Trino:</p>
 </div>
 <div class="listingblock">
 <div class="content">
@@ -284,12 +292,13 @@ cd Redis SQL Trino
 <div class="paragraph">
 <p>Follow these step-by-step instructions to deploy a single-node Trino server on Ubuntu.</p>
 </div>
+<div class="sect2">
+<h3 id="install-java"><a class="anchor" href="#install-java"></a>6.1. Install Java</h3>
 <div class="paragraph">
 <p>Trino requires a 64-bit version of Java 17.
 It is recommended to use <a href="https://www.azul.com/downloads/?package=jdk">Azul Zulu</a> as the JDK.</p>
 </div>
 <div class="listingblock">
-<div class="title">Install Java</div>
 <div class="content">
 <pre class="CodeRay highlight"><code data-lang="console">$ java -version
 openjdk version &quot;17.0.4.1&quot; 2022-08-12 LTS
@@ -297,11 +306,13 @@ OpenJDK Runtime Environment Zulu17.36+17-CA (build 17.0.4.1+1-LTS)
 OpenJDK 64-Bit Server VM Zulu17.36+17-CA (build 17.0.4.1+1-LTS, mixed mode, sharing)</code></pre>
 </div>
 </div>
+</div>
+<div class="sect2">
+<h3 id="set-up-trino"><a class="anchor" href="#set-up-trino"></a>6.2. Set up Trino</h3>
 <div class="paragraph">
 <p>Download the Trino server tarball and unpack it.</p>
 </div>
 <div class="listingblock">
-<div class="title">Install Trino</div>
 <div class="content">
 <pre class="CodeRay highlight"><code data-lang="console">wget https://repo1.maven.org/maven2/io/trino/trino-server/403/trino-server-403.tar.gz
 mkdir /usr/lib/trino
@@ -322,16 +333,15 @@ It is recommended to create a data directory outside of the installation directo
 <p>Create an <code>etc</code> directory inside the installation directory to hold configuration files.</p>
 </div>
 <div class="listingblock">
-<div class="title">Create etc directory</div>
 <div class="content">
 <pre class="CodeRay highlight"><code data-lang="console">mkdir /usr/lib/trino/etc</code></pre>
 </div>
 </div>
 <div class="paragraph">
-<p>Create a node properties file.</p>
+<p>Create a <code>node.properties</code> file.</p>
 </div>
 <div class="listingblock">
-<div class="title">etc/node.properties</div>
+<div class="title">/usr/lib/trino/etc/node.properties</div>
 <div class="content">
 <pre class="CodeRay highlight"><code data-lang="properties">node.environment=production
 node.id=ffffffff-ffff-ffff-ffff-ffffffffffff
@@ -342,7 +352,7 @@ node.data-dir=/var/trino</code></pre>
 <p>Create a JVM config file.</p>
 </div>
 <div class="listingblock">
-<div class="title">etc/jvm.config</div>
+<div class="title">/usr/lib/trino/etc/jvm.config</div>
 <div class="content">
 <pre class="CodeRay highlight"><code data-lang="console">-server
 -Xmx16G
@@ -366,7 +376,7 @@ node.data-dir=/var/trino</code></pre>
 <p>Create a config properties file.</p>
 </div>
 <div class="listingblock">
-<div class="title">etc/config.properties</div>
+<div class="title">/usr/lib/trino/etc/config.properties</div>
 <div class="content">
 <pre class="CodeRay highlight"><code data-lang="properties">coordinator=true
 node-scheduler.include-coordinator=true
@@ -378,26 +388,36 @@ discovery.uri=http://localhost:8080</code></pre>
 <p>Create a logging configuration file.</p>
 </div>
 <div class="listingblock">
-<div class="title">etc/log.properties</div>
+<div class="title">/usr/lib/trino/etc/log.properties</div>
 <div class="content">
 <pre class="CodeRay highlight"><code data-lang="properties">io.trino=INFO</code></pre>
 </div>
 </div>
+</div>
+<div class="sect2">
+<h3 id="set-up-redis-sql-trino"><a class="anchor" href="#set-up-redis-sql-trino"></a>6.3. Set up Redis SQL Trino</h3>
 <div class="paragraph">
-<p>Download latest <a href="https://github.com/redis-field-engineering/redis-sql-trino/releases/latest">release</a> and unzip without any directory structure under <code>plugin/redisearch</code>.</p>
+<p>Download latest <a href="https://github.com/redis-field-engineering/redis-sql-trino/releases/latest">release</a> and unzip without any directory structure under <code>plugin/redisearch</code>:</p>
 </div>
 <div class="listingblock">
-<div class="title">Install RediSearch plugin</div>
 <div class="content">
-<pre class="CodeRay highlight"><code data-lang="console">wget https://github.com/redis-field-engineering/redis-sql-trino/releases/download/v403/redis-sql-trino-403.zip
+<pre class="CodeRay highlight"><code data-lang="console">wget https://github.com/redis-field-engineering/redis-sql-trino/releases/download/v0.3.0/redis-sql-trino-0.3.0.zip
 unzip -j redis-sql-trino-0.3.0.zip -d /usr/lib/trino/plugin/redisearch</code></pre>
 </div>
 </div>
 <div class="paragraph">
-<p>Create a RediSearch connector configuration file.</p>
+<p>Create a etc/catalog subdirectory:</p>
 </div>
 <div class="listingblock">
-<div class="title">etc/catalog/redisearch.properties</div>
+<div class="content">
+<pre class="CodeRay highlight"><code data-lang="console">mkdir /usr/lib/trino/etc/catalog</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Create a RediSearch connector configuration file:</p>
+</div>
+<div class="listingblock">
+<div class="title">/usr/lib/trino/etc/catalog/redisearch.properties</div>
 <div class="content">
 <pre class="CodeRay highlight"><code data-lang="properties">connector.name=redisearch
 redisearch.uri=redis://localhost:6379</code></pre>
@@ -406,34 +426,37 @@ redisearch.uri=redis://localhost:6379</code></pre>
 <div class="paragraph">
 <p>Change and/or add <a href="#properties">properties</a> as needed.</p>
 </div>
+</div>
+<div class="sect2">
+<h3 id="start-trino"><a class="anchor" href="#start-trino"></a>6.4. Start Trino</h3>
 <div class="paragraph">
-<p>Start the Trino server.</p>
+<p>Start the Trino server:</p>
 </div>
 <div class="listingblock">
-<div class="title">Run Trino server</div>
 <div class="content">
 <pre class="CodeRay highlight"><code data-lang="console">/usr/lib/trino/bin/launcher run</code></pre>
 </div>
 </div>
+</div>
+<div class="sect2">
+<h3 id="run-trino-cli"><a class="anchor" href="#run-trino-cli"></a>6.5. Run Trino CLI</h3>
 <div class="paragraph">
-<p>Download <a href="https://repo1.maven.org/maven2/io/trino/trino-cli/403/trino-cli-403-executable.jar">trino-cli-403-executable.jar</a>, rename it to <code>trino</code>, make it executable with <code>chmod +x</code>, and run it to show the version of the CLI.</p>
+<p>Download and run <a href="https://repo1.maven.org/maven2/io/trino/trino-cli/403/trino-cli-403-executable.jar">trino-cli-403-executable.jar</a>:</p>
 </div>
 <div class="listingblock">
-<div class="title">Install Trino CLI</div>
 <div class="content">
-<pre class="CodeRay highlight"><code data-lang="console">wget https://repo1.maven.org/maven2/io/trino/trino-cli/403/trino-cli-403-executable.jar
-mv trino-cli-403-executable.jar trino
-chmod +x trino</code></pre>
+<pre class="CodeRay highlight"><code data-lang="console">wget https://repo1.maven.org/maven2/io/trino/trino-cli/403/trino-cli-403-executable.jar -O /usr/local/bin/trino
+chmod +x /usr/local/bin/trino
+trino --catalog redisearch --schema default</code></pre>
 </div>
 </div>
 <div class="paragraph">
-<p>Connect to Trino using the CLI and run a SQL query.</p>
+<p>Run a SQL query:</p>
 </div>
 <div class="listingblock">
-<div class="title">Run Trino CLI</div>
 <div class="content">
-<pre class="CodeRay highlight"><code data-lang="console">./trino --catalog redisearch --schema default
-trino:default&gt; select * from mySearchIndex;</code></pre>
+<pre class="CodeRay highlight"><code data-lang="console">trino:default&gt; select * from mySearchIndex;</code></pre>
+</div>
 </div>
 </div>
 </div>
@@ -442,7 +465,7 @@ trino:default&gt; select * from mySearchIndex;</code></pre>
 <div id="footer">
 <div id="footer-text">
 Version 0.3.0<br>
-Last updated 2023-01-25 02:02:42 UTC
+Last updated 2023-02-07 04:36:32 UTC
 </div>
 </div>
 <link rel="stylesheet" href="./coderay-asciidoctor.css">
