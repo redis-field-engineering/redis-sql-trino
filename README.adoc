@@ -7,7 +7,7 @@
 
 ++++
 <p align="center">
-  <img alt="Redis SQL Trino" src=".github/images/redis-sql-trino-banner-lt.png">
+  <img alt="Redis SQL Trino" src=".github/images/Redis SQL Github Banner Light.png">
 
   <p align="center">
     Redis SQL Trino is a SQL interface for <a href='https://redis.io/docs/stack/'>Redis Stack</a>, <a href='https://redis.com/redis-enterprise-cloud/overview/'>Redis Cloud</a>, and <a href='https://redis.com/redis-enterprise-software/overview/'>Redis Enterprise</a>.
