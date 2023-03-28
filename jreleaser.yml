@@ -51,9 +51,9 @@ release:
 
 announce:
   slack:
-    active: release
+    active: RELEASE
     channel: '#field-engineering-announcements'
-    message: '✨ Redis SQL Trino {{projectVersion}} has been released! {{releaseNotesUrl}}'
+    message: '🔎 Redis SQL Trino {{projectVersion}} has been released! {{releaseNotesUrl}}'
 
 distributions:
   redis-sql-trino:
