@@ -45,7 +45,7 @@ release:
             - 'dependencies'
       hide:
         categories:
-          - 'Merge'
+          - 'merge'
       replacers:
         - search: 'deps: '
 
