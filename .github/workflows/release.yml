@@ -18,6 +18,7 @@ jobs:
     with:
       branch: ${{ github.event.inputs.branch }}
       version: ${{ github.event.inputs.version }}
+      publish: true
     secrets:
       github-token: ${{ secrets.GIT_ACCESS_TOKEN }}
       gpg-passphrase: ${{ secrets.GPG_PASSPHRASE }}
@@ -29,15 +30,6 @@ jobs:
       sonatype-password: ${{ secrets.SONATYPE_PASSWORD }}
       slack-webhook: ${{ secrets.SLACK_WEBHOOK }}
 
-  publish:
-    name: Publish
-    uses: redis-field-engineering/redis-github-workflows/.github/workflows/publish-maven.yml@main
-    with:
-      branch: ${{ github.event.inputs.branch }}
-      version: ${{ github.event.inputs.version }}
-    secrets:
-      github-token: ${{ secrets.GIT_ACCESS_TOKEN }}
-      
   docker:
     name: 'Docker'
     uses: redis-field-engineering/redis-github-workflows/.github/workflows/docker.yml@main
