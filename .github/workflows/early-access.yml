@@ -6,90 +6,30 @@ on:
 
 jobs:
   earlyaccess:
-    name: EarlyAccess
+    name: 'Early Access'
+    if: github.repository == 'redis-field-engineering/redis-sql-trino' && startsWith(github.event.head_commit.message, 'Releasing version') != true
+    uses: redis-field-engineering/redis-github-workflows/.github/workflows/early-access-maven.yml@main
+    with:
+      jreleaser-arguments: full-release
+      java-version: '17'
+    secrets:
+      github-token: ${{ secrets.GIT_ACCESS_TOKEN }}
+      gpg-passphrase: ${{ secrets.GPG_PASSPHRASE }}
+      gpg-public-key: ${{ secrets.GPG_PUBLIC_KEY }}
+      gpg-secret-key: ${{ secrets.GPG_SECRET_KEY }}
+      sonatype-username: ${{ secrets.SONATYPE_USERNAME }}
+      sonatype-password: ${{ secrets.SONATYPE_PASSWORD }}      
+      docker-username: ${{ secrets.DOCKER_USERNAME }}
+      docker-password: ${{ secrets.DOCKER_PASSWORD }}
+      slack-webhook: ${{ secrets.SLACK_WEBHOOK }}
+
+  docker:
+    name: 'Docker'
     if: startsWith(github.event.head_commit.message, 'Releasing version') != true
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-
-      - name: Set up Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: zulu
-          java-version: 17
-
-      - uses: actions/cache@v3
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
-
-      - name: Build
-        run: ./mvnw --no-transfer-progress -B --file pom.xml verify
-
-      - name: Show Reports
-        uses: actions/upload-artifact@v3
-        if: failure()
-        with:
-          name: reports-${{ runner.os }}
-          path: target/
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-
-      - name: Version
-        id: vars
-        run: echo version=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout) >> $GITHUB_OUTPUT
-
-      - name: Assemble
-        uses: jreleaser/release-action@v2
-        with:
-          arguments: assemble
-        env:
-          JRELEASER_PROJECT_VERSION: ${{ steps.vars.outputs.version }}
-          JRELEASER_GITHUB_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
-
-      - name: Release
-        uses: jreleaser/release-action@v2
-        with:
-          arguments: full-release
-        env:
-          JRELEASER_PROJECT_VERSION: ${{ steps.vars.outputs.version }}
-          JRELEASER_GITHUB_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
-          JRELEASER_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-          JRELEASER_GPG_PUBLIC_KEY: ${{ secrets.GPG_PUBLIC_KEY }}
-          JRELEASER_GPG_SECRET_KEY: ${{ secrets.GPG_SECRET_KEY }}
-          JRELEASER_SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-
-      - name: JReleaser output
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: artifact
-          path: |
-            out/jreleaser/trace.log
-            out/jreleaser/output.properties
-            out/jreleaser/release/CHANGELOG.md
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-        
-      - name: Login to DockerHub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v3
-        with:
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: fieldengineering/redis-sql-trino:early-access
-          platforms: linux/amd64,linux/arm64
+    uses: redis-field-engineering/redis-github-workflows/.github/workflows/docker.yml@main
+    with:
+      tags: fieldengineering/redis-sql-trino:early-access
+    secrets:
+      github-token: ${{ secrets.GIT_ACCESS_TOKEN }}
+      docker-username: ${{ secrets.DOCKER_USERNAME }}
+      docker-password: ${{ secrets.DOCKER_PASSWORD }}

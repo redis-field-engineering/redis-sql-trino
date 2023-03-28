@@ -5,32 +5,5 @@ on:
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
-    if: startsWith(github.event.head_commit.message, 'Releasing version') != true
-
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: zulu
-          java-version: 17
-
-      - uses: actions/cache@v3
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
-
-      - name: Build
-        run: ./mvnw -B package --file pom.xml
-
-      - name: Show Reports
-        uses: actions/upload-artifact@v3
-        if: failure()
-        with:
-          name: reports-${{ runner.os }}
-          path: build/
+    name: 'Build'
+    uses: redis-field-engineering/redis-github-workflows/.github/workflows/build-maven.yml@main
