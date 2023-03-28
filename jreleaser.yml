@@ -23,12 +23,12 @@ project:
 release:
   github:
     overwrite: true
+    issues:
+      enabled: true
     changelog:
       formatted: ALWAYS
       preset: conventional-commits
       format: '- {{commitShortHash}} {{commitTitle}}'
-      contributors:
-        enabled: false
       labelers:
         - label: 'dependencies'
           title: 'regex:^(?:deps(?:\(.*\))?!?):\s.*'
