@@ -216,10 +216,12 @@ public class RediSearchTranslator {
 		return Search.builder().index(index).query(query).options(options.build()).build();
 	}
 
-	public Aggregation aggregate(RediSearchTableHandle table) {
+	public Aggregation aggregate(RediSearchTableHandle table, String[] columnNames) {
 		String index = index(table);
 		String query = queryBuilder.buildQuery(table.getConstraint(), table.getWildcards());
 		AggregateOptions.Builder<String, String> builder = AggregateOptions.builder();
+		builder.load(RediSearchBuiltinField.KEY.getName());
+		builder.loads(columnNames);
 		queryBuilder.group(table).ifPresent(builder::operation);
 		builder.operation(Limit.offset(0).num(limit(table)));
 		AggregateOptions<String, String> options = builder.build();

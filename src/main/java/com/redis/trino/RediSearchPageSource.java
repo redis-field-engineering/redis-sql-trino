@@ -41,8 +41,9 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.redis.lettucemod.api.StatefulRedisModulesConnection;
 import com.redis.lettucemod.api.async.RedisModulesAsyncCommands;
-import com.redis.lettucemod.search.Document;
+import com.redis.lettucemod.search.AggregateWithCursorResults;
 
+import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
 import io.airlift.slice.SliceOutput;
 import io.lettuce.core.LettuceFutures;
@@ -57,28 +58,29 @@ import io.trino.spi.type.VarcharType;
 
 public class RediSearchPageSource implements UpdatablePageSource {
 
+	private static final Logger log = Logger.get(RediSearchPageSource.class);
+
 	private static final int ROWS_PER_REQUEST = 1024;
 
 	private final RediSearchPageSourceResultWriter writer = new RediSearchPageSourceResultWriter();
 	private final RediSearchSession session;
 	private final RediSearchTableHandle table;
-	private final Iterator<Document<String, String>> cursor;
 	private final String[] columnNames;
 	private final List<Type> columnTypes;
-	private final PageBuilder pageBuilder;
-
-	private Document<String, String> currentDoc;
+	private final CursorIterator iterator;
+	private Map<String, Object> currentDoc;
 	private long count;
 	private boolean finished;
+
+	private final PageBuilder pageBuilder;
 
 	public RediSearchPageSource(RediSearchSession session, RediSearchTableHandle table,
 			List<RediSearchColumnHandle> columns) {
 		this.session = session;
 		this.table = table;
 		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).toArray(String[]::new);
-		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType)
-				.collect(Collectors.toList());
-		this.cursor = session.search(table, columnNames).iterator();
+		this.iterator = new CursorIterator(session, table, columnNames);
+		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType).collect(Collectors.toList());
 		this.currentDoc = null;
 		this.pageBuilder = new PageBuilder(columnTypes);
 	}
@@ -108,26 +110,24 @@ public class RediSearchPageSource implements UpdatablePageSource {
 		verify(pageBuilder.isEmpty());
 		count = 0;
 		for (int i = 0; i < ROWS_PER_REQUEST; i++) {
-			if (!cursor.hasNext()) {
+			if (!iterator.hasNext()) {
 				finished = true;
 				break;
 			}
-			currentDoc = cursor.next();
+			currentDoc = iterator.next();
 			count++;
 
 			pageBuilder.declarePosition();
 			for (int column = 0; column < columnTypes.size(); column++) {
 				BlockBuilder output = pageBuilder.getBlockBuilder(column);
-				String columnName = columnNames[column];
-				String value = currentValue(columnName);
+				Object value = currentValue(columnNames[column]);
 				if (value == null) {
 					output.appendNull();
 				} else {
-					writer.appendTo(columnTypes.get(column), value, output);
+					writer.appendTo(columnTypes.get(column), value.toString(), output);
 				}
 			}
 		}
-
 		Page page = pageBuilder.build();
 		pageBuilder.reset();
 		return page;
@@ -149,42 +149,33 @@ public class RediSearchPageSource implements UpdatablePageSource {
 				columnValueAndRowIdChannels.size() - 1);
 		StatefulRedisModulesConnection<String, String> connection = session.getConnection();
 		connection.setAutoFlushCommands(false);
-		RedisModulesAsyncCommands<String, String> commands = connection.async();
-		List<RedisFuture<?>> futures = new ArrayList<>();
-		for (int position = 0; position < page.getPositionCount(); position++) {
-			Block rowIdBlock = page.getBlock(rowIdChannel);
-			if (rowIdBlock.isNull(position)) {
-				continue;
-			}
-			String key = VarcharType.VARCHAR.getSlice(rowIdBlock, position).toStringUtf8();
-			Map<String, String> map = new HashMap<>();
-			for (int channel = 0; channel < columnChannelMapping.size(); channel++) {
-				RediSearchColumnHandle column = table.getUpdatedColumns().get(columnChannelMapping.get(channel));
-				Block block = page.getBlock(channel);
-				if (block.isNull(position)) {
+		try {
+			RedisModulesAsyncCommands<String, String> commands = connection.async();
+			List<RedisFuture<?>> futures = new ArrayList<>();
+			for (int position = 0; position < page.getPositionCount(); position++) {
+				Block rowIdBlock = page.getBlock(rowIdChannel);
+				if (rowIdBlock.isNull(position)) {
 					continue;
 				}
-				String value = RediSearchPageSink.value(column.getType(), block, position);
-				map.put(column.getName(), value);
+				String key = VarcharType.VARCHAR.getSlice(rowIdBlock, position).toStringUtf8();
+				Map<String, String> map = new HashMap<>();
+				for (int channel = 0; channel < columnChannelMapping.size(); channel++) {
+					RediSearchColumnHandle column = table.getUpdatedColumns().get(columnChannelMapping.get(channel));
+					Block block = page.getBlock(channel);
+					if (block.isNull(position)) {
+						continue;
+					}
+					String value = RediSearchPageSink.value(column.getType(), block, position);
+					map.put(column.getName(), value);
+				}
+				RedisFuture<Long> future = commands.hset(key, map);
+				futures.add(future);
 			}
-			RedisFuture<Long> future = commands.hset(key, map);
-			futures.add(future);
+			connection.flushCommands();
+			LettuceFutures.awaitAll(connection.getTimeout(), futures.toArray(new RedisFuture[0]));
+		} finally {
+			connection.setAutoFlushCommands(true);
 		}
-		connection.flushCommands();
-		LettuceFutures.awaitAll(connection.getTimeout(), futures.toArray(new RedisFuture[0]));
-		connection.setAutoFlushCommands(true);
-	}
-
-	private String currentValue(String columnName) {
-		if (RediSearchBuiltinField.isBuiltinColumn(columnName)) {
-			if (RediSearchBuiltinField.ID.getName().equals(columnName)) {
-				return currentDoc.getId();
-			}
-			if (RediSearchBuiltinField.SCORE.getName().equals(columnName)) {
-				return String.valueOf(currentDoc.getScore());
-			}
-		}
-		return currentDoc.get(columnName);
 	}
 
 	@Override
@@ -194,12 +185,67 @@ public class RediSearchPageSource implements UpdatablePageSource {
 		return future;
 	}
 
+	private Object currentValue(String columnName) {
+		if (RediSearchBuiltinField.isKeyColumn(columnName)) {
+			return currentDoc.get(RediSearchBuiltinField.KEY.getName());
+		}
+		return currentDoc.get(columnName);
+	}
+
 	public static JsonGenerator createJsonGenerator(JsonFactory factory, SliceOutput output) throws IOException {
 		return factory.createGenerator((OutputStream) output);
 	}
 
 	@Override
 	public void close() {
-		// nothing to do
+		try {
+			iterator.close();
+		} catch (Exception e) {
+			log.error(e, "Could not close cursor iterator");
+		}
+	}
+
+	private static class CursorIterator implements Iterator<Map<String, Object>>, AutoCloseable {
+
+		private final RediSearchSession session;
+		private final RediSearchTableHandle table;
+		private Iterator<Map<String, Object>> iterator;
+		private long cursor;
+
+		public CursorIterator(RediSearchSession session, RediSearchTableHandle table, String[] columnNames) {
+			this.session = session;
+			this.table = table;
+			read(session.aggregate(table, columnNames));
+		}
+
+		private void read(AggregateWithCursorResults<String> results) {
+			this.iterator = results.iterator();
+			this.cursor = results.getCursor();
+		}
+
+		@Override
+		public boolean hasNext() {
+			while (!iterator.hasNext()) {
+				if (cursor == 0) {
+					return false;
+				}
+				read(session.cursorRead(table, cursor));
+			}
+			return true;
+		}
+
+		@Override
+		public Map<String, Object> next() {
+			return iterator.next();
+		}
+
+		@Override
+		public void close() throws Exception {
+			if (cursor == 0) {
+				return;
+			}
+			session.cursorDelete(table, cursor);
+		}
+
 	}
 }

@@ -190,7 +190,7 @@ public class RediSearchSession {
 	public void createTable(SchemaTableName schemaTableName, List<RediSearchColumnHandle> columns) {
 		String index = index(schemaTableName);
 		if (!connection.sync().ftList().contains(index)) {
-			List<Field<String>> fields = columns.stream().filter(c -> !c.getName().equals("_id"))
+			List<Field<String>> fields = columns.stream().filter(c -> !RediSearchBuiltinField.isKeyColumn(c.getName()))
 					.map(c -> buildField(c.getName(), c.getType())).collect(Collectors.toList());
 			CreateOptions.Builder<String, String> options = CreateOptions.<String, String>builder();
 			options.prefix(index + ":");
@@ -260,9 +260,7 @@ public class RediSearchSession {
 				fields.add(docField);
 			}
 		}
-		RediSearchTableHandle tableHandle = new RediSearchTableHandle(RediSearchTableHandle.Type.SEARCH,
-				schemaTableName);
-		return new RediSearchTable(tableHandle, columns.build(), indexInfo);
+		return new RediSearchTable(new RediSearchTableHandle(schemaTableName), columns.build(), indexInfo);
 	}
 
 	private Optional<IndexInfo> indexInfo(String index) {
@@ -308,8 +306,8 @@ public class RediSearchSession {
 		return connection.sync().ftSearch(search.getIndex(), search.getQuery(), search.getOptions());
 	}
 
-	public AggregateWithCursorResults<String> aggregate(RediSearchTableHandle table) {
-		Aggregation aggregation = translator.aggregate(table);
+	public AggregateWithCursorResults<String> aggregate(RediSearchTableHandle table, String[] columnNames) {
+		Aggregation aggregation = translator.aggregate(table, columnNames);
 		log.info("Running %s", aggregation);
 		String index = aggregation.getIndex();
 		String query = aggregation.getQuery();

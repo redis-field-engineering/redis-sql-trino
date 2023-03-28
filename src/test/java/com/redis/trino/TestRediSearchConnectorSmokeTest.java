@@ -113,7 +113,7 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	public void testRediSearchFields() throws IOException, InterruptedException {
 		populateBeers();
 		getQueryRunner().execute("select id, last_mod from beers");
-		getQueryRunner().execute("select _id, _score from beers");
+		getQueryRunner().execute("select __key from beers");
 	}
 
 	@SuppressWarnings("unchecked")

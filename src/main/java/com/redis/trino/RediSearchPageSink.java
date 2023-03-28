@@ -100,26 +100,29 @@ public class RediSearchPageSink implements ConnectorPageSink {
 		String prefix = prefix().orElse(schemaTableName.getTableName() + KEY_SEPARATOR);
 		StatefulRedisModulesConnection<String, String> connection = session.getConnection();
 		connection.setAutoFlushCommands(false);
-		RedisModulesAsyncCommands<String, String> commands = connection.async();
-		List<RedisFuture<?>> futures = new ArrayList<>();
-		for (int position = 0; position < page.getPositionCount(); position++) {
-			String key = prefix + factory.create().toString();
-			Map<String, String> map = new HashMap<>();
-			for (int channel = 0; channel < page.getChannelCount(); channel++) {
-				RediSearchColumnHandle column = columns.get(channel);
-				Block block = page.getBlock(channel);
-				if (block.isNull(position)) {
-					continue;
+		try {
+			RedisModulesAsyncCommands<String, String> commands = connection.async();
+			List<RedisFuture<?>> futures = new ArrayList<>();
+			for (int position = 0; position < page.getPositionCount(); position++) {
+				String key = prefix + factory.create().toString();
+				Map<String, String> map = new HashMap<>();
+				for (int channel = 0; channel < page.getChannelCount(); channel++) {
+					RediSearchColumnHandle column = columns.get(channel);
+					Block block = page.getBlock(channel);
+					if (block.isNull(position)) {
+						continue;
+					}
+					String value = value(column.getType(), block, position);
+					map.put(column.getName(), value);
 				}
-				String value = value(column.getType(), block, position);
-				map.put(column.getName(), value);
+				RedisFuture<Long> future = commands.hset(key, map);
+				futures.add(future);
 			}
-			RedisFuture<Long> future = commands.hset(key, map);
-			futures.add(future);
+			connection.flushCommands();
+			LettuceFutures.awaitAll(connection.getTimeout(), futures.toArray(new RedisFuture[0]));
+		} finally {
+			connection.setAutoFlushCommands(true);
 		}
-		connection.flushCommands();
-		LettuceFutures.awaitAll(connection.getTimeout(), futures.toArray(new RedisFuture[0]));
-		connection.setAutoFlushCommands(true);
 		return NOT_BLOCKED;
 	}
 

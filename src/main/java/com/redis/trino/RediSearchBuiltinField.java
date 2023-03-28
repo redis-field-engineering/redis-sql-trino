@@ -1,7 +1,6 @@
 package com.redis.trino;
 
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
-import static io.trino.spi.type.RealType.REAL;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static java.util.Arrays.stream;
 import static java.util.function.Function.identity;
@@ -16,7 +15,7 @@ import io.trino.spi.type.Type;
 
 enum RediSearchBuiltinField {
 
-	ID("_id", VARCHAR, Field.Type.TAG), SCORE("_score", REAL, Field.Type.NUMERIC);
+	KEY("__key", VARCHAR, Field.Type.TAG);
 
 	private static final Map<String, RediSearchBuiltinField> COLUMNS_BY_NAME = stream(values())
 			.collect(toImmutableMap(RediSearchBuiltinField::getName, identity()));
@@ -57,5 +56,9 @@ enum RediSearchBuiltinField {
 
 	public RediSearchColumnHandle getColumnHandle() {
 		return new RediSearchColumnHandle(name, type, fieldType, true, false);
+	}
+
+	public static boolean isKeyColumn(String columnName) {
+		return KEY.name.equals(columnName);
 	}
 }

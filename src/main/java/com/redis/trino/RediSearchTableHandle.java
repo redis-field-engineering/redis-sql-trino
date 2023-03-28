@@ -46,7 +46,6 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 		SEARCH, AGGREGATE
 	}
 
-	private final Type type;
 	private final SchemaTableName schemaTableName;
 	private final TupleDomain<ColumnHandle> constraint;
 	private final OptionalLong limit;
@@ -57,20 +56,18 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	// UPDATE only
 	private final List<RediSearchColumnHandle> updatedColumns;
 
-	public RediSearchTableHandle(Type type, SchemaTableName schemaTableName) {
-		this(type, schemaTableName, TupleDomain.all(), OptionalLong.empty(), Collections.emptyList(),
-				Collections.emptyList(), Map.of(), Collections.emptyList());
+	public RediSearchTableHandle(SchemaTableName schemaTableName) {
+		this(schemaTableName, TupleDomain.all(), OptionalLong.empty(), Collections.emptyList(), Collections.emptyList(),
+				Map.of(), Collections.emptyList());
 	}
 
 	@JsonCreator
-	public RediSearchTableHandle(@JsonProperty("type") Type type,
-			@JsonProperty("schemaTableName") SchemaTableName schemaTableName,
+	public RediSearchTableHandle(@JsonProperty("schemaTableName") SchemaTableName schemaTableName,
 			@JsonProperty("constraint") TupleDomain<ColumnHandle> constraint, @JsonProperty("limit") OptionalLong limit,
 			@JsonProperty("aggTerms") List<RediSearchAggregationTerm> termAggregations,
 			@JsonProperty("aggregates") List<RediSearchAggregation> metricAggregations,
 			@JsonProperty("wildcards") Map<String, String> wildcards,
 			@JsonProperty("updatedColumns") List<RediSearchColumnHandle> updatedColumns) {
-		this.type = requireNonNull(type, "type is null");
 		this.schemaTableName = requireNonNull(schemaTableName, "schemaTableName is null");
 		this.constraint = requireNonNull(constraint, "constraint is null");
 		this.limit = requireNonNull(limit, "limit is null");
@@ -78,11 +75,6 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 		this.aggregations = requireNonNull(metricAggregations, "aggregates is null");
 		this.wildcards = requireNonNull(wildcards, "wildcards is null");
 		this.updatedColumns = ImmutableList.copyOf(requireNonNull(updatedColumns, "updatedColumns is null"));
-	}
-
-	@JsonProperty
-	public Type getType() {
-		return type;
 	}
 
 	@JsonProperty
