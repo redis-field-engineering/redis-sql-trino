@@ -19,3 +19,4 @@ services:
       - redis
     environment:
       REDISEARCH_URI: 'redis://redis:6379'
+      REDISEARCH_CASE_INSENSITIVE_NAMES: true
