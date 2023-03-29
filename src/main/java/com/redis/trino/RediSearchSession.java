@@ -31,6 +31,7 @@ import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static java.lang.String.format;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
+import static java.util.stream.Collectors.toSet;
 
 import java.io.File;
 import java.util.Collections;
@@ -40,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -165,7 +167,7 @@ public class RediSearchSession {
 		return Collections.emptyList();
 	}
 
-	public Set<String> getAllTables() throws SchemaNotFoundException {
+	private Set<String> listIndexNames() throws SchemaNotFoundException {
 		ImmutableSet.Builder<String> builder = ImmutableSet.builder();
 		builder.addAll(connection.sync().ftList());
 		return builder.build();
@@ -179,11 +181,15 @@ public class RediSearchSession {
 	 */
 	public RediSearchTable getTable(SchemaTableName tableName) throws TableNotFoundException {
 		try {
-			return tableCache.getUnchecked(tableName);
-		} catch (UncheckedExecutionException e) {
+			return tableCache.get(tableName, () -> loadTableSchema(tableName));
+		} catch (ExecutionException | UncheckedExecutionException e) {
 			throwIfInstanceOf(e.getCause(), TrinoException.class);
-			throw e;
+			throw new RuntimeException(e);
 		}
+	}
+
+	public Set<String> getAllTables() {
+		return listIndexNames().stream().collect(toSet());
 	}
 
 	@SuppressWarnings("unchecked")
@@ -214,7 +220,7 @@ public class RediSearchSession {
 		if (!config.isCaseInsensitiveNames()) {
 			return tableName;
 		}
-		for (String remoteTableName : getAllTables()) {
+		for (String remoteTableName : listIndexNames()) {
 			if (tableName.equals(remoteTableName.toLowerCase(ENGLISH))) {
 				return remoteTableName;
 			}
@@ -233,7 +239,7 @@ public class RediSearchSession {
 	 * @throws TableNotFoundException if no index by that name was found
 	 */
 	private RediSearchTable loadTableSchema(SchemaTableName schemaTableName) throws TableNotFoundException {
-		String index = schemaTableName.getTableName();
+		String index = toRemoteTableName(schemaTableName.getTableName());
 		Optional<IndexInfo> indexInfoOptional = indexInfo(index);
 		if (indexInfoOptional.isEmpty()) {
 			throw new TableNotFoundException(schemaTableName, format("Index '%s' not found", index), null);

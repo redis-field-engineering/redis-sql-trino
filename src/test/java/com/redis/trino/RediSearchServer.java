@@ -2,29 +2,49 @@ package com.redis.trino;
 
 import java.io.Closeable;
 
+import org.testcontainers.utility.DockerImageName;
+
+import com.redis.lettucemod.api.StatefulRedisModulesConnection;
+import com.redis.lettucemod.util.ClientBuilder;
+import com.redis.lettucemod.util.RedisModulesUtils;
 import com.redis.testcontainers.RedisStackContainer;
-import com.redis.testcontainers.junit.RedisTestContext;
+
+import io.lettuce.core.AbstractRedisClient;
+import io.lettuce.core.RedisURI;
 
 public class RediSearchServer implements Closeable {
 
-	private final RedisStackContainer dockerContainer;
-	private final RedisTestContext context;
+	private static final DockerImageName DOCKER_IMAGE_NAME = RedisStackContainer.DEFAULT_IMAGE_NAME
+			.withTag(RedisStackContainer.DEFAULT_TAG);
+	private final RedisStackContainer container = new RedisStackContainer(DOCKER_IMAGE_NAME).withEnv("REDISEARCH_ARGS",
+			"MAXAGGREGATERESULTS -1");
+	private final AbstractRedisClient client;
+	private final StatefulRedisModulesConnection<String, String> connection;
 
 	public RediSearchServer() {
-		this.dockerContainer = new RedisStackContainer(
-				RedisStackContainer.DEFAULT_IMAGE_NAME.withTag(RedisStackContainer.DEFAULT_TAG));
-		this.dockerContainer.withEnv("REDISEARCH_ARGS", "MAXAGGREGATERESULTS -1");
-		this.dockerContainer.start();
-		this.context = new RedisTestContext(dockerContainer);
+		this.container.start();
+		this.client = ClientBuilder.create(RedisURI.create(container.getRedisURI())).cluster(container.isCluster())
+				.build();
+		this.connection = RedisModulesUtils.connection(client);
 	}
 
-	public RedisTestContext getTestContext() {
-		return context;
+	public String getRedisURI() {
+		return container.getRedisURI();
+	}
+
+	public AbstractRedisClient getClient() {
+		return client;
+	}
+
+	public StatefulRedisModulesConnection<String, String> getConnection() {
+		return connection;
 	}
 
 	@Override
 	public void close() {
-		context.close();
-		dockerContainer.close();
+		connection.close();
+		client.shutdown();
+		client.getResources().shutdown();
+		container.close();
 	}
 }

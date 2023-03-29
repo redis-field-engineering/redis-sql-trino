@@ -7,7 +7,8 @@ import org.testng.annotations.Test;
 import io.airlift.json.JsonCodec;
 import io.trino.spi.connector.SchemaTableName;
 
-public class TestRediSearchTableHandle {
+public class TestTableHandle {
+
 	private final JsonCodec<RediSearchTableHandle> codec = JsonCodec.jsonCodec(RediSearchTableHandle.class);
 
 	@Test

@@ -20,8 +20,9 @@ import com.github.f4b6a3.ulid.UlidFactory;
 import com.redis.lettucemod.api.StatefulRedisModulesConnection;
 import com.redis.lettucemod.search.CreateOptions;
 import com.redis.lettucemod.search.Field;
-import com.redis.testcontainers.junit.RedisTestContext;
+import com.redis.lettucemod.util.RedisModulesUtils;
 
+import io.lettuce.core.AbstractRedisClient;
 import io.lettuce.core.LettuceFutures;
 import io.lettuce.core.RedisFuture;
 import io.trino.Session;
@@ -35,21 +36,28 @@ import io.trino.testing.AbstractTestingTrinoClient;
 import io.trino.testing.ResultsSession;
 
 public class RediSearchLoader extends AbstractTestingTrinoClient<Void> {
-	private final String tableName;
-	private final RedisTestContext context;
 
-	public RediSearchLoader(RedisTestContext context, String tableName, TestingTrinoServer trinoServer,
+	private final String tableName;
+	private final StatefulRedisModulesConnection<String, String> connection;
+
+	public RediSearchLoader(AbstractRedisClient client, String tableName, TestingTrinoServer trinoServer,
 			Session defaultSession) {
 		super(trinoServer, defaultSession);
-
+		requireNonNull(client, "client is null");
+		this.connection = RedisModulesUtils.connection(client);
 		this.tableName = requireNonNull(tableName, "tableName is null");
-		this.context = requireNonNull(context, "client is null");
 	}
 
 	@Override
 	public ResultsSession<Void> getResultSession(Session session) {
 		requireNonNull(session, "session is null");
 		return new RediSearchLoadingSession();
+	}
+
+	@Override
+	public void close() {
+		connection.close();
+		super.close();
 	}
 
 	private class RediSearchLoadingSession implements ResultsSession<Void> {
@@ -71,17 +79,16 @@ public class RediSearchLoader extends AbstractTestingTrinoClient<Void> {
 			}
 			checkState(types.get() != null, "Type information is missing");
 			List<Column> columns = statusInfo.getColumns();
-			if (!context.sync().ftList().contains(tableName)) {
+			if (!connection.sync().ftList().contains(tableName)) {
 				List<Field<String>> schema = new ArrayList<>();
 				for (int i = 0; i < columns.size(); i++) {
 					Type type = types.get().get(i);
 					schema.add(field(columns.get(i).getName(), type));
 				}
-				context.sync().ftCreate(tableName,
+				connection.sync().ftCreate(tableName,
 						CreateOptions.<String, String>builder().prefix(tableName + ":").build(),
 						schema.toArray(Field[]::new));
 			}
-			StatefulRedisModulesConnection<String, String> connection = context.getConnection();
 			connection.setAutoFlushCommands(false);
 			try {
 				UlidFactory factory = UlidFactory.newInstance(new Random());
@@ -94,10 +101,10 @@ public class RediSearchLoader extends AbstractTestingTrinoClient<Void> {
 						String value = convertValue(fields.get(i), type);
 						map.put(columns.get(i).getName(), value);
 					}
-					futures.add(context.async().hset(key, map));
+					futures.add(connection.async().hset(key, map));
 				}
 				connection.flushCommands();
-				LettuceFutures.awaitAll(context.getConnection().getTimeout(), futures.toArray(new RedisFuture[0]));
+				LettuceFutures.awaitAll(connection.getTimeout(), futures.toArray(new RedisFuture[0]));
 			} finally {
 				connection.setAutoFlushCommands(true);
 			}

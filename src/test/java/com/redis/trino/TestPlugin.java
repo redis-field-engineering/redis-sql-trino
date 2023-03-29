@@ -13,7 +13,7 @@ import io.trino.spi.connector.Connector;
 import io.trino.spi.connector.ConnectorFactory;
 import io.trino.testing.TestingConnectorContext;
 
-public class TestRediSearchPlugin {
+public class TestPlugin {
 
 	private RediSearchServer server;
 
@@ -27,8 +27,7 @@ public class TestRediSearchPlugin {
 		RediSearchPlugin plugin = new RediSearchPlugin();
 
 		ConnectorFactory factory = getOnlyElement(plugin.getConnectorFactories());
-		Connector connector = factory.create("test",
-				ImmutableMap.of("redisearch.uri", server.getTestContext().getRedisURI()),
+		Connector connector = factory.create("test", ImmutableMap.of("redisearch.uri", server.getRedisURI()),
 				new TestingConnectorContext());
 
 		assertFalse(plugin.getTypes().iterator().hasNext());

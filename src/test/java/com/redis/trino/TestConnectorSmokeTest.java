@@ -20,10 +20,12 @@ import org.testng.annotations.Test;
 
 import com.google.common.base.Throwables;
 import com.redis.lettucemod.Beers;
+import com.redis.lettucemod.api.StatefulRedisModulesConnection;
 import com.redis.lettucemod.api.sync.RedisModulesCommands;
 import com.redis.lettucemod.search.CreateOptions;
 import com.redis.lettucemod.search.CreateOptions.DataType;
 import com.redis.lettucemod.search.Field;
+import com.redis.lettucemod.util.RedisModulesUtils;
 
 import io.airlift.log.Logger;
 import io.trino.spi.TrinoException;
@@ -33,9 +35,9 @@ import io.trino.testing.QueryRunner;
 import io.trino.testing.TestingConnectorBehavior;
 import io.trino.testing.sql.TestTable;
 
-public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
+public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 
-	private static final Logger log = Logger.get(TestRediSearchConnectorSmokeTest.class);
+	private static final Logger log = Logger.get(TestConnectorSmokeTest.class);
 
 	private RediSearchServer redisearch;
 
@@ -46,7 +48,10 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	}
 
 	private void populateBeers() throws IOException, InterruptedException {
-		Beers.populateIndex(redisearch.getTestContext().getConnection());
+		try (StatefulRedisModulesConnection<String, String> connection = RedisModulesUtils
+				.connection(redisearch.getClient())) {
+			Beers.populateIndex(connection);
+		}
 	}
 
 	@Override
@@ -121,14 +126,14 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	public void testCountEmptyIndex() throws IOException, InterruptedException {
 		String index = "emptyidx";
 		CreateOptions<String, String> options = CreateOptions.<String, String>builder().prefix(index + ":").build();
-		redisearch.getTestContext().sync().ftCreate(index, options, Field.tag("field1").build());
+		redisearch.getConnection().sync().ftCreate(index, options, Field.tag("field1").build());
 		assertQuery("SELECT count(*) FROM " + index, "VALUES 0");
 	}
 
 	@SuppressWarnings("unchecked")
 	@Test
 	public void testJsonSearch() throws IOException {
-		RedisModulesCommands<String, String> sync = redisearch.getTestContext().getConnection().sync();
+		RedisModulesCommands<String, String> sync = redisearch.getConnection().sync();
 		sync.ftCreate("jsontest", CreateOptions.<String, String>builder().on(DataType.JSON).build(),
 				Field.tag("$.id").as("id").build(), Field.text("$.message").as("message").build());
 		sync.jsonSet("doc:1", "$", "{\"id\": \"1\", \"message\": \"this is a test\"}");
@@ -152,11 +157,11 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 		String index = "insertidx";
 		String prefix = index + ":";
 		CreateOptions<String, String> options = CreateOptions.<String, String>builder().prefix(prefix).build();
-		redisearch.getTestContext().sync().ftCreate(index, options, Field.tag("id").build(), Field.tag("name").build());
+		redisearch.getConnection().sync().ftCreate(index, options, Field.tag("id").build(), Field.tag("name").build());
 		assertUpdate(String.format("INSERT INTO %s (id, name) VALUES ('abc', 'mybeer')", index), 1);
 		assertThat(query(String.format("SELECT id, name FROM %s", index)))
 				.matches("VALUES (VARCHAR 'abc', VARCHAR 'mybeer')");
-		List<String> keys = redisearch.getTestContext().sync().keys(prefix + "*");
+		List<String> keys = redisearch.getConnection().sync().keys(prefix + "*");
 		assertEquals(keys.size(), 1);
 		assertTrue(keys.get(0).startsWith(prefix));
 	}
@@ -167,8 +172,8 @@ public class TestRediSearchConnectorSmokeTest extends BaseConnectorSmokeTest {
 	}
 
 	static RuntimeException getTrinoExceptionCause(Throwable e) {
-		return Throwables.getCausalChain(e).stream().filter(TestRediSearchConnectorSmokeTest::isTrinoException)
-				.findFirst().map(RuntimeException.class::cast)
+		return Throwables.getCausalChain(e).stream().filter(TestConnectorSmokeTest::isTrinoException).findFirst()
+				.map(RuntimeException.class::cast)
 				.orElseThrow(() -> new IllegalArgumentException("Exception does not have TrinoException cause", e));
 	}
 

@@ -20,7 +20,7 @@ import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.predicate.ValueSet;
 import io.trino.spi.type.DoubleType;
 
-public class TestRediSearchQueryBuilder {
+public class TestQueryBuilder {
 
 	private static final RediSearchColumnHandle COL1 = new RediSearchColumnHandle("col1", BIGINT, Field.Type.NUMERIC,
 			false, true);

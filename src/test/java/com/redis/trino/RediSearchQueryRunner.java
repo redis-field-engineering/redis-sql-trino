@@ -88,19 +88,20 @@ public final class RediSearchQueryRunner {
 	private static void installRediSearchPlugin(RediSearchServer server, QueryRunner queryRunner,
 			RediSearchConnectorFactory factory, Map<String, String> extraConnectorProperties) {
 		queryRunner.installPlugin(new RediSearchPlugin(factory));
-		Map<String, String> config = ImmutableMap.<String, String>builder()
-				.put("redisearch.uri", server.getTestContext().getRedisURI()).put("redisearch.default-limit", "100000")
-				.put("redisearch.default-schema-name", TPCH_SCHEMA).putAll(extraConnectorProperties).build();
+		Map<String, String> config = ImmutableMap.<String, String>builder().put("redisearch.uri", server.getRedisURI())
+				.put("redisearch.default-limit", "100000").put("redisearch.default-schema-name", TPCH_SCHEMA)
+				.putAll(extraConnectorProperties).build();
 		queryRunner.createCatalog("redisearch", "redisearch", config);
 	}
 
 	private static void loadTpchTopic(RediSearchServer server, TestingTrinoClient trinoClient, TpchTable<?> table) {
 		long start = System.nanoTime();
 		LOG.info("Running import for %s", table.getTableName());
-		RediSearchLoader loader = new RediSearchLoader(server.getTestContext(),
-				table.getTableName().toLowerCase(ENGLISH), trinoClient.getServer(), trinoClient.getDefaultSession());
-		loader.execute(format("SELECT * from %s",
-				new QualifiedObjectName(TPCH_SCHEMA, TINY_SCHEMA_NAME, table.getTableName().toLowerCase(ENGLISH))));
+		try (RediSearchLoader loader = new RediSearchLoader(server.getClient(),
+				table.getTableName().toLowerCase(ENGLISH), trinoClient.getServer(), trinoClient.getDefaultSession())) {
+			loader.execute(format("SELECT * from %s",
+					new QualifiedObjectName(TPCH_SCHEMA, TINY_SCHEMA_NAME, table.getTableName().toLowerCase(ENGLISH))));
+		}
 		LOG.info("Imported %s in %s s", table.getTableName(), Duration.ofNanos(System.nanoTime() - start).toSeconds());
 	}
 

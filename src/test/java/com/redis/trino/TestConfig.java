@@ -12,7 +12,7 @@ import com.google.common.collect.ImmutableMap;
 
 import io.airlift.configuration.ConfigurationFactory;
 
-public class TestRediSearchConfig {
+public class TestConfig {
 
 	@Test
 	public void testDefaults() {
