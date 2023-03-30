@@ -28,6 +28,8 @@ release:
     changelog:
       formatted: ALWAYS
       preset: conventional-commits
+      contributors:
+        enabled: false
       labelers:
         - label: 'dependencies'
           title: 'regex:^(?:deps(?:\(.*\))?!?):\s.*'
