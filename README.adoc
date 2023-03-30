@@ -4,6 +4,8 @@
 :project-group:      com.redis
 :project-version:    0.3.1
 :name:               Redis SQL Trino
+:toc:
+:toc-placement!:
 
 ++++
 <p align="center">
@@ -27,15 +29,7 @@ Trino is a distributed SQL engine designed to query large data sets across one o
 Though Trino does support a https://trino.io/docs/current/connector/redis.html[Redis OSS connector], this connector is limited to SCAN and subsequent HGET operations, which do not scale well in high-throughput scenarios.
 However, that is where {name} shines since it can push the entire query to the data atomically. This eliminates the waste of many network hops and subsequent operations.
 
-== Table of Contents
-
-* link:#background[Background]
-* link:#requirements[Requirements]
-* link:#quick-start[Quick start]
-* link:#installation[Installation]
-* link:#Usage[Usage]
-* link:#Support[Support]
-* link:#License[License]
+toc::[]
 
 == Background
 
