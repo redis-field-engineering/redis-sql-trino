@@ -1,9 +1,9 @@
 :linkattrs:
-:project-owner:      redis-field-engineering
-:project-name:       redis-sql-trino
-:project-group:      com.redis
-:project-version:    0.3.1
-:name:               Redis SQL Trino
+:project-owner:   redis-field-engineering
+:project-name:    redis-sql-trino
+:project-group:   com.redis
+:project-version: 0.3.2
+:name:            Redis SQL Trino
 :toc:
 :toc-placement!:
 
