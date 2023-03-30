@@ -144,6 +144,10 @@ For a self-managed deployment, or for testing locally, install https://redis.io/
 If you need a fully-managed, cloud-based deployment of Redis on AWS, GCP, or Azure, see all of the https://redis.com/redis-enterprise-cloud/overview/[Redis Cloud] offerings.
 For deployment in your own private cloud or data center, consider https://redis.com/redis-enterprise-software/overview/[Redis Enterprise].
 
+== Documentation
+
+{name} documentation is available at https://{project-owner}.github.io/{project-name}
+
 == Usage
 
 The example above uses the https://trino.io/docs/current/client/cli.html[Trino CLI] to access your data.
