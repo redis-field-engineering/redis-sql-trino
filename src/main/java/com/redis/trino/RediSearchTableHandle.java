@@ -33,6 +33,7 @@ import java.util.OptionalLong;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 
 import io.trino.spi.connector.ColumnHandle;
@@ -47,6 +48,7 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	}
 
 	private final SchemaTableName schemaTableName;
+	private final String index;
 	private final TupleDomain<ColumnHandle> constraint;
 	private final OptionalLong limit;
 	// for group by fields
@@ -56,19 +58,21 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	// UPDATE only
 	private final List<RediSearchColumnHandle> updatedColumns;
 
-	public RediSearchTableHandle(SchemaTableName schemaTableName) {
-		this(schemaTableName, TupleDomain.all(), OptionalLong.empty(), Collections.emptyList(), Collections.emptyList(),
-				Map.of(), Collections.emptyList());
+	public RediSearchTableHandle(SchemaTableName schemaTableName, String index) {
+		this(schemaTableName, index, TupleDomain.all(), OptionalLong.empty(), Collections.emptyList(),
+				Collections.emptyList(), Map.of(), Collections.emptyList());
 	}
 
 	@JsonCreator
 	public RediSearchTableHandle(@JsonProperty("schemaTableName") SchemaTableName schemaTableName,
-			@JsonProperty("constraint") TupleDomain<ColumnHandle> constraint, @JsonProperty("limit") OptionalLong limit,
+			@JsonProperty("index") String index, @JsonProperty("constraint") TupleDomain<ColumnHandle> constraint,
+			@JsonProperty("limit") OptionalLong limit,
 			@JsonProperty("aggTerms") List<RediSearchAggregationTerm> termAggregations,
 			@JsonProperty("aggregates") List<RediSearchAggregation> metricAggregations,
 			@JsonProperty("wildcards") Map<String, String> wildcards,
 			@JsonProperty("updatedColumns") List<RediSearchColumnHandle> updatedColumns) {
 		this.schemaTableName = requireNonNull(schemaTableName, "schemaTableName is null");
+		this.index = requireNonNull(index, "index is null");
 		this.constraint = requireNonNull(constraint, "constraint is null");
 		this.limit = requireNonNull(limit, "limit is null");
 		this.aggregationTerms = requireNonNull(termAggregations, "aggTerms is null");
@@ -80,6 +84,11 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	@JsonProperty
 	public SchemaTableName getSchemaTableName() {
 		return schemaTableName;
+	}
+
+	@JsonProperty
+	public String getIndex() {
+		return index;
 	}
 
 	@JsonProperty
@@ -126,13 +135,14 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 			return false;
 		}
 		RediSearchTableHandle other = (RediSearchTableHandle) obj;
-		return Objects.equals(this.schemaTableName, other.schemaTableName)
+		return Objects.equals(this.schemaTableName, other.schemaTableName) && Objects.equals(this.index, other.index)
 				&& Objects.equals(this.constraint, other.constraint) && Objects.equals(this.limit, other.limit)
 				&& Objects.equals(updatedColumns, other.updatedColumns);
 	}
 
 	@Override
 	public String toString() {
-		return schemaTableName.toString();
+		return MoreObjects.toStringHelper(this).add("schemaTableName", schemaTableName).add("index", index)
+				.add("limit", limit).add("constraint", constraint).toString();
 	}
 }

@@ -207,7 +207,7 @@ public class RediSearchTranslator {
 	}
 
 	public Search search(RediSearchTableHandle table, String[] columnNames) {
-		String index = index(table);
+		String index = table.getIndex();
 		String query = queryBuilder.buildQuery(table.getConstraint(), table.getWildcards());
 		Builder<String, String> options = SearchOptions.builder();
 		options.withScores(true);
@@ -217,7 +217,7 @@ public class RediSearchTranslator {
 	}
 
 	public Aggregation aggregate(RediSearchTableHandle table, String[] columnNames) {
-		String index = index(table);
+		String index = table.getIndex();
 		String query = queryBuilder.buildQuery(table.getConstraint(), table.getWildcards());
 		AggregateOptions.Builder<String, String> builder = AggregateOptions.builder();
 		builder.load(RediSearchBuiltinField.KEY.getName());
@@ -231,10 +231,6 @@ public class RediSearchTranslator {
 		}
 		return Aggregation.builder().index(index).query(query).options(options).cursorOptions(cursorOptions.build())
 				.build();
-	}
-
-	private String index(RediSearchTableHandle tableHandle) {
-		return tableHandle.getSchemaTableName().getTableName();
 	}
 
 	private long limit(RediSearchTableHandle tableHandle) {

@@ -275,8 +275,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			List<ColumnHandle> updatedColumns, RetryMode retryMode) {
 		checkRetry(retryMode);
 		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
-		return new RediSearchTableHandle(table.getSchemaTableName(), table.getConstraint(), table.getLimit(),
-				table.getTermAggregations(), table.getMetricAggregations(), table.getWildcards(),
+		return new RediSearchTableHandle(table.getSchemaTableName(), table.getIndex(), table.getConstraint(),
+				table.getLimit(), table.getTermAggregations(), table.getMetricAggregations(), table.getWildcards(),
 				updatedColumns.stream().map(RediSearchColumnHandle.class::cast).collect(toImmutableList()));
 	}
 
@@ -306,7 +306,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		}
 
 		return Optional.of(new LimitApplicationResult<>(new RediSearchTableHandle(handle.getSchemaTableName(),
-				handle.getConstraint(), OptionalLong.of(limit), handle.getTermAggregations(),
+				handle.getIndex(), handle.getConstraint(), OptionalLong.of(limit), handle.getTermAggregations(),
 				handle.getMetricAggregations(), handle.getWildcards(), handle.getUpdatedColumns()), true, false));
 	}
 
@@ -369,7 +369,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			return Optional.empty();
 		}
 
-		handle = new RediSearchTableHandle(handle.getSchemaTableName(), newDomain, handle.getLimit(),
+		handle = new RediSearchTableHandle(handle.getSchemaTableName(), handle.getIndex(), newDomain, handle.getLimit(),
 				handle.getTermAggregations(), handle.getMetricAggregations(), newWildcards, handle.getUpdatedColumns());
 
 		return Optional.of(new ConstraintApplicationResult<>(handle, TupleDomain.withColumnDomains(unsupported),
@@ -495,8 +495,9 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		if (aggregationList.isEmpty()) {
 			return Optional.empty();
 		}
-		RediSearchTableHandle tableHandle = new RediSearchTableHandle(table.getSchemaTableName(), table.getConstraint(),
-				table.getLimit(), terms.build(), aggregationList, table.getWildcards(), table.getUpdatedColumns());
+		RediSearchTableHandle tableHandle = new RediSearchTableHandle(table.getSchemaTableName(), table.getIndex(),
+				table.getConstraint(), table.getLimit(), terms.build(), aggregationList, table.getWildcards(),
+				table.getUpdatedColumns());
 		return Optional.of(new AggregationApplicationResult<>(tableHandle, projections.build(),
 				resultAssignments.build(), Map.of(), false));
 	}

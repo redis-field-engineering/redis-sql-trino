@@ -13,7 +13,7 @@ public class TestTableHandle {
 
 	@Test
 	public void testRoundTrip() {
-		RediSearchTableHandle expected = new RediSearchTableHandle(new SchemaTableName("schema", "table"));
+		RediSearchTableHandle expected = new RediSearchTableHandle(new SchemaTableName("schema", "table"), "table");
 
 		String json = codec.toJson(expected);
 		RediSearchTableHandle actual = codec.fromJson(json);

@@ -45,9 +45,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
+import com.google.common.cache.Cache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.UncheckedExecutionException;
@@ -73,6 +71,7 @@ import io.lettuce.core.AbstractRedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.SslVerifyMode;
 import io.lettuce.core.protocol.ProtocolVersion;
+import io.trino.collect.cache.EvictableCacheBuilder;
 import io.trino.spi.HostAddress;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ColumnMetadata;
@@ -106,7 +105,7 @@ public class RediSearchSession {
 	private final RediSearchTranslator translator;
 	private final AbstractRedisClient client;
 	private final StatefulRedisModulesConnection<String, String> connection;
-	private final LoadingCache<SchemaTableName, RediSearchTable> tableCache;
+	private final Cache<SchemaTableName, RediSearchTable> tableCache;
 
 	public RediSearchSession(TypeManager typeManager, RediSearchConfig config) {
 		this.typeManager = requireNonNull(typeManager, "typeManager is null");
@@ -114,10 +113,8 @@ public class RediSearchSession {
 		this.translator = new RediSearchTranslator(config);
 		this.client = client(config);
 		this.connection = RedisModulesUtils.connection(client);
-		this.tableCache = CacheBuilder.newBuilder().expireAfterWrite(config.getTableCacheExpiration(), TimeUnit.SECONDS)
-				.refreshAfterWrite(config.getTableCacheRefresh(), TimeUnit.SECONDS)
-				.build(CacheLoader.from(this::loadTableSchema));
-
+		this.tableCache = EvictableCacheBuilder.newBuilder()
+				.expireAfterWrite(config.getTableCacheRefresh(), TimeUnit.SECONDS).build();
 	}
 
 	private AbstractRedisClient client(RediSearchConfig config) {
@@ -194,7 +191,7 @@ public class RediSearchSession {
 
 	@SuppressWarnings("unchecked")
 	public void createTable(SchemaTableName schemaTableName, List<RediSearchColumnHandle> columns) {
-		String index = index(schemaTableName);
+		String index = schemaTableName.getTableName();
 		if (!connection.sync().ftList().contains(index)) {
 			List<Field<String>> fields = columns.stream().filter(c -> !RediSearchBuiltinField.isKeyColumn(c.getName()))
 					.map(c -> buildField(c.getName(), c.getType())).collect(Collectors.toList());
@@ -266,7 +263,8 @@ public class RediSearchSession {
 				fields.add(docField);
 			}
 		}
-		return new RediSearchTable(new RediSearchTableHandle(schemaTableName), columns.build(), indexInfo);
+		RediSearchTableHandle tableHandle = new RediSearchTableHandle(schemaTableName, index);
+		return new RediSearchTable(tableHandle, columns.build(), indexInfo);
 	}
 
 	private Optional<IndexInfo> indexInfo(String index) {
@@ -339,15 +337,11 @@ public class RediSearchSession {
 	}
 
 	public AggregateWithCursorResults<String> cursorRead(RediSearchTableHandle tableHandle, long cursor) {
-		String index = index(tableHandle.getSchemaTableName());
+		String index = tableHandle.getIndex();
 		if (config.getCursorCount() > 0) {
 			return connection.sync().ftCursorRead(index, cursor, config.getCursorCount());
 		}
 		return connection.sync().ftCursorRead(index, cursor);
-	}
-
-	private String index(SchemaTableName schemaTableName) {
-		return schemaTableName.getTableName();
 	}
 
 	private Field<String> buildField(String columnName, Type columnType) {
@@ -427,7 +421,7 @@ public class RediSearchSession {
 	}
 
 	public void cursorDelete(RediSearchTableHandle tableHandle, long cursor) {
-		connection.sync().ftCursorDelete(index(tableHandle.getSchemaTableName()), cursor);
+		connection.sync().ftCursorDelete(tableHandle.getIndex(), cursor);
 	}
 
 	public Long deleteDocs(List<String> docIds) {

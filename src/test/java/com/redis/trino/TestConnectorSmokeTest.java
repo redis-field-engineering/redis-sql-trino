@@ -44,6 +44,7 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 	@Override
 	protected QueryRunner createQueryRunner() throws Exception {
 		redisearch = new RediSearchServer();
+		redisearch.getConnection().sync().flushall();
 		return RediSearchQueryRunner.createRediSearchQueryRunner(redisearch, CUSTOMER, NATION, ORDERS, REGION);
 	}
 

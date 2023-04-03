@@ -55,6 +55,12 @@
 	</developers>
 	<dependencies>
 
+	    <dependency>
+			<groupId>io.trino</groupId>
+			<artifactId>trino-collect</artifactId>
+			<version>${project.parent.version}</version>
+		</dependency>
+
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-plugin-toolkit</artifactId>
@@ -177,13 +183,6 @@
 		<dependency>
 			<groupId>io.trino</groupId>
 			<artifactId>trino-client</artifactId>
-			<version>${project.parent.version}</version>
-			<scope>test</scope>
-		</dependency>
-
-		<dependency>
-			<groupId>io.trino</groupId>
-			<artifactId>trino-collect</artifactId>
 			<version>${project.parent.version}</version>
 			<scope>test</scope>
 		</dependency>
