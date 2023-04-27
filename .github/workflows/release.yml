@@ -33,6 +33,7 @@ jobs:
 
   docker:
     name: 'Docker'
+    needs: [release]
     uses: redis-field-engineering/redis-github-workflows/.github/workflows/docker.yml@main
     with:
       tags: fieldengineering/redis-sql-trino:latest,fieldengineering/redis-sql-trino:${{ github.event.inputs.version }}

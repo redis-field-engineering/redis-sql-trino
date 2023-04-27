@@ -25,6 +25,7 @@ jobs:
 
   docker:
     name: 'Docker'
+    needs: [earlyaccess]
     if: startsWith(github.event.head_commit.message, 'Releasing version') != true
     uses: redis-field-engineering/redis-github-workflows/.github/workflows/docker.yml@main
     with:
