@@ -9,6 +9,18 @@ services:
       - "6379:6379"
     restart: always
 
+  redis-cli:
+    image: redis/redis-stack-server
+    depends_on:
+      - redis
+    command: "redis-cli -h redis FT.CREATE beers ON HASH PREFIX 1 beer: SCHEMA id TAG SORTABLE brewery_id TAG SORTABLE name TEXT SORTABLE abv NUMERIC SORTABLE descript TEXT style_name TAG SORTABLE cat_name TAG SORTABLE"
+
+  riot:
+    image: fieldengineering/riot
+    depends_on:
+      - redis
+    command: -h redis file-import https://storage.googleapis.com/jrx/beers.json hset --keyspace beer --keys id
+    
   trino:
     image: fieldengineering/redis-sql-trino:early-access
     hostname: trino
