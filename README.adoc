@@ -72,18 +72,10 @@ cd {project-name}
 Next, use Docker Compose to launch containers for Trino and Redis Stack:
 [source,console]
 ----
-docker-compose up
+docker compose up
 ----
 
-This example uses a small data set describing a collection of beers.
-To load the data set, you'll need to have https://developer.redis.com/riot/riot-file/index.html[riot-file] installed locally (see the https://developer.redis.com/riot/riot-file/index.html[riot-file] installation instructions).
-
-Next, use `riot-file` to import the sample data set into Redis:
-[source,console]
-----
-riot-file -h localhost import https://storage.googleapis.com/jrx/beers.json \
-  hset --keyspace beer --keys id
-----
+This example includes a preloaded data set describing a collection of beers.
 
 Each beer is represented as a Redis hash.
 Start the Redis CLI to examine this data.
@@ -94,14 +86,7 @@ docker exec -it redis /opt/redis-stack/bin/redis-cli
 127.0.0.1:6379> hgetall beer:190
 ----
 
-Next, create an index on the beer data.
-While still in the Redis CLI, you can create the required index by running the following `FT.CREATE` command:
-[source,console]
-----
-127.0.0.1:6379> FT.CREATE beers ON HASH PREFIX 1 beer: SCHEMA id TAG SORTABLE brewery_id TAG SORTABLE name TEXT SORTABLE abv NUMERIC SORTABLE descript TEXT style_name TAG SORTABLE cat_name TAG SORTABLE
-----
-
-Now that you've indexed the data set, you can query it using SQL statements through Trino.
+Now let's query the same data using SQL statements through Trino.
 Start the Trino CLI:
 [source,console]
 ----
