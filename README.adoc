@@ -23,7 +23,7 @@
 image:https://github.com/{project-owner}/{project-name}/actions/workflows/early-access.yml/badge.svg["Build Status", link="https://github.com/{project-owner}/{project-name}/actions/workflows/early-access.yml"]
 image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg?token={codecov-token}["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
 
-{name} lets lets you easily integrate with visualization frameworks — like Tableau and SuperSet — and platforms that support JDBC-compatible databases (e.g., Mulesoft).
+{name} lets you easily integrate with visualization frameworks — like Tableau and SuperSet — and platforms that support JDBC-compatible databases (e.g., Mulesoft).
 Query support includes SELECT statements across secondary indexes on both Redis hashes & JSON, aggregations (e.g., count, min, max, avg), ordering, and more.
 
 Trino is a distributed SQL engine designed to query large data sets across one or more heterogeneous data sources.
@@ -117,7 +117,7 @@ To run {name} in production, you'll need:
 
 First, you'll need a working Trino installation.
 
-See the https://trino.io/docs/current/installation.html[Trino installation and deplyoment guide] for details.
+See the https://trino.io/docs/current/installation.html[Trino installation and deployment guide] for details.
 Trino recommends a https://trino.io/docs/current/installation/containers.html[container-based deployment] using your orchestration platform of choice.
 If you run Kubernetes, see the https://trino.io/docs/current/installation/kubernetes.html[Trino Helm chart].
 
