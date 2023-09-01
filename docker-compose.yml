@@ -2,7 +2,7 @@ version: '3.6'
 services:
 
   redis:
-    image: redis/redis-stack-server
+    image: redis/redis-stack-server:6.2.6-v9
     hostname: redis
     container_name: redis
     ports:
@@ -10,7 +10,7 @@ services:
     restart: always
 
   redis-cli:
-    image: redis/redis-stack-server
+    image: redis/redis-stack-server:6.2.6-v9
     depends_on:
       - redis
     command: "redis-cli -h redis FT.CREATE beers ON HASH PREFIX 1 beer: SCHEMA id TAG SORTABLE brewery_id TAG SORTABLE name TEXT SORTABLE abv NUMERIC SORTABLE descript TEXT style_name TAG SORTABLE cat_name TAG SORTABLE"
