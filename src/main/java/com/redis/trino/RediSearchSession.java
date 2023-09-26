@@ -49,7 +49,9 @@ import com.google.common.cache.Cache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.UncheckedExecutionException;
+import com.redis.lettucemod.RedisModulesClient;
 import com.redis.lettucemod.api.StatefulRedisModulesConnection;
+import com.redis.lettucemod.cluster.RedisModulesClusterClient;
 import com.redis.lettucemod.search.AggregateOperation;
 import com.redis.lettucemod.search.AggregateOptions;
 import com.redis.lettucemod.search.AggregateWithCursorResults;
@@ -60,16 +62,17 @@ import com.redis.lettucemod.search.Field;
 import com.redis.lettucemod.search.Group;
 import com.redis.lettucemod.search.IndexInfo;
 import com.redis.lettucemod.search.SearchResults;
-import com.redis.lettucemod.util.ClientBuilder;
 import com.redis.lettucemod.util.RedisModulesUtils;
-import com.redis.lettucemod.util.RedisURIBuilder;
 import com.redis.trino.RediSearchTranslator.Aggregation;
 import com.redis.trino.RediSearchTranslator.Search;
 
 import io.airlift.log.Logger;
 import io.lettuce.core.AbstractRedisClient;
+import io.lettuce.core.ClientOptions;
 import io.lettuce.core.RedisURI;
-import io.lettuce.core.SslVerifyMode;
+import io.lettuce.core.SslOptions;
+import io.lettuce.core.SslOptions.Builder;
+import io.lettuce.core.cluster.ClusterClientOptions;
 import io.lettuce.core.protocol.ProtocolVersion;
 import io.trino.collect.cache.EvictableCacheBuilder;
 import io.trino.spi.HostAddress;
@@ -98,334 +101,365 @@ import io.trino.spi.type.VarcharType;
 
 public class RediSearchSession {
 
-	private static final Logger log = Logger.get(RediSearchSession.class);
+    private static final Logger log = Logger.get(RediSearchSession.class);
 
-	private final TypeManager typeManager;
-	private final RediSearchConfig config;
-	private final RediSearchTranslator translator;
-	private final AbstractRedisClient client;
-	private final StatefulRedisModulesConnection<String, String> connection;
-	private final Cache<SchemaTableName, RediSearchTable> tableCache;
+    private final TypeManager typeManager;
 
-	public RediSearchSession(TypeManager typeManager, RediSearchConfig config) {
-		this.typeManager = requireNonNull(typeManager, "typeManager is null");
-		this.config = requireNonNull(config, "config is null");
-		this.translator = new RediSearchTranslator(config);
-		this.client = client(config);
-		this.connection = RedisModulesUtils.connection(client);
-		this.tableCache = EvictableCacheBuilder.newBuilder()
-				.expireAfterWrite(config.getTableCacheRefresh(), TimeUnit.SECONDS).build();
-	}
+    private final RediSearchConfig config;
 
-	private AbstractRedisClient client(RediSearchConfig config) {
-		ClientBuilder builder = ClientBuilder.create(redisURI(config));
-		builder.cluster(config.isCluster());
-		config.getKeyPath().map(File::new).ifPresent(builder::key);
-		config.getCertPath().map(File::new).ifPresent(builder::keyCert);
-		config.getKeyPassword().ifPresent(p -> builder.keyPassword(p.toCharArray()));
-		config.getCaCertPath().map(File::new).ifPresent(builder::trustManager);
-		if (config.isResp2()) {
-			builder.protocolVersion(ProtocolVersion.RESP2);
-		}
-		return builder.build();
-	}
+    private final RediSearchTranslator translator;
 
-	private RedisURI redisURI(RediSearchConfig config) {
-		RedisURIBuilder uri = RedisURIBuilder.create();
-		uri.uriString(config.getUri());
-		config.getUsername().ifPresent(uri::username);
-		config.getPassword().ifPresent(p -> uri.password(p.toCharArray()));
-		if (config.isInsecure()) {
-			uri.sslVerifyMode(SslVerifyMode.NONE);
-		}
-		return uri.build();
-	}
+    private final AbstractRedisClient client;
 
-	public StatefulRedisModulesConnection<String, String> getConnection() {
-		return connection;
-	}
+    private final StatefulRedisModulesConnection<String, String> connection;
 
-	public RediSearchConfig getConfig() {
-		return config;
-	}
+    private final Cache<SchemaTableName, RediSearchTable> tableCache;
 
-	public void shutdown() {
-		connection.close();
-		client.shutdown();
-		client.getResources().shutdown();
-	}
+    public RediSearchSession(TypeManager typeManager, RediSearchConfig config) {
+        this.typeManager = requireNonNull(typeManager, "typeManager is null");
+        this.config = requireNonNull(config, "config is null");
+        this.translator = new RediSearchTranslator(config);
+        this.client = client(config);
+        this.connection = RedisModulesUtils.connection(client);
+        this.tableCache = EvictableCacheBuilder.newBuilder().expireAfterWrite(config.getTableCacheRefresh(), TimeUnit.SECONDS)
+                .build();
+    }
 
-	public List<HostAddress> getAddresses() {
-		Optional<String> uri = config.getUri();
-		if (uri.isPresent()) {
-			RedisURI redisURI = RedisURI.create(uri.get());
-			return Collections.singletonList(HostAddress.fromParts(redisURI.getHost(), redisURI.getPort()));
-		}
-		return Collections.emptyList();
-	}
+    private AbstractRedisClient client(RediSearchConfig config) {
+        RedisURI redisURI = redisURI(config);
+        if (config.isCluster()) {
+            RedisModulesClusterClient clusterClient = RedisModulesClusterClient.create(redisURI);
+            clusterClient.setOptions(ClusterClientOptions.builder(clientOptions(config)).build());
+            return clusterClient;
+        }
+        RedisModulesClient redisClient = RedisModulesClient.create(redisURI);
+        redisClient.setOptions(clientOptions(config));
+        return redisClient;
+    }
 
-	private Set<String> listIndexNames() throws SchemaNotFoundException {
-		ImmutableSet.Builder<String> builder = ImmutableSet.builder();
-		builder.addAll(connection.sync().ftList());
-		return builder.build();
-	}
+    private ClientOptions clientOptions(RediSearchConfig config) {
+        ClientOptions.Builder builder = ClientOptions.builder();
+        builder.sslOptions(sslOptions(config));
+        builder.protocolVersion(protocolVersion(config));
+        return builder.build();
+    }
 
-	/**
-	 * 
-	 * @param schemaTableName SchemaTableName to load
-	 * @return RediSearchTable describing the RediSearch index
-	 * @throws TableNotFoundException if no index by that name was found
-	 */
-	public RediSearchTable getTable(SchemaTableName tableName) throws TableNotFoundException {
-		try {
-			return tableCache.get(tableName, () -> loadTableSchema(tableName));
-		} catch (ExecutionException | UncheckedExecutionException e) {
-			throwIfInstanceOf(e.getCause(), TrinoException.class);
-			throw new RuntimeException(e);
-		}
-	}
+    private ProtocolVersion protocolVersion(RediSearchConfig config) {
+        if (config.isResp2()) {
+            return ProtocolVersion.RESP2;
+        }
+        return RedisModulesClient.DEFAULT_PROTOCOL_VERSION;
+    }
 
-	public Set<String> getAllTables() {
-		return listIndexNames().stream().collect(toSet());
-	}
+    public SslOptions sslOptions(RediSearchConfig config) {
+        Builder ssl = SslOptions.builder();
+        if (config.getKeyPath() != null) {
+            ssl.keyManager(new File(config.getCertPath()), new File(config.getKeyPath()),
+                    config.getKeyPassword().toCharArray());
+        }
+        if (config.getCaCertPath() != null) {
+            ssl.trustManager(new File(config.getCaCertPath()));
+        }
+        return ssl.build();
+    }
 
-	@SuppressWarnings("unchecked")
-	public void createTable(SchemaTableName schemaTableName, List<RediSearchColumnHandle> columns) {
-		String index = schemaTableName.getTableName();
-		if (!connection.sync().ftList().contains(index)) {
-			List<Field<String>> fields = columns.stream().filter(c -> !RediSearchBuiltinField.isKeyColumn(c.getName()))
-					.map(c -> buildField(c.getName(), c.getType())).collect(Collectors.toList());
-			CreateOptions.Builder<String, String> options = CreateOptions.<String, String>builder();
-			options.prefix(index + ":");
-			connection.sync().ftCreate(index, options.build(), fields.toArray(Field[]::new));
-		}
-	}
+    private RedisURI redisURI(RediSearchConfig config) {
+        RedisURI.Builder uri = RedisURI.builder(RedisURI.create(config.getUri()));
+        if (config.getPassword() != null) {
+            if (config.getUsername() != null) {
+                uri.withAuthentication(config.getUsername(), config.getPassword());
+            } else {
+                uri.withPassword(config.getPassword().toCharArray());
+            }
+        }
+        if (config.isInsecure()) {
+            uri.withVerifyPeer(false);
+        }
+        return uri.build();
+    }
 
-	public void dropTable(SchemaTableName tableName) {
-		connection.sync().ftDropindexDeleteDocs(toRemoteTableName(tableName.getTableName()));
-		tableCache.invalidate(tableName);
-	}
+    public StatefulRedisModulesConnection<String, String> getConnection() {
+        return connection;
+    }
 
-	public void addColumn(SchemaTableName schemaTableName, ColumnMetadata columnMetadata) {
-		String tableName = toRemoteTableName(schemaTableName.getTableName());
-		connection.sync().ftAlter(tableName, buildField(columnMetadata.getName(), columnMetadata.getType()));
-		tableCache.invalidate(schemaTableName);
-	}
+    public RediSearchConfig getConfig() {
+        return config;
+    }
 
-	private String toRemoteTableName(String tableName) {
-		verify(tableName.equals(tableName.toLowerCase(ENGLISH)), "tableName not in lower-case: %s", tableName);
-		if (!config.isCaseInsensitiveNames()) {
-			return tableName;
-		}
-		for (String remoteTableName : listIndexNames()) {
-			if (tableName.equals(remoteTableName.toLowerCase(ENGLISH))) {
-				return remoteTableName;
-			}
-		}
-		return tableName;
-	}
+    public void shutdown() {
+        connection.close();
+        client.shutdown();
+        client.getResources().shutdown();
+    }
 
-	public void dropColumn(SchemaTableName schemaTableName, String columnName) {
-		throw new TrinoException(NOT_SUPPORTED, "This connector does not support dropping columns");
-	}
+    public List<HostAddress> getAddresses() {
+        RedisURI redisURI = RedisURI.create(config.getUri());
+        return Collections.singletonList(HostAddress.fromParts(redisURI.getHost(), redisURI.getPort()));
+    }
 
-	/**
-	 * 
-	 * @param schemaTableName SchemaTableName to load
-	 * @return RediSearchTable describing the RediSearch index
-	 * @throws TableNotFoundException if no index by that name was found
-	 */
-	private RediSearchTable loadTableSchema(SchemaTableName schemaTableName) throws TableNotFoundException {
-		String index = toRemoteTableName(schemaTableName.getTableName());
-		Optional<IndexInfo> indexInfoOptional = indexInfo(index);
-		if (indexInfoOptional.isEmpty()) {
-			throw new TableNotFoundException(schemaTableName, format("Index '%s' not found", index), null);
-		}
-		IndexInfo indexInfo = indexInfoOptional.get();
-		Set<String> fields = new HashSet<>();
-		ImmutableList.Builder<RediSearchColumnHandle> columns = ImmutableList.builder();
-		for (RediSearchBuiltinField builtinfield : RediSearchBuiltinField.values()) {
-			fields.add(builtinfield.getName());
-			columns.add(builtinfield.getColumnHandle());
-		}
-		for (Field<String> indexedField : indexInfo.getFields()) {
-			RediSearchColumnHandle column = buildColumnHandle(indexedField);
-			fields.add(column.getName());
-			columns.add(column);
-		}
-		SearchResults<String, String> results = connection.sync().ftSearch(index, "*");
-		for (Document<String, String> doc : results) {
-			for (String docField : doc.keySet()) {
-				if (fields.contains(docField)) {
-					continue;
-				}
-				columns.add(new RediSearchColumnHandle(docField, VarcharType.VARCHAR, Field.Type.TEXT, false, false));
-				fields.add(docField);
-			}
-		}
-		RediSearchTableHandle tableHandle = new RediSearchTableHandle(schemaTableName, index);
-		return new RediSearchTable(tableHandle, columns.build(), indexInfo);
-	}
+    private Set<String> listIndexNames() throws SchemaNotFoundException {
+        ImmutableSet.Builder<String> builder = ImmutableSet.builder();
+        builder.addAll(connection.sync().ftList());
+        return builder.build();
+    }
 
-	private Optional<IndexInfo> indexInfo(String index) {
-		try {
-			List<Object> indexInfoList = connection.sync().ftInfo(index);
-			if (indexInfoList != null) {
-				return Optional.of(RedisModulesUtils.indexInfo(indexInfoList));
-			}
-		} catch (Exception e) {
-			// Ignore as index might not exist
-		}
-		return Optional.empty();
-	}
+    /**
+     * 
+     * @param schemaTableName SchemaTableName to load
+     * @return RediSearchTable describing the RediSearch index
+     * @throws TableNotFoundException if no index by that name was found
+     */
+    public RediSearchTable getTable(SchemaTableName tableName) throws TableNotFoundException {
+        try {
+            return tableCache.get(tableName, () -> loadTableSchema(tableName));
+        } catch (ExecutionException | UncheckedExecutionException e) {
+            throwIfInstanceOf(e.getCause(), TrinoException.class);
+            throw new RuntimeException(e);
+        }
+    }
 
-	private RediSearchColumnHandle buildColumnHandle(Field<String> field) {
-		return buildColumnHandle(name(field), field.getType(), false, true);
-	}
+    public Set<String> getAllTables() {
+        return listIndexNames().stream().collect(toSet());
+    }
 
-	private String name(Field<String> field) {
-		Optional<String> as = field.getAs();
-		if (as.isEmpty()) {
-			return field.getName();
-		}
-		return as.get();
-	}
+    @SuppressWarnings("unchecked")
+    public void createTable(SchemaTableName schemaTableName, List<RediSearchColumnHandle> columns) {
+        String index = schemaTableName.getTableName();
+        if (!connection.sync().ftList().contains(index)) {
+            List<Field<String>> fields = columns.stream().filter(c -> !RediSearchBuiltinField.isKeyColumn(c.getName()))
+                    .map(c -> buildField(c.getName(), c.getType())).collect(Collectors.toList());
+            CreateOptions.Builder<String, String> options = CreateOptions.<String, String> builder();
+            options.prefix(index + ":");
+            connection.sync().ftCreate(index, options.build(), fields.toArray(Field[]::new));
+        }
+    }
 
-	private RediSearchColumnHandle buildColumnHandle(String name, Field.Type type, boolean hidden,
-			boolean supportsPredicates) {
-		return new RediSearchColumnHandle(name, columnType(type), type, hidden, supportsPredicates);
-	}
+    public void dropTable(SchemaTableName tableName) {
+        connection.sync().ftDropindexDeleteDocs(toRemoteTableName(tableName.getTableName()));
+        tableCache.invalidate(tableName);
+    }
 
-	private Type columnType(Field.Type type) {
-		return columnType(typeSignature(type));
-	}
+    public void addColumn(SchemaTableName schemaTableName, ColumnMetadata columnMetadata) {
+        String tableName = toRemoteTableName(schemaTableName.getTableName());
+        connection.sync().ftAlter(tableName, buildField(columnMetadata.getName(), columnMetadata.getType()));
+        tableCache.invalidate(schemaTableName);
+    }
 
-	private Type columnType(TypeSignature typeSignature) {
-		return typeManager.fromSqlType(typeSignature.toString());
-	}
+    private String toRemoteTableName(String tableName) {
+        verify(tableName.equals(tableName.toLowerCase(ENGLISH)), "tableName not in lower-case: %s", tableName);
+        if (!config.isCaseInsensitiveNames()) {
+            return tableName;
+        }
+        for (String remoteTableName : listIndexNames()) {
+            if (tableName.equals(remoteTableName.toLowerCase(ENGLISH))) {
+                return remoteTableName;
+            }
+        }
+        return tableName;
+    }
 
-	public SearchResults<String, String> search(RediSearchTableHandle tableHandle, String[] columns) {
-		Search search = translator.search(tableHandle, columns);
-		log.info("Running %s", search);
-		return connection.sync().ftSearch(search.getIndex(), search.getQuery(), search.getOptions());
-	}
+    public void dropColumn(SchemaTableName schemaTableName, String columnName) {
+        throw new TrinoException(NOT_SUPPORTED, "This connector does not support dropping columns");
+    }
 
-	public AggregateWithCursorResults<String> aggregate(RediSearchTableHandle table, String[] columnNames) {
-		Aggregation aggregation = translator.aggregate(table, columnNames);
-		log.info("Running %s", aggregation);
-		String index = aggregation.getIndex();
-		String query = aggregation.getQuery();
-		CursorOptions cursor = aggregation.getCursorOptions();
-		AggregateOptions<String, String> options = aggregation.getOptions();
-		AggregateWithCursorResults<String> results = connection.sync().ftAggregate(index, query, cursor, options);
-		List<AggregateOperation<String, String>> groupBys = aggregation.getOptions().getOperations().stream()
-				.filter(this::isGroupOperation).collect(Collectors.toList());
-		if (results.isEmpty() && !groupBys.isEmpty()) {
-			Group groupBy = (Group) groupBys.get(0);
-			Optional<String> as = groupBy.getReducers()[0].getAs();
-			if (as.isPresent()) {
-				Map<String, Object> doc = new HashMap<>();
-				doc.put(as.get(), 0);
-				results.add(doc);
-			}
-		}
-		return results;
-	}
+    /**
+     * 
+     * @param schemaTableName SchemaTableName to load
+     * @return RediSearchTable describing the RediSearch index
+     * @throws TableNotFoundException if no index by that name was found
+     */
+    private RediSearchTable loadTableSchema(SchemaTableName schemaTableName) throws TableNotFoundException {
+        String index = toRemoteTableName(schemaTableName.getTableName());
+        Optional<IndexInfo> indexInfoOptional = indexInfo(index);
+        if (indexInfoOptional.isEmpty()) {
+            throw new TableNotFoundException(schemaTableName, format("Index '%s' not found", index), null);
+        }
+        IndexInfo indexInfo = indexInfoOptional.get();
+        Set<String> fields = new HashSet<>();
+        ImmutableList.Builder<RediSearchColumnHandle> columns = ImmutableList.builder();
+        for (RediSearchBuiltinField builtinfield : RediSearchBuiltinField.values()) {
+            fields.add(builtinfield.getName());
+            columns.add(builtinfield.getColumnHandle());
+        }
+        for (Field<String> indexedField : indexInfo.getFields()) {
+            RediSearchColumnHandle column = buildColumnHandle(indexedField);
+            fields.add(column.getName());
+            columns.add(column);
+        }
+        SearchResults<String, String> results = connection.sync().ftSearch(index, "*");
+        for (Document<String, String> doc : results) {
+            for (String docField : doc.keySet()) {
+                if (fields.contains(docField)) {
+                    continue;
+                }
+                columns.add(new RediSearchColumnHandle(docField, VarcharType.VARCHAR, Field.Type.TEXT, false, false));
+                fields.add(docField);
+            }
+        }
+        RediSearchTableHandle tableHandle = new RediSearchTableHandle(schemaTableName, index);
+        return new RediSearchTable(tableHandle, columns.build(), indexInfo);
+    }
 
-	private boolean isGroupOperation(AggregateOperation<String, String> operation) {
-		return operation.getType() == AggregateOperation.Type.GROUP;
-	}
+    private Optional<IndexInfo> indexInfo(String index) {
+        try {
+            List<Object> indexInfoList = connection.sync().ftInfo(index);
+            if (indexInfoList != null) {
+                return Optional.of(RedisModulesUtils.indexInfo(indexInfoList));
+            }
+        } catch (Exception e) {
+            // Ignore as index might not exist
+        }
+        return Optional.empty();
+    }
 
-	public AggregateWithCursorResults<String> cursorRead(RediSearchTableHandle tableHandle, long cursor) {
-		String index = tableHandle.getIndex();
-		if (config.getCursorCount() > 0) {
-			return connection.sync().ftCursorRead(index, cursor, config.getCursorCount());
-		}
-		return connection.sync().ftCursorRead(index, cursor);
-	}
+    private RediSearchColumnHandle buildColumnHandle(Field<String> field) {
+        return buildColumnHandle(name(field), field.getType(), false, true);
+    }
 
-	private Field<String> buildField(String columnName, Type columnType) {
-		Field.Type fieldType = toFieldType(columnType);
-		switch (fieldType) {
-		case GEO:
-			return Field.geo(columnName).build();
-		case NUMERIC:
-			return Field.numeric(columnName).build();
-		case TAG:
-			return Field.tag(columnName).build();
-		case TEXT:
-			return Field.text(columnName).build();
-		}
-		throw new IllegalArgumentException(String.format("Field type %s not supported", fieldType));
-	}
+    private String name(Field<String> field) {
+        Optional<String> as = field.getAs();
+        if (as.isEmpty()) {
+            return field.getName();
+        }
+        return as.get();
+    }
 
-	public static Field.Type toFieldType(Type type) {
-		if (type.equals(BooleanType.BOOLEAN)) {
-			return Field.Type.NUMERIC;
-		}
-		if (type.equals(BigintType.BIGINT)) {
-			return Field.Type.NUMERIC;
-		}
-		if (type.equals(IntegerType.INTEGER)) {
-			return Field.Type.NUMERIC;
-		}
-		if (type.equals(SmallintType.SMALLINT)) {
-			return Field.Type.NUMERIC;
-		}
-		if (type.equals(TinyintType.TINYINT)) {
-			return Field.Type.NUMERIC;
-		}
-		if (type.equals(DoubleType.DOUBLE)) {
-			return Field.Type.NUMERIC;
-		}
-		if (type.equals(RealType.REAL)) {
-			return Field.Type.NUMERIC;
-		}
-		if (type instanceof DecimalType) {
-			return Field.Type.NUMERIC;
-		}
-		if (type instanceof VarcharType) {
-			return Field.Type.TAG;
-		}
-		if (type instanceof CharType) {
-			return Field.Type.TAG;
-		}
-		if (type.equals(DateType.DATE)) {
-			return Field.Type.NUMERIC;
-		}
-		if (type.equals(TimestampType.TIMESTAMP_MILLIS)) {
-			return Field.Type.NUMERIC;
-		}
-		if (type.equals(TimestampWithTimeZoneType.TIMESTAMP_TZ_MILLIS)) {
-			return Field.Type.NUMERIC;
-		}
-		if (type.equals(UuidType.UUID)) {
-			return Field.Type.TAG;
-		}
-		throw new IllegalArgumentException("unsupported type: " + type);
-	}
+    private RediSearchColumnHandle buildColumnHandle(String name, Field.Type type, boolean hidden, boolean supportsPredicates) {
+        return new RediSearchColumnHandle(name, columnType(type), type, hidden, supportsPredicates);
+    }
 
-	private TypeSignature typeSignature(Field.Type type) {
-		if (type == Field.Type.NUMERIC) {
-			return doubleType();
-		}
-		return varcharType();
-	}
+    private Type columnType(Field.Type type) {
+        return columnType(typeSignature(type));
+    }
 
-	private TypeSignature doubleType() {
-		return DOUBLE.getTypeSignature();
-	}
+    private Type columnType(TypeSignature typeSignature) {
+        return typeManager.fromSqlType(typeSignature.toString());
+    }
 
-	private TypeSignature varcharType() {
-		return createUnboundedVarcharType().getTypeSignature();
-	}
+    public SearchResults<String, String> search(RediSearchTableHandle tableHandle, String[] columns) {
+        Search search = translator.search(tableHandle, columns);
+        log.info("Running %s", search);
+        return connection.sync().ftSearch(search.getIndex(), search.getQuery(), search.getOptions());
+    }
 
-	public void cursorDelete(RediSearchTableHandle tableHandle, long cursor) {
-		connection.sync().ftCursorDelete(tableHandle.getIndex(), cursor);
-	}
+    public AggregateWithCursorResults<String> aggregate(RediSearchTableHandle table, String[] columnNames) {
+        Aggregation aggregation = translator.aggregate(table, columnNames);
+        log.info("Running %s", aggregation);
+        String index = aggregation.getIndex();
+        String query = aggregation.getQuery();
+        CursorOptions cursor = aggregation.getCursorOptions();
+        AggregateOptions<String, String> options = aggregation.getOptions();
+        AggregateWithCursorResults<String> results = connection.sync().ftAggregate(index, query, cursor, options);
+        List<AggregateOperation<String, String>> groupBys = aggregation.getOptions().getOperations().stream()
+                .filter(this::isGroupOperation).collect(Collectors.toList());
+        if (results.isEmpty() && !groupBys.isEmpty()) {
+            Group groupBy = (Group) groupBys.get(0);
+            Optional<String> as = groupBy.getReducers()[0].getAs();
+            if (as.isPresent()) {
+                Map<String, Object> doc = new HashMap<>();
+                doc.put(as.get(), 0);
+                results.add(doc);
+            }
+        }
+        return results;
+    }
 
-	public Long deleteDocs(List<String> docIds) {
-		return connection.sync().del(docIds.toArray(String[]::new));
-	}
+    private boolean isGroupOperation(AggregateOperation<String, String> operation) {
+        return operation.getType() == AggregateOperation.Type.GROUP;
+    }
+
+    public AggregateWithCursorResults<String> cursorRead(RediSearchTableHandle tableHandle, long cursor) {
+        String index = tableHandle.getIndex();
+        if (config.getCursorCount() > 0) {
+            return connection.sync().ftCursorRead(index, cursor, config.getCursorCount());
+        }
+        return connection.sync().ftCursorRead(index, cursor);
+    }
+
+    private Field<String> buildField(String columnName, Type columnType) {
+        Field.Type fieldType = toFieldType(columnType);
+        switch (fieldType) {
+            case GEO:
+                return Field.geo(columnName).build();
+            case NUMERIC:
+                return Field.numeric(columnName).build();
+            case TAG:
+                return Field.tag(columnName).build();
+            case TEXT:
+                return Field.text(columnName).build();
+            case VECTOR:
+                throw new UnsupportedOperationException("Vector field not supported");
+        }
+        throw new IllegalArgumentException(String.format("Field type %s not supported", fieldType));
+    }
+
+    public static Field.Type toFieldType(Type type) {
+        if (type.equals(BooleanType.BOOLEAN)) {
+            return Field.Type.NUMERIC;
+        }
+        if (type.equals(BigintType.BIGINT)) {
+            return Field.Type.NUMERIC;
+        }
+        if (type.equals(IntegerType.INTEGER)) {
+            return Field.Type.NUMERIC;
+        }
+        if (type.equals(SmallintType.SMALLINT)) {
+            return Field.Type.NUMERIC;
+        }
+        if (type.equals(TinyintType.TINYINT)) {
+            return Field.Type.NUMERIC;
+        }
+        if (type.equals(DoubleType.DOUBLE)) {
+            return Field.Type.NUMERIC;
+        }
+        if (type.equals(RealType.REAL)) {
+            return Field.Type.NUMERIC;
+        }
+        if (type instanceof DecimalType) {
+            return Field.Type.NUMERIC;
+        }
+        if (type instanceof VarcharType) {
+            return Field.Type.TAG;
+        }
+        if (type instanceof CharType) {
+            return Field.Type.TAG;
+        }
+        if (type.equals(DateType.DATE)) {
+            return Field.Type.NUMERIC;
+        }
+        if (type.equals(TimestampType.TIMESTAMP_MILLIS)) {
+            return Field.Type.NUMERIC;
+        }
+        if (type.equals(TimestampWithTimeZoneType.TIMESTAMP_TZ_MILLIS)) {
+            return Field.Type.NUMERIC;
+        }
+        if (type.equals(UuidType.UUID)) {
+            return Field.Type.TAG;
+        }
+        throw new IllegalArgumentException("unsupported type: " + type);
+    }
+
+    private TypeSignature typeSignature(Field.Type type) {
+        if (type == Field.Type.NUMERIC) {
+            return doubleType();
+        }
+        return varcharType();
+    }
+
+    private TypeSignature doubleType() {
+        return DOUBLE.getTypeSignature();
+    }
+
+    private TypeSignature varcharType() {
+        return createUnboundedVarcharType().getTypeSignature();
+    }
+
+    public void cursorDelete(RediSearchTableHandle tableHandle, long cursor) {
+        connection.sync().ftCursorDelete(tableHandle.getIndex(), cursor);
+    }
+
+    public Long deleteDocs(List<String> docIds) {
+        return connection.sync().del(docIds.toArray(String[]::new));
+    }
 
 }

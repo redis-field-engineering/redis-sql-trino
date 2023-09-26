@@ -2,10 +2,9 @@ package com.redis.trino;
 
 import java.io.Closeable;
 
-import org.testcontainers.utility.DockerImageName;
-
+import com.redis.lettucemod.RedisModulesClient;
 import com.redis.lettucemod.api.StatefulRedisModulesConnection;
-import com.redis.lettucemod.util.ClientBuilder;
+import com.redis.lettucemod.cluster.RedisModulesClusterClient;
 import com.redis.lettucemod.util.RedisModulesUtils;
 import com.redis.testcontainers.RedisStackContainer;
 
@@ -14,12 +13,9 @@ import io.lettuce.core.RedisURI;
 
 public class RediSearchServer implements Closeable {
 
-    private static final String TAG = "6.2.6-v9";
-
-    private static final DockerImageName DOCKER_IMAGE_NAME = RedisStackContainer.DEFAULT_IMAGE_NAME.withTag(TAG);
-
-    private final RedisStackContainer container = new RedisStackContainer(DOCKER_IMAGE_NAME).withEnv("REDISEARCH_ARGS",
-            "MAXAGGREGATERESULTS -1");
+    private final RedisStackContainer container = new RedisStackContainer(
+            RedisStackContainer.DEFAULT_IMAGE_NAME.withTag(RedisStackContainer.DEFAULT_TAG)).withEnv("REDISEARCH_ARGS",
+                    "MAXAGGREGATERESULTS -1");
 
     private final AbstractRedisClient client;
 
@@ -27,7 +23,8 @@ public class RediSearchServer implements Closeable {
 
     public RediSearchServer() {
         this.container.start();
-        this.client = ClientBuilder.create(RedisURI.create(container.getRedisURI())).cluster(container.isCluster()).build();
+        RedisURI uri = RedisURI.create(container.getRedisURI());
+        this.client = container.isCluster() ? RedisModulesClusterClient.create(uri) : RedisModulesClient.create(uri);
         this.connection = RedisModulesUtils.connection(client);
     }
 

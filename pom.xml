@@ -26,9 +26,9 @@
 		<github.owner>redis-field-engineering</github.owner>
 		<github.repo>redis-sql-trino</github.repo>
 
-		<lettucemod.version>3.3.1</lettucemod.version>
-		<lettuce.version>6.2.2.RELEASE</lettuce.version>
-		<testcontainers-redis.version>1.6.3</testcontainers-redis.version>
+		<lettucemod.version>3.7.3</lettucemod.version>
+		<lettuce.version>6.2.6.RELEASE</lettuce.version>
+		<testcontainers-redis.version>1.6.4</testcontainers-redis.version>
 		<ulid.version>5.1.0</ulid.version>
 
 		<air.check.skip-license>true</air.check.skip-license>
