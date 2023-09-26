@@ -2,7 +2,7 @@
 :project-owner:   redis-field-engineering
 :project-name:    redis-sql-trino
 :project-group:   com.redis
-:project-version: 0.3.3
+:project-version: 0.3.4
 :name:            Redis SQL Trino
 :toc:
 :toc-title:
