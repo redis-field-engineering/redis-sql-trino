@@ -45,8 +45,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import org.apache.bval.util.StringUtils;
-
 import com.google.common.cache.Cache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -155,20 +153,24 @@ public class RediSearchSession {
 
     public SslOptions sslOptions(RediSearchConfig config) {
         Builder ssl = SslOptions.builder();
-        if (StringUtils.isNotBlank(config.getKeyPath())) {
+        if (!isNullOrEmpty(config.getKeyPath())) {
             ssl.keyManager(new File(config.getCertPath()), new File(config.getKeyPath()),
                     config.getKeyPassword().toCharArray());
         }
-        if (StringUtils.isNotBlank(config.getCaCertPath())) {
+        if (!isNullOrEmpty(config.getCaCertPath())) {
             ssl.trustManager(new File(config.getCaCertPath()));
         }
         return ssl.build();
     }
+    
+    private static boolean isNullOrEmpty(String s) {
+        return s == null || s.isEmpty();
+    }
 
     private RedisURI redisURI(RediSearchConfig config) {
         RedisURI.Builder uri = RedisURI.builder(RedisURI.create(config.getUri()));
-        if (StringUtils.isNotBlank(config.getPassword())) {
-            if (StringUtils.isNotBlank(config.getUsername())) {
+        if (!isNullOrEmpty(config.getPassword())) {
+            if (!isNullOrEmpty(config.getUsername())) {
                 uri.withAuthentication(config.getUsername(), config.getPassword());
             } else {
                 uri.withPassword(config.getPassword().toCharArray());
