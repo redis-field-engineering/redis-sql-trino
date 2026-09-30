@@ -1,11 +1,13 @@
 package com.redis.trino;
 
 import static com.google.common.collect.Iterables.getOnlyElement;
-import static org.testng.Assert.assertFalse;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.TestInstance.Lifecycle.PER_CLASS;
 
-import org.testng.annotations.AfterClass;
-import org.testng.annotations.BeforeClass;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 
 import com.google.common.collect.ImmutableMap;
 
@@ -13,11 +15,12 @@ import io.trino.spi.connector.Connector;
 import io.trino.spi.connector.ConnectorFactory;
 import io.trino.testing.TestingConnectorContext;
 
+@TestInstance(PER_CLASS)
 public class TestPlugin {
 
 	private RediSearchServer server;
 
-	@BeforeClass
+	@BeforeAll
 	public void start() {
 		server = new RediSearchServer();
 	}
@@ -30,12 +33,12 @@ public class TestPlugin {
 		Connector connector = factory.create("test", ImmutableMap.of("redisearch.uri", server.getRedisURI()),
 				new TestingConnectorContext());
 
-		assertFalse(plugin.getTypes().iterator().hasNext());
+		assertThat(plugin.getTypes()).isEmpty();
 
 		connector.shutdown();
 	}
 
-	@AfterClass(alwaysRun = true)
+	@AfterAll
 	public void destroy() {
 		if (server != null) {
 			server.close();

@@ -25,13 +25,17 @@ package com.redis.trino;
 
 import static java.util.Objects.requireNonNull;
 
-import com.redis.lettucemod.search.AggregateOptions;
-import com.redis.lettucemod.search.CursorOptions;
-import com.redis.lettucemod.search.Limit;
-import com.redis.lettucemod.search.SearchOptions;
-import com.redis.lettucemod.search.SearchOptions.Builder;
+import java.util.Optional;
+
+import io.lettuce.core.search.arguments.AggregateArgs;
+import io.lettuce.core.search.arguments.AggregateArgs.GroupBy;
+import io.lettuce.core.search.arguments.AggregateArgs.WithCursor;
+import io.lettuce.core.search.arguments.QueryDialects;
+import io.lettuce.core.search.arguments.SearchArgs;
 
 public class RediSearchTranslator {
+
+	private static final QueryDialects DIALECT = QueryDialects.DIALECT2;
 
 	private final RediSearchQueryBuilder queryBuilder = new RediSearchQueryBuilder();
 
@@ -46,191 +50,91 @@ public class RediSearchTranslator {
 	}
 
 	public static class Aggregation {
-		private String index;
-		private String query;
-		private AggregateOptions<String, String> options;
-		private CursorOptions cursorOptions;
+		private final String index;
+		private final String query;
+		private final AggregateArgs args;
+		private final boolean grouped;
 
-		private Aggregation(Builder builder) {
-			this.index = builder.index;
-			this.query = builder.query;
-			this.options = builder.options;
-			this.cursorOptions = builder.cursorOptions;
+		public Aggregation(String index, String query, AggregateArgs args, boolean grouped) {
+			this.index = index;
+			this.query = query;
+			this.args = args;
+			this.grouped = grouped;
 		}
 
 		public String getIndex() {
 			return index;
 		}
 
-		public void setIndex(String index) {
-			this.index = index;
-		}
-
 		public String getQuery() {
 			return query;
 		}
 
-		public void setQuery(String query) {
-			this.query = query;
+		public AggregateArgs getArgs() {
+			return args;
 		}
 
-		public AggregateOptions<String, String> getOptions() {
-			return options;
-		}
-
-		public CursorOptions getCursorOptions() {
-			return cursorOptions;
-		}
-
-		public void setOptions(AggregateOptions<String, String> options) {
-			this.options = options;
+		public boolean isGrouped() {
+			return grouped;
 		}
 
 		@Override
 		public String toString() {
-			return "Aggregation [index=" + index + ", query=" + query + ", options=" + options + ", cursorOptions="
-					+ cursorOptions + "]";
+			return "Aggregation [index=" + index + ", query=" + query + ", grouped=" + grouped + "]";
 		}
-
-		public static Builder builder() {
-			return new Builder();
-		}
-
-		public static final class Builder {
-			private String index;
-			private String query;
-			private AggregateOptions<String, String> options;
-			private CursorOptions cursorOptions;
-
-			private Builder() {
-			}
-
-			public Builder index(String index) {
-				this.index = index;
-				return this;
-			}
-
-			public Builder query(String query) {
-				this.query = query;
-				return this;
-			}
-
-			public Builder options(AggregateOptions<String, String> options) {
-				this.options = options;
-				return this;
-			}
-
-			public Builder cursorOptions(CursorOptions cursorOptions) {
-				this.cursorOptions = cursorOptions;
-				return this;
-			}
-
-			public Aggregation build() {
-				return new Aggregation(this);
-			}
-		}
-
 	}
 
 	public static class Search {
-		private String index;
-		private String query;
-		private SearchOptions<String, String> options;
+		private final String index;
+		private final String query;
+		private final SearchArgs<String> args;
 
-		private Search(Builder builder) {
-			this.index = builder.index;
-			this.query = builder.query;
-			this.options = builder.options;
+		public Search(String index, String query, SearchArgs<String> args) {
+			this.index = index;
+			this.query = query;
+			this.args = args;
 		}
 
 		public String getIndex() {
 			return index;
 		}
 
-		public void setIndex(String index) {
-			this.index = index;
-		}
-
 		public String getQuery() {
 			return query;
 		}
 
-		public void setQuery(String query) {
-			this.query = query;
-		}
-
-		public SearchOptions<String, String> getOptions() {
-			return options;
-		}
-
-		public void setOptions(SearchOptions<String, String> options) {
-			this.options = options;
+		public SearchArgs<String> getArgs() {
+			return args;
 		}
 
 		@Override
 		public String toString() {
-			return "Search [index=" + index + ", query=" + query + ", options=" + options + "]";
+			return "Search [index=" + index + ", query=" + query + "]";
 		}
-
-		public static Builder builder() {
-			return new Builder();
-		}
-
-		public static final class Builder {
-			private String index;
-			private String query;
-			private SearchOptions<String, String> options;
-
-			private Builder() {
-			}
-
-			public Builder index(String index) {
-				this.index = index;
-				return this;
-			}
-
-			public Builder query(String query) {
-				this.query = query;
-				return this;
-			}
-
-			public Builder options(SearchOptions<String, String> options) {
-				this.options = options;
-				return this;
-			}
-
-			public Search build() {
-				return new Search(this);
-			}
-		}
-
 	}
 
 	public Search search(RediSearchTableHandle table, String[] columnNames) {
-		String index = table.getIndex();
 		String query = queryBuilder.buildQuery(table.getConstraint(), table.getWildcards());
-		Builder<String, String> options = SearchOptions.builder();
-		options.withScores(true);
-		options.limit(Limit.offset(0).num(limit(table)));
-		options.returnFields(columnNames);
-		return Search.builder().index(index).query(query).options(options.build()).build();
+		SearchArgs.Builder<String> args = SearchArgs.<String>builder().withScores().limit(0, limit(table))
+				.dialect(DIALECT);
+		for (String columnName : columnNames) {
+			args.returnField(columnName);
+		}
+		return new Search(table.getIndex(), query, args.build());
 	}
 
 	public Aggregation aggregate(RediSearchTableHandle table, String[] columnNames) {
-		String index = table.getIndex();
 		String query = queryBuilder.buildQuery(table.getConstraint(), table.getWildcards());
-		AggregateOptions.Builder<String, String> builder = AggregateOptions.builder();
-		builder.load(RediSearchBuiltinField.KEY.getName());
-		builder.loads(columnNames);
-		queryBuilder.group(table).ifPresent(builder::operation);
-		builder.operation(Limit.offset(0).num(limit(table)));
-		AggregateOptions<String, String> options = builder.build();
-		CursorOptions.Builder cursorOptions = CursorOptions.builder();
-		if (config.getCursorCount() > 0) {
-			cursorOptions.count(config.getCursorCount());
+		AggregateArgs.Builder args = AggregateArgs.builder().dialect(DIALECT);
+		args.load(RediSearchBuiltinField.KEY.getName());
+		for (String columnName : columnNames) {
+			args.load(columnName);
 		}
-		return Aggregation.builder().index(index).query(query).options(options).cursorOptions(cursorOptions.build())
-				.build();
+		Optional<GroupBy> groupBy = queryBuilder.group(table);
+		groupBy.ifPresent(args::groupBy);
+		args.limit(0, limit(table));
+		args.withCursor(WithCursor.of(config.getCursorCount() > 0 ? config.getCursorCount() : null));
+		return new Aggregation(table.getIndex(), query, args.build(), groupBy.isPresent());
 	}
 
 	private long limit(RediSearchTableHandle tableHandle) {

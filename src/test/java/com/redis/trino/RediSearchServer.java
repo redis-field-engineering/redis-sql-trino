@@ -6,11 +6,9 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
 
-import com.redis.lettucemod.RedisModulesClient;
-import com.redis.lettucemod.api.StatefulRedisModulesConnection;
-
-import io.lettuce.core.AbstractRedisClient;
+import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
+import io.lettuce.core.api.StatefulRedisConnection;
 
 public class RediSearchServer implements Closeable {
 
@@ -25,26 +23,25 @@ public class RediSearchServer implements Closeable {
             .withExposedPorts(REDIS_PORT)
             .waitingFor(Wait.forLogMessage(".*Ready to accept connections.*\\n", 1));
 
-    private final AbstractRedisClient client;
+    private final RedisClient client;
 
-    private final StatefulRedisModulesConnection<String, String> connection;
+    private final StatefulRedisConnection<String, String> connection;
 
     public RediSearchServer() {
         this.container.start();
-        RedisModulesClient redisClient = RedisModulesClient.create(RedisURI.create(getRedisURI()));
-        this.client = redisClient;
-        this.connection = redisClient.connect();
+        this.client = RedisClient.create(RedisURI.create(getRedisURI()));
+        this.connection = client.connect();
     }
 
     public String getRedisURI() {
         return "redis://" + container.getHost() + ":" + container.getMappedPort(REDIS_PORT);
     }
 
-    public AbstractRedisClient getClient() {
+    public RedisClient getClient() {
         return client;
     }
 
-    public StatefulRedisModulesConnection<String, String> getConnection() {
+    public StatefulRedisConnection<String, String> getConnection() {
         return connection;
     }
 

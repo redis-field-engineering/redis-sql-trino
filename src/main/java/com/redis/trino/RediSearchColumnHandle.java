@@ -30,7 +30,6 @@ import java.util.Objects;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.redis.lettucemod.search.Field;
 
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ColumnMetadata;
@@ -40,13 +39,13 @@ public class RediSearchColumnHandle implements ColumnHandle {
 
 	private final String name;
 	private final Type type;
-	private final Field.Type fieldType;
+	private final RediSearchFieldType fieldType;
 	private final boolean hidden;
 	private final boolean supportsPredicates;
 
 	@JsonCreator
 	public RediSearchColumnHandle(@JsonProperty("name") String name, @JsonProperty("columnType") Type type,
-			@JsonProperty("fieldType") Field.Type fieldType, @JsonProperty("hidden") boolean hidden,
+			@JsonProperty("fieldType") RediSearchFieldType fieldType, @JsonProperty("hidden") boolean hidden,
 			@JsonProperty("supportsPredicates") boolean supportsPredicates) {
 		this.name = requireNonNull(name, "name is null");
 		this.type = requireNonNull(type, "type is null");
@@ -66,7 +65,7 @@ public class RediSearchColumnHandle implements ColumnHandle {
 	}
 
 	@JsonProperty("fieldType")
-	public Field.Type getFieldType() {
+	public RediSearchFieldType getFieldType() {
 		return fieldType;
 	}
 

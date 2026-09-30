@@ -34,6 +34,7 @@ import static io.trino.spi.type.Timestamps.roundDiv;
 import static java.lang.Float.intBitsToFloat;
 import static java.lang.Math.floorDiv;
 import static java.lang.Math.toIntExact;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.concurrent.CompletableFuture.completedFuture;
 
 import java.time.LocalDate;
@@ -50,15 +51,12 @@ import java.util.concurrent.CompletableFuture;
 import com.github.f4b6a3.ulid.UlidFactory;
 import com.google.common.primitives.Shorts;
 import com.google.common.primitives.SignedBytes;
-import com.redis.lettucemod.api.StatefulRedisModulesConnection;
-import com.redis.lettucemod.api.async.RedisModulesAsyncCommands;
-import com.redis.lettucemod.search.CreateOptions;
-import com.redis.lettucemod.search.CreateOptions.DataType;
-import com.redis.lettucemod.search.IndexInfo;
 
 import io.airlift.slice.Slice;
 import io.lettuce.core.LettuceFutures;
 import io.lettuce.core.RedisFuture;
+import io.lettuce.core.api.StatefulConnection;
+import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.trino.spi.Page;
 import io.trino.spi.TrinoException;
 import io.trino.spi.block.Block;
@@ -98,47 +96,40 @@ public class RediSearchPageSink implements ConnectorPageSink {
 	@Override
 	public CompletableFuture<?> appendPage(Page page) {
 		String prefix = prefix().orElse(schemaTableName.getTableName() + KEY_SEPARATOR);
-		StatefulRedisModulesConnection<String, String> connection = session.getConnection();
-		connection.setAutoFlushCommands(false);
-		try {
-			RedisModulesAsyncCommands<String, String> commands = connection.async();
-			List<RedisFuture<?>> futures = new ArrayList<>();
-			for (int position = 0; position < page.getPositionCount(); position++) {
-				String key = prefix + factory.create().toString();
-				Map<String, String> map = new HashMap<>();
-				for (int channel = 0; channel < page.getChannelCount(); channel++) {
-					RediSearchColumnHandle column = columns.get(channel);
-					Block block = page.getBlock(channel);
-					if (block.isNull(position)) {
-						continue;
-					}
-					String value = value(column.getType(), block, position);
-					map.put(column.getName(), value);
+		StatefulConnection<String, String> connection = session.getConnection();
+		RedisClusterAsyncCommands<String, String> commands = session.async();
+		List<RedisFuture<?>> futures = new ArrayList<>();
+		for (int position = 0; position < page.getPositionCount(); position++) {
+			String key = prefix + factory.create().toString();
+			Map<String, String> map = new HashMap<>();
+			for (int channel = 0; channel < page.getChannelCount(); channel++) {
+				RediSearchColumnHandle column = columns.get(channel);
+				Block block = page.getBlock(channel);
+				if (block.isNull(position)) {
+					continue;
 				}
-				RedisFuture<Long> future = commands.hset(key, map);
-				futures.add(future);
+				String value = value(column.getType(), block, position);
+				map.put(column.getName(), value);
 			}
-			connection.flushCommands();
-			LettuceFutures.awaitAll(connection.getTimeout(), futures.toArray(new RedisFuture[0]));
-		} finally {
-			connection.setAutoFlushCommands(true);
+			RedisFuture<Long> future = commands.hset(key, map);
+			futures.add(future);
 		}
+		LettuceFutures.awaitAll(connection.getTimeout(), futures.toArray(new RedisFuture[0]));
 		return NOT_BLOCKED;
 	}
 
 	private Optional<String> prefix() {
 		try {
 			RediSearchTable table = session.getTable(schemaTableName);
-			IndexInfo indexInfo = table.getIndexInfo();
-			CreateOptions<String, String> options = indexInfo.getIndexOptions();
-			Optional<DataType> on = options.getOn();
-			if (on.isEmpty() || on.get() != DataType.HASH) {
+			RediSearchIndexInfo indexInfo = table.getIndexInfo();
+			Optional<RediSearchIndexInfo.KeyType> on = indexInfo.getKeyType();
+			if (on.isEmpty() || on.get() != RediSearchIndexInfo.KeyType.HASH) {
 				return Optional.empty();
 			}
-			if (options.getPrefixes().isEmpty()) {
+			if (indexInfo.getPrefixes().isEmpty()) {
 				return Optional.empty();
 			}
-			String prefix = options.getPrefixes().get(0);
+			String prefix = indexInfo.getPrefixes().get(0);
 			if (prefix.equals("*")) {
 				return Optional.empty();
 			}
@@ -180,7 +171,7 @@ public class RediSearchPageSink implements ConnectorPageSink {
 			return padSpaces(type.getSlice(block, position), (CharType) type).toStringUtf8();
 		}
 		if (type.equals(VarbinaryType.VARBINARY)) {
-			return new String(type.getSlice(block, position).getBytes());
+			return new String(type.getSlice(block, position).getBytes(), UTF_8);
 		}
 		if (type.equals(DateType.DATE)) {
 			long days = type.getLong(block, position);

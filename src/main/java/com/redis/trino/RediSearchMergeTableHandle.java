@@ -23,43 +23,45 @@
  */
 package com.redis.trino;
 
-import static io.airlift.slice.SizeOf.instanceSize;
-import static java.util.Objects.requireNonNull;
-
-import java.util.List;
-
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import io.trino.spi.connector.ConnectorMergeTableHandle;
 
-import io.airlift.slice.SizeOf;
-import io.trino.spi.HostAddress;
-import io.trino.spi.connector.ConnectorSplit;
+import java.util.List;
+import java.util.Map;
 
-public class RediSearchSplit implements ConnectorSplit {
+import static java.util.Objects.requireNonNull;
 
-	private static final long INSTANCE_SIZE = instanceSize(RediSearchSplit.class);
-
-	private final List<HostAddress> addresses;
+public class RediSearchMergeTableHandle implements ConnectorMergeTableHandle {
+	private final RediSearchTableHandle tableHandle;
+	private final List<RediSearchColumnHandle> dataColumns;
+	// UPDATE case number -> channels (indexes into dataColumns) of the columns it assigns
+	private final Map<Integer, List<Integer>> updateCaseChannels;
 
 	@JsonCreator
-	public RediSearchSplit(@JsonProperty("addresses") List<HostAddress> addresses) {
-		this.addresses = ImmutableList.copyOf(requireNonNull(addresses, "addresses is null"));
-	}
-
-	@Override
-	public boolean isRemotelyAccessible() {
-		return true;
+	public RediSearchMergeTableHandle(@JsonProperty("tableHandle") RediSearchTableHandle tableHandle,
+			@JsonProperty("dataColumns") List<RediSearchColumnHandle> dataColumns,
+			@JsonProperty("updateCaseChannels") Map<Integer, List<Integer>> updateCaseChannels) {
+		this.tableHandle = requireNonNull(tableHandle, "tableHandle is null");
+		this.dataColumns = ImmutableList.copyOf(requireNonNull(dataColumns, "dataColumns is null"));
+		this.updateCaseChannels = ImmutableMap.copyOf(requireNonNull(updateCaseChannels, "updateCaseChannels is null"));
 	}
 
 	@Override
 	@JsonProperty
-	public List<HostAddress> getAddresses() {
-		return addresses;
+	public RediSearchTableHandle getTableHandle() {
+		return tableHandle;
 	}
 
-	@Override
-	public long getRetainedSizeInBytes() {
-		return INSTANCE_SIZE + SizeOf.estimatedSizeOf(addresses, HostAddress::getRetainedSizeInBytes);
+	@JsonProperty
+	public List<RediSearchColumnHandle> getDataColumns() {
+		return dataColumns;
+	}
+
+	@JsonProperty
+	public Map<Integer, List<Integer>> getUpdateCaseChannels() {
+		return updateCaseChannels;
 	}
 }

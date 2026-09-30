@@ -7,12 +7,11 @@ import static io.trino.spi.predicate.Range.lessThan;
 import static io.trino.spi.predicate.Range.range;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
-import static org.testng.Assert.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.ImmutableMap;
-import com.redis.lettucemod.search.Field;
 
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.predicate.Domain;
@@ -22,10 +21,10 @@ import io.trino.spi.type.DoubleType;
 
 public class TestQueryBuilder {
 
-	private static final RediSearchColumnHandle COL1 = new RediSearchColumnHandle("col1", BIGINT, Field.Type.NUMERIC,
+	private static final RediSearchColumnHandle COL1 = new RediSearchColumnHandle("col1", BIGINT, RediSearchFieldType.NUMERIC,
 			false, true);
 	private static final RediSearchColumnHandle COL2 = new RediSearchColumnHandle("col2", createUnboundedVarcharType(),
-			Field.Type.TAG, false, true);
+			RediSearchFieldType.TAG, false, true);
 
 	@Test
 	public void testBuildQuery() {
@@ -35,7 +34,7 @@ public class TestQueryBuilder {
 
 		String query = new RediSearchQueryBuilder().buildQuery(tupleDomain);
 		String expected = "((@col1:[(100.0 inf] @col1:[-inf 200.0]) @col2:{a\\ value})";
-		assertEquals(query, expected);
+		assertThat(query).isEqualTo(expected);
 	}
 
 	@Test
@@ -45,7 +44,7 @@ public class TestQueryBuilder {
 						equal(createUnboundedVarcharType(), utf8Slice("world"))), false)));
 		String query = new RediSearchQueryBuilder().buildQuery(tupleDomain);
 		String expected = "@col2:{world | hello}";
-		assertEquals(query, expected);
+		assertThat(query).isEqualTo(expected);
 
 	}
 
@@ -56,7 +55,7 @@ public class TestQueryBuilder {
 
 		String query = new RediSearchQueryBuilder().buildQuery(tupleDomain);
 		String expected = "(@col1:[-inf (100.0]|@col1:[(200.0 inf])";
-		assertEquals(query, expected);
+		assertThat(query).isEqualTo(expected);
 	}
 
 	@Test
@@ -66,12 +65,12 @@ public class TestQueryBuilder {
 
 		String query = new RediSearchQueryBuilder().buildQuery(tupleDomain);
 		String expected = "@col1:[(200.0 inf]";
-		assertEquals(query, expected);
+		assertThat(query).isEqualTo(expected);
 	}
 
 	@Test
 	public void testBuildQueryInDouble() {
-		RediSearchColumnHandle orderkey = new RediSearchColumnHandle("orderkey", DoubleType.DOUBLE, Field.Type.NUMERIC,
+		RediSearchColumnHandle orderkey = new RediSearchColumnHandle("orderkey", DoubleType.DOUBLE, RediSearchFieldType.NUMERIC,
 				false, true);
 		ValueSet values = ValueSet.ofRanges(equal(DoubleType.DOUBLE, 1.0), equal(DoubleType.DOUBLE, 2.0),
 				equal(DoubleType.DOUBLE, 3.0));
@@ -79,7 +78,7 @@ public class TestQueryBuilder {
 				.withColumnDomains(ImmutableMap.of(orderkey, Domain.create(values, false)));
 		String query = new RediSearchQueryBuilder().buildQuery(tupleDomain);
 		String expected = "(@orderkey:[1.0 1.0]|@orderkey:[2.0 2.0]|@orderkey:[3.0 3.0])";
-		assertEquals(query, expected);
+		assertThat(query).isEqualTo(expected);
 	}
 
 }

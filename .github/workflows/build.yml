@@ -8,4 +8,4 @@ jobs:
     name: 'Build'
     uses: redis-field-engineering/redis-github-workflows/.github/workflows/build-maven.yml@main
     with:
-      java-version: 17
+      java-version: 25

@@ -8,23 +8,22 @@ import static java.util.function.Function.identity;
 import java.util.Map;
 import java.util.Optional;
 
-import com.redis.lettucemod.search.Field;
 
 import io.trino.spi.connector.ColumnMetadata;
 import io.trino.spi.type.Type;
 
 enum RediSearchBuiltinField {
 
-	KEY("__key", VARCHAR, Field.Type.TAG);
+	KEY("__key", VARCHAR, RediSearchFieldType.TAG);
 
 	private static final Map<String, RediSearchBuiltinField> COLUMNS_BY_NAME = stream(values())
 			.collect(toImmutableMap(RediSearchBuiltinField::getName, identity()));
 
 	private final String name;
 	private final Type type;
-	private final Field.Type fieldType;
+	private final RediSearchFieldType fieldType;
 
-	RediSearchBuiltinField(String name, Type type, Field.Type fieldType) {
+	RediSearchBuiltinField(String name, Type type, RediSearchFieldType fieldType) {
 		this.name = name;
 		this.type = type;
 		this.fieldType = fieldType;
@@ -46,7 +45,7 @@ enum RediSearchBuiltinField {
 		return type;
 	}
 
-	public Field.Type getFieldType() {
+	public RediSearchFieldType getFieldType() {
 		return fieldType;
 	}
 

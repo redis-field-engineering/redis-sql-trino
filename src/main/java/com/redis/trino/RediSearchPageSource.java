@@ -27,48 +27,34 @@ import static com.google.common.base.Verify.verify;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
-import com.redis.lettucemod.api.StatefulRedisModulesConnection;
-import com.redis.lettucemod.api.async.RedisModulesAsyncCommands;
-import com.redis.lettucemod.search.AggregateWithCursorResults;
 
 import io.airlift.log.Logger;
-import io.airlift.slice.Slice;
 import io.airlift.slice.SliceOutput;
-import io.lettuce.core.LettuceFutures;
-import io.lettuce.core.RedisFuture;
 import io.trino.spi.Page;
 import io.trino.spi.PageBuilder;
-import io.trino.spi.block.Block;
 import io.trino.spi.block.BlockBuilder;
-import io.trino.spi.connector.UpdatablePageSource;
+import io.trino.spi.connector.ConnectorPageSource;
+import io.trino.spi.connector.SourcePage;
 import io.trino.spi.type.Type;
-import io.trino.spi.type.VarcharType;
 
-public class RediSearchPageSource implements UpdatablePageSource {
+public class RediSearchPageSource implements ConnectorPageSource {
 
 	private static final Logger log = Logger.get(RediSearchPageSource.class);
 
 	private static final int ROWS_PER_REQUEST = 1024;
 
 	private final RediSearchPageSourceResultWriter writer = new RediSearchPageSourceResultWriter();
-	private final RediSearchSession session;
-	private final RediSearchTableHandle table;
 	private final String[] columnNames;
 	private final List<Type> columnTypes;
 	private final CursorIterator iterator;
-	private Map<String, Object> currentDoc;
+	private Map<String, String> currentDoc;
 	private long count;
 	private boolean finished;
 
@@ -76,8 +62,6 @@ public class RediSearchPageSource implements UpdatablePageSource {
 
 	public RediSearchPageSource(RediSearchSession session, RediSearchTableHandle table,
 			List<RediSearchColumnHandle> columns) {
-		this.session = session;
-		this.table = table;
 		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).toArray(String[]::new);
 		this.iterator = new CursorIterator(session, table, columnNames);
 		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType).collect(Collectors.toList());
@@ -101,12 +85,7 @@ public class RediSearchPageSource implements UpdatablePageSource {
 	}
 
 	@Override
-	public long getMemoryUsage() {
-		return 0L;
-	}
-
-	@Override
-	public Page getNextPage() {
+	public SourcePage getNextSourcePage() {
 		verify(pageBuilder.isEmpty());
 		count = 0;
 		for (int i = 0; i < ROWS_PER_REQUEST; i++) {
@@ -120,72 +99,20 @@ public class RediSearchPageSource implements UpdatablePageSource {
 			pageBuilder.declarePosition();
 			for (int column = 0; column < columnTypes.size(); column++) {
 				BlockBuilder output = pageBuilder.getBlockBuilder(column);
-				Object value = currentValue(columnNames[column]);
+				String value = currentValue(columnNames[column]);
 				if (value == null) {
 					output.appendNull();
 				} else {
-					writer.appendTo(columnTypes.get(column), value.toString(), output);
+					writer.appendTo(columnTypes.get(column), value, output);
 				}
 			}
 		}
 		Page page = pageBuilder.build();
 		pageBuilder.reset();
-		return page;
+		return SourcePage.create(page);
 	}
 
-	@Override
-	public void deleteRows(Block rowIds) {
-		List<String> docIds = new ArrayList<>(rowIds.getPositionCount());
-		for (int position = 0; position < rowIds.getPositionCount(); position++) {
-			docIds.add(VarcharType.VARCHAR.getSlice(rowIds, position).toStringUtf8());
-		}
-		session.deleteDocs(docIds);
-	}
-
-	@Override
-	public void updateRows(Page page, List<Integer> columnValueAndRowIdChannels) {
-		int rowIdChannel = columnValueAndRowIdChannels.get(columnValueAndRowIdChannels.size() - 1);
-		List<Integer> columnChannelMapping = columnValueAndRowIdChannels.subList(0,
-				columnValueAndRowIdChannels.size() - 1);
-		StatefulRedisModulesConnection<String, String> connection = session.getConnection();
-		connection.setAutoFlushCommands(false);
-		try {
-			RedisModulesAsyncCommands<String, String> commands = connection.async();
-			List<RedisFuture<?>> futures = new ArrayList<>();
-			for (int position = 0; position < page.getPositionCount(); position++) {
-				Block rowIdBlock = page.getBlock(rowIdChannel);
-				if (rowIdBlock.isNull(position)) {
-					continue;
-				}
-				String key = VarcharType.VARCHAR.getSlice(rowIdBlock, position).toStringUtf8();
-				Map<String, String> map = new HashMap<>();
-				for (int channel = 0; channel < columnChannelMapping.size(); channel++) {
-					RediSearchColumnHandle column = table.getUpdatedColumns().get(columnChannelMapping.get(channel));
-					Block block = page.getBlock(channel);
-					if (block.isNull(position)) {
-						continue;
-					}
-					String value = RediSearchPageSink.value(column.getType(), block, position);
-					map.put(column.getName(), value);
-				}
-				RedisFuture<Long> future = commands.hset(key, map);
-				futures.add(future);
-			}
-			connection.flushCommands();
-			LettuceFutures.awaitAll(connection.getTimeout(), futures.toArray(new RedisFuture[0]));
-		} finally {
-			connection.setAutoFlushCommands(true);
-		}
-	}
-
-	@Override
-	public CompletableFuture<Collection<Slice>> finish() {
-		CompletableFuture<Collection<Slice>> future = new CompletableFuture<>();
-		future.complete(Collections.emptyList());
-		return future;
-	}
-
-	private Object currentValue(String columnName) {
+	private String currentValue(String columnName) {
 		if (RediSearchBuiltinField.isKeyColumn(columnName)) {
 			return currentDoc.get(RediSearchBuiltinField.KEY.getName());
 		}
@@ -205,11 +132,11 @@ public class RediSearchPageSource implements UpdatablePageSource {
 		}
 	}
 
-	private static class CursorIterator implements Iterator<Map<String, Object>>, AutoCloseable {
+	private static class CursorIterator implements Iterator<Map<String, String>>, AutoCloseable {
 
 		private final RediSearchSession session;
 		private final RediSearchTableHandle table;
-		private Iterator<Map<String, Object>> iterator;
+		private Iterator<Map<String, String>> iterator;
 		private long cursor;
 
 		public CursorIterator(RediSearchSession session, RediSearchTableHandle table, String[] columnNames) {
@@ -218,8 +145,8 @@ public class RediSearchPageSource implements UpdatablePageSource {
 			read(session.aggregate(table, columnNames));
 		}
 
-		private void read(AggregateWithCursorResults<String> results) {
-			this.iterator = results.iterator();
+		private void read(RediSearchSession.AggregateResult results) {
+			this.iterator = results.getRows().iterator();
 			this.cursor = results.getCursor();
 		}
 
@@ -235,7 +162,7 @@ public class RediSearchPageSource implements UpdatablePageSource {
 		}
 
 		@Override
-		public Map<String, Object> next() {
+		public Map<String, String> next() {
 			return iterator.next();
 		}
 

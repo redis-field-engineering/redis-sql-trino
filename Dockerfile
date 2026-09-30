@@ -1,6 +1,6 @@
-ARG TRINO_VERSION=403
+ARG TRINO_VERSION=483
 
-FROM docker.io/library/maven:3.8.6-openjdk-18 AS builder
+FROM docker.io/library/maven:3.9-eclipse-temurin-25 AS builder
 WORKDIR /root/redis-sql-trino
 COPY . /root/redis-sql-trino
 ENV MAVEN_FAST_INSTALL="-DskipTests -Dair.check.skip-all=true -Dmaven.javadoc.skip=true -B -q -T C1"

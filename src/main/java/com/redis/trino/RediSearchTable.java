@@ -28,22 +28,21 @@ import static com.google.common.base.MoreObjects.toStringHelper;
 import java.util.List;
 
 import com.google.common.collect.ImmutableList;
-import com.redis.lettucemod.search.IndexInfo;
 
 public class RediSearchTable {
 
 	private final RediSearchTableHandle tableHandle;
 	private final List<RediSearchColumnHandle> columns;
-	private final IndexInfo indexInfo;
+	private final RediSearchIndexInfo indexInfo;
 
 	public RediSearchTable(RediSearchTableHandle tableHandle, List<RediSearchColumnHandle> columns,
-			IndexInfo indexInfo) {
+			RediSearchIndexInfo indexInfo) {
 		this.tableHandle = tableHandle;
 		this.columns = ImmutableList.copyOf(columns);
 		this.indexInfo = indexInfo;
 	}
 
-	public IndexInfo getIndexInfo() {
+	public RediSearchIndexInfo getIndexInfo() {
 		return indexInfo;
 	}
 

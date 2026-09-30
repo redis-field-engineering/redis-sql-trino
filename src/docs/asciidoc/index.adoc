@@ -142,7 +142,7 @@ Refer to the https://trino.io/docs/current/client/cli.html[Trino CLI documentati
 
 == Build
 
-Run these commands to build the Trino connector for RediSearch from source (requires Java 17+):
+Run these commands to build the Trino connector for RediSearch from source (requires Java 25+):
 
 [source,console,subs="verbatim,attributes"]
 ----
@@ -159,15 +159,15 @@ Follow these step-by-step instructions to deploy a single-node Trino server on U
 
 === Install Java
 
-Trino requires a 64-bit version of Java 17.
+Trino requires a 64-bit version of Java 25.
 It is recommended to use https://www.azul.com/downloads/?package=jdk[Azul Zulu] as the JDK.
 
 [source,console]
 ----
 $ java -version
-openjdk version "17.0.4.1" 2022-08-12 LTS
-OpenJDK Runtime Environment Zulu17.36+17-CA (build 17.0.4.1+1-LTS)
-OpenJDK 64-Bit Server VM Zulu17.36+17-CA (build 17.0.4.1+1-LTS, mixed mode, sharing)
+openjdk version "25.0.1" 2025-10-21 LTS
+OpenJDK Runtime Environment Zulu25.30+17-CA (build 25.0.1+8-LTS)
+OpenJDK 64-Bit Server VM Zulu25.30+17-CA (build 25.0.1+8-LTS, mixed mode, sharing)
 ----
 
 === Set up Trino
