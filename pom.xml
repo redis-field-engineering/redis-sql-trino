@@ -28,7 +28,6 @@
 
 		<lettucemod.version>3.7.3</lettucemod.version>
 		<lettuce.version>6.2.6.RELEASE</lettuce.version>
-		<testcontainers-redis.version>1.6.4</testcontainers-redis.version>
 		<!-- Override Trino 403's managed Testcontainers (too old for current Docker Desktop API) -->
 		<testcontainers.version>1.21.4</testcontainers.version>
 		<docker-java.version>3.4.2</docker-java.version>
@@ -335,72 +334,6 @@
 			<version>${lettucemod.version}</version>
 			<classifier>tests</classifier>
 			<scope>test</scope>
-		</dependency>
-
-		<dependency>
-			<groupId>com.redis.testcontainers</groupId>
-			<artifactId>testcontainers-redis</artifactId>
-			<version>${testcontainers-redis.version}</version>
-			<scope>test</scope>
-			<exclusions>
-				<exclusion>
-					<groupId>org.testcontainers</groupId>
-					<artifactId>testcontainers</artifactId>
-				</exclusion>
-				<exclusion>
-					<groupId>org.slf4j</groupId>
-					<artifactId>slf4j-api</artifactId>
-				</exclusion>
-				<exclusion>
-					<groupId>com.fasterxml.jackson.core</groupId>
-					<artifactId>jackson-databind</artifactId>
-				</exclusion>
-			</exclusions>
-		</dependency>
-
-		<dependency>
-			<groupId>com.redis.testcontainers</groupId>
-			<artifactId>testcontainers-redis-junit</artifactId>
-			<version>${testcontainers-redis.version}</version>
-			<scope>test</scope>
-			<exclusions>
-				<exclusion>
-					<groupId>org.hamcrest</groupId>
-					<artifactId>hamcrest</artifactId>
-				</exclusion>
-				<exclusion>
-					<groupId>org.testcontainers</groupId>
-					<artifactId>testcontainers</artifactId>
-				</exclusion>
-				<exclusion>
-					<groupId>org.testcontainers</groupId>
-					<artifactId>junit-jupiter</artifactId>
-				</exclusion>
-				<exclusion>
-					<groupId>org.junit.jupiter</groupId>
-					<artifactId>junit-jupiter-engine</artifactId>
-				</exclusion>
-				<exclusion>
-					<groupId>org.junit.jupiter</groupId>
-					<artifactId>junit-jupiter-api</artifactId>
-				</exclusion>
-				<exclusion>
-					<groupId>org.junit.jupiter</groupId>
-					<artifactId>junit-jupiter-params</artifactId>
-				</exclusion>
-				<exclusion>
-					<groupId>org.junit.jupiter</groupId>
-					<artifactId>junit-jupiter</artifactId>
-				</exclusion>
-				<exclusion>
-					<groupId>org.slf4j</groupId>
-					<artifactId>slf4j-api</artifactId>
-				</exclusion>
-				<exclusion>
-					<groupId>com.fasterxml.jackson.core</groupId>
-					<artifactId>jackson-databind</artifactId>
-				</exclusion>
-			</exclusions>
 		</dependency>
 
 		<dependency>
