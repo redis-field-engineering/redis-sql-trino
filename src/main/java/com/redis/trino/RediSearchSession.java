@@ -26,7 +26,6 @@ package com.redis.trino;
 import static com.google.common.base.Throwables.throwIfInstanceOf;
 import static com.google.common.base.Verify.verify;
 import static com.redis.trino.RediSearchErrorCode.REDISEARCH_INDEX_NOT_READY;
-import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static java.lang.String.format;
@@ -304,10 +303,6 @@ public class RediSearchSession {
             }
         }
         return tableName;
-    }
-
-    public void dropColumn(SchemaTableName schemaTableName, String columnName) {
-        throw new TrinoException(NOT_SUPPORTED, "This connector does not support dropping columns");
     }
 
     /**

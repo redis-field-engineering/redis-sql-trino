@@ -1,9 +1,0 @@
-connector.name=redisearch
-redisearch.uri=${REDISEARCH_URI}
-redisearch.username=${REDISEARCH_USERNAME}
-redisearch.password=${REDISEARCH_PASSWORD}
-redisearch.cluster=${REDISEARCH_CLUSTER}
-redisearch.cacert-path=${REDISEARCH_CACERT_PATH}
-redisearch.key-path=${REDISEARCH_KEY_PATH}
-redisearch.key-password=${REDISEARCH_KEY_PASSWORD}
-redisearch.cert-path=${REDISEARCH_CERT_PATH}

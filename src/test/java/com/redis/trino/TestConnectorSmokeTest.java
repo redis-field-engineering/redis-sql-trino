@@ -1,10 +1,11 @@
 package com.redis.trino;
 
+import static io.trino.testing.assertions.Assert.assertEventually;
 import static io.trino.tpch.TpchTable.CUSTOMER;
 import static io.trino.tpch.TpchTable.NATION;
 import static io.trino.tpch.TpchTable.ORDERS;
 import static io.trino.tpch.TpchTable.REGION;
-import static java.util.Objects.requireNonNull;
+import static java.lang.String.format;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.abort;
 
@@ -12,8 +13,6 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
-
-import com.google.common.base.Throwables;
 
 import io.airlift.log.Logger;
 import io.lettuce.core.ScriptOutputType;
@@ -24,8 +23,6 @@ import io.lettuce.core.search.arguments.CreateArgs.TargetType;
 import io.lettuce.core.search.arguments.NumericFieldArgs;
 import io.lettuce.core.search.arguments.TagFieldArgs;
 import io.lettuce.core.search.arguments.TextFieldArgs;
-import io.trino.spi.TrinoException;
-import io.trino.sql.parser.ParsingException;
 import io.trino.testing.BaseConnectorSmokeTest;
 import io.trino.testing.QueryRunner;
 import io.trino.testing.TestingConnectorBehavior;
@@ -204,31 +201,13 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 		assertThat(keys.get(0)).startsWith(prefix);
 	}
 
-	static RuntimeException getTrinoExceptionCause(Throwable e) {
-		return Throwables.getCausalChain(e).stream().filter(TestConnectorSmokeTest::isTrinoException).findFirst()
-				.map(RuntimeException.class::cast)
-				.orElseThrow(() -> new IllegalArgumentException("Exception does not have TrinoException cause", e));
-	}
-
-	private static boolean isTrinoException(Throwable exception) {
-		requireNonNull(exception, "exception is null");
-
-		if (exception instanceof TrinoException || exception instanceof ParsingException) {
-			return true;
-		}
-
-		if (exception.getClass().getName().equals("io.trino.client.FailureInfo$FailureException")) {
-			try {
-				String originalClassName = exception.toString().split(":", 2)[0];
-				Class<? extends Throwable> originalClass = Class.forName(originalClassName).asSubclass(Throwable.class);
-				return TrinoException.class.isAssignableFrom(originalClass)
-						|| ParsingException.class.isAssignableFrom(originalClass);
-			} catch (ClassNotFoundException e) {
-				return false;
-			}
-		}
-
-		return false;
+	@Test
+	public void testCreateTableAsSelectRollback() {
+		String table = "test_ctas_rollback";
+		assertQueryFails(format("CREATE TABLE %s AS SELECT name, 1 / (nationkey - nationkey) AS x FROM tpch.tiny.nation",
+				table), "Division by zero");
+		// Trino rolls back the failed query's transaction asynchronously, which drops the index beginCreateTable created
+		assertEventually(() -> assertThat(redisearch.getConnection().sync().ftList()).doesNotContain(table));
 	}
 
 	@Test
@@ -259,6 +238,31 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 					"Index bulkidx is still being built \\(\\d+% indexed\\), so its results would be incomplete.*");
 			redisearch.awaitIndexed(index);
 			assertQuery("SELECT count(*) FROM " + index, "VALUES 50000");
+		} finally {
+			redis.ftDropindex(index, true);
+		}
+	}
+
+	@Test
+	public void testAddColumnRebuildsIndex() {
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		String index = "alteridx";
+		redis.eval("for i = 1, 50000 do redis.call('HSET', 'alter:' .. i, 'id', i) end return 1", ScriptOutputType.INTEGER);
+		redis.ftCreate(index, CreateArgs.builder().withPrefix("alter:").build(),
+				List.of(NumericFieldArgs.builder().name("id").build()));
+		redisearch.awaitIndexed(index);
+		try {
+			// FT.ALTER ... SCHEMA ADD reindexes the existing documents in the background; reads during that can miss
+			// documents or return some twice
+			getQueryRunner().execute("ALTER TABLE " + index + " ADD COLUMN extra varchar");
+			assertQueryFails("SELECT count(*) FROM " + index,
+					"Index alteridx is still being built \\(\\d+% indexed\\), so its results would be incomplete.*");
+			redisearch.awaitIndexed(index);
+			assertQuery("SELECT count(*) FROM " + index, "VALUES 50000");
+			assertQuery("SELECT count(*) FROM " + index + " WHERE extra IS NULL", "VALUES 50000");
+			assertUpdate("INSERT INTO " + index + " (id, extra) VALUES (50001, 'x')", 1);
+			assertQuery("SELECT count(*) FROM " + index + " WHERE extra = 'x'", "VALUES 1");
+			assertQuery("SELECT count(*) FROM " + index, "VALUES 50001");
 		} finally {
 			redis.ftDropindex(index, true);
 		}

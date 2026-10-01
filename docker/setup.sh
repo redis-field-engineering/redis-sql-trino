@@ -13,28 +13,29 @@ envsubst() {
   }'
 }
 
-REDISEARCH_ENVS=0
-if [ ! -z "${REDISEARCH_URI}" ] || [ ! -z "${REDISEARCH_USERNAME}" ] || [ ! -z "${REDISEARCH_PASSWORD}" ] || [ ! -z "${REDISEARCH_CLUSTER}" ] \
-|| [ ! -z "${REDISEARCH_CACERT_PATH}" ] || [ ! -z "${REDISEARCH_KEY_PATH}" ] || [ ! -z "${REDISEARCH_KEY_PASSWORD}" ] || [ ! -z "${REDISEARCH_CERT_PATH}" ]; then
-  REDISEARCH_ENVS=1
-fi
+# REDISEARCH_<NAME> sets redisearch.<name>, e.g. REDISEARCH_CACERT_PATH sets redisearch.cacert-path.
+# Unset variables are left out so the connector's defaults apply.
+REDISEARCH_PROPERTIES="USERNAME PASSWORD CLUSTER CACERT_PATH CERT_PATH KEY_PATH KEY_PASSWORD"
 
-export REDISEARCH_URI=${REDISEARCH_URI:-redis://host.docker.internal:6379}
-export REDISEARCH_USERNAME=${REDISEARCH_USERNAME}
-export REDISEARCH_PASSWORD=${REDISEARCH_PASSWORD}
-export REDISEARCH_CLUSTER=${REDISEARCH_CLUSTER:-false}
-export REDISEARCH_CACERT_PATH=${REDISEARCH_CACERT_PATH}
-export REDISEARCH_KEY_PATH=${REDISEARCH_KEY_PATH}
-export REDISEARCH_KEY_PASSWORD=${REDISEARCH_KEY_PASSWORD}
-export REDISEARCH_CERT_PATH=${REDISEARCH_CERT_PATH}
+redisearch_catalog() {
+  echo "connector.name=redisearch"
+  echo "redisearch.uri=${REDISEARCH_URI:-redis://host.docker.internal:6379}"
+  for name in $REDISEARCH_PROPERTIES; do
+    local var=REDISEARCH_$name property=${name,,}
+    if [ -n "${!var}" ]; then
+      echo "redisearch.${property//_/-}=${!var}"
+    fi
+  done
+}
 
-if [ -f /tmp/redisearch.properties.template ] && [ $REDISEARCH_ENVS -eq 1 ]; then
-  envsubst < /tmp/redisearch.properties.template > /etc/trino/catalog/redisearch.properties
-fi
-
-export TRINO_NODE_ID=$(cat /proc/sys/kernel/random/uuid)
-echo "TRINO_NODE_ID=$TRINO_NODE_ID"
-envsubst < /tmp/trino.node.properties.template > /etc/trino/node.properties
+# Keep the image's (or a mounted) catalog file unless a REDISEARCH_* variable is set
+for name in URI $REDISEARCH_PROPERTIES; do
+  var=REDISEARCH_$name
+  if [ -n "${!var}" ]; then
+    redisearch_catalog > /etc/trino/catalog/redisearch.properties
+    break
+  fi
+done
 
 export TRINO_DISCOVERY_URI=${TRINO_DISCOVERY_URI:-http://localhost:8080}
 if [[ -z "${TRINO_NODE_TYPE}" ]]; then
@@ -45,11 +46,10 @@ elif [[ $TRINO_NODE_TYPE == "coordinator" ]]; then
 elif [[ $TRINO_NODE_TYPE == "worker" ]]; then
     echo "Configuring a worker Trino node"
     envsubst < /tmp/worker.config.properties.template > /etc/trino/config.properties
-else 
+else
     printf '%s\n' "Invalid TRINO_NODE_TYPE parameter: $TRINO_NODE_TYPE" >&2
     exit 1
 fi
 
-chown -R trino:trino /etc/trino
-
-/usr/lib/trino/bin/run-trino
+# run-trino sets node.id to the container hostname
+exec /usr/lib/trino/bin/run-trino

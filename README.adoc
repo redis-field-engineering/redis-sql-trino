@@ -168,7 +168,7 @@ docker exec -it trino trino --catalog redisearch --schema default
 
 On Linux, add `--add-host=host.docker.internal:host-gateway` to reach a Redis running on the host.
 
-The container writes the `redisearch` catalog from these environment variables:
+When any of these environment variables is set, the container writes the `redisearch` catalog from them; unset ones get the default shown.
 
 [cols="2,2,2"]
 |===
@@ -283,7 +283,6 @@ These queries return wrong results or fail:
 * `MERGE \... WHEN NOT MATCHED THEN INSERT` fails unless the column list includes the table's last column (https://github.com/{project-owner}/{project-name}/issues/42[#42]).
 * `CREATE TABLE AS SELECT` with BOOLEAN or DATE values succeeds, but those rows can't be queried. Cast them to INTEGER or VARCHAR first (https://github.com/{project-owner}/{project-name}/issues/43[#43]).
 * `INSERT` into a JSON index writes a hash the index never sees (https://github.com/{project-owner}/{project-name}/issues/44[#44]).
-* A scan without a SQL `LIMIT` stops at `redisearch.default-limit` documents, 10,000 by default (https://github.com/{project-owner}/{project-name}/issues/35[#35]).
 
 See the https://{project-owner}.github.io/{project-name}/#sql-support[SQL support] documentation for column types in `CREATE TABLE` and more detail on each statement.
 

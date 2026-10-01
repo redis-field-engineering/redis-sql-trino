@@ -49,18 +49,12 @@ public class RediSearchIndexInfo {
 	}
 
 	public static class Field {
-		private final String identifier;
 		private final String attribute;
 		private final RediSearchFieldType type;
 
-		public Field(String identifier, String attribute, RediSearchFieldType type) {
-			this.identifier = requireNonNull(identifier, "identifier is null");
+		public Field(String attribute, RediSearchFieldType type) {
 			this.attribute = requireNonNull(attribute, "attribute is null");
 			this.type = requireNonNull(type, "type is null");
-		}
-
-		public String getIdentifier() {
-			return identifier;
 		}
 
 		/**
@@ -137,7 +131,7 @@ public class RediSearchIndexInfo {
 				Map<String, Object> attributeMap = toMap((List<?>) attribute);
 				String identifier = string(attributeMap.get("identifier"));
 				String alias = string(attributeMap.get("attribute"));
-				fields.add(new Field(identifier, alias == null ? identifier : alias,
+				fields.add(new Field(alias == null ? identifier : alias,
 						RediSearchFieldType.of(string(attributeMap.get("type")))));
 			}
 		}
