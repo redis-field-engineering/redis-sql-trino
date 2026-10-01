@@ -82,14 +82,16 @@ public class RediSearchLoader implements AutoCloseable {
 		connection.close();
 	}
 
+	// The field types CREATE TABLE uses for these column types, so tests read values the way the connector writes them
 	private static FieldArgs field(String name, Type type) {
-		if (type instanceof VarcharType || type == BOOLEAN || type == DATE) {
+		switch (RediSearchSession.toFieldType(type)) {
+		case TAG:
 			return TagFieldArgs.builder().name(name).build();
-		}
-		if (type == BIGINT || type == INTEGER || type == DOUBLE) {
+		case NUMERIC:
 			return NumericFieldArgs.builder().name(name).build();
+		default:
+			throw new IllegalArgumentException("Unhandled type: " + type);
 		}
-		throw new IllegalArgumentException("Unhandled type: " + type);
 	}
 
 	private static String convertValue(Object value, Type type) {

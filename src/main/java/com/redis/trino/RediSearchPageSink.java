@@ -31,6 +31,7 @@ import static io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
 import static io.trino.spi.type.Timestamps.MICROSECONDS_PER_MILLISECOND;
 import static io.trino.spi.type.Timestamps.PICOSECONDS_PER_MILLISECOND;
 import static io.trino.spi.type.Timestamps.roundDiv;
+import static io.trino.spi.type.UuidType.trinoUuidToJavaUuid;
 import static java.lang.Float.intBitsToFloat;
 import static java.lang.Math.floorDiv;
 import static java.lang.Math.toIntExact;
@@ -75,6 +76,7 @@ import io.trino.spi.type.TimeType;
 import io.trino.spi.type.TimestampWithTimeZoneType;
 import io.trino.spi.type.TinyintType;
 import io.trino.spi.type.Type;
+import io.trino.spi.type.UuidType;
 import io.trino.spi.type.VarbinaryType;
 import io.trino.spi.type.VarcharType;
 
@@ -191,6 +193,9 @@ public class RediSearchPageSink implements ConnectorPageSink {
 		}
 		if (type instanceof DecimalType) {
 			return readBigDecimal((DecimalType) type, block, position).toPlainString();
+		}
+		if (type.equals(UuidType.UUID)) {
+			return trinoUuidToJavaUuid(type.getSlice(block, position)).toString();
 		}
 		throw new TrinoException(NOT_SUPPORTED, "unsupported type: " + type);
 	}

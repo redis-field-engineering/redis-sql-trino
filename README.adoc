@@ -411,11 +411,7 @@ Trino evaluates `LIKE`, `IS NULL`, `IS NOT NULL`, and comparisons other than `=`
 
 === Known limitations
 
-These queries return wrong results or fail:
-
-* `MERGE \... WHEN NOT MATCHED THEN INSERT` fails unless the column list includes the table's last column (https://github.com/{project-owner}/{project-name}/issues/42[#42]).
-* `CREATE TABLE AS SELECT` with BOOLEAN or DATE values succeeds, but those rows can't be queried. Cast them to INTEGER or VARCHAR first (https://github.com/{project-owner}/{project-name}/issues/43[#43]).
-* `INSERT` into a JSON index writes a hash the index never sees (https://github.com/{project-owner}/{project-name}/issues/44[#44]).
+Queries known to return wrong results or fail are tracked as https://github.com/{project-owner}/{project-name}/issues?q=is%3Aissue+is%3Aopen+label%3Abug[open issues labeled bug].
 
 See the https://{project-owner}.github.io/{project-name}/#sql-support[SQL support] documentation for column types in `CREATE TABLE` and more detail on each statement.
 
