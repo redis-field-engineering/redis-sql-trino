@@ -45,10 +45,6 @@ public class RediSearchTranslator {
 		this.config = requireNonNull(config, "config is null");
 	}
 
-	public RediSearchConfig getConfig() {
-		return config;
-	}
-
 	public static class Aggregation {
 		private final String index;
 		private final String query;

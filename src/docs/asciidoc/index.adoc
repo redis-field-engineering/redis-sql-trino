@@ -282,10 +282,6 @@ These queries return wrong results or fail.
 |
 |{project-url}/issues/44[#44]
 
-|A scan without a SQL `LIMIT` stops at `redisearch.default-limit` documents (10,000 by default).
-|Raise `redisearch.default-limit`.
-|{project-url}/issues/35[#35]
-
 |Queries return partial results while an index is still being built.
 |Wait for `FT.INFO` to report `indexing` as `0`.
 |{project-url}/issues/36[#36]
@@ -401,8 +397,7 @@ Create a JVM config file.
 -XX:PerBytecodeRecompilationCutoff=10000
 -Djdk.attach.allowAttachSelf=true
 -Djdk.nio.maxCachedBufferSize=2000000
--XX:+UnlockDiagnosticVMOptions
--XX:+UseAESCTRIntrinsics
+--add-modules=jdk.incubator.vector
 ----
 
 Create a config properties file.
