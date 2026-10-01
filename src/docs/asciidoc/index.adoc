@@ -145,6 +145,11 @@ A table has these columns:
 |VARCHAR
 |===
 
+When `FT.CREATE` covers keys that already exist, Redis indexes them in the background, and until it finishes the index holds only some of the documents.
+Queries on such an index fail with `REDISEARCH_INDEX_NOT_READY` (`Index beers is still being built (42% indexed) \...`) instead of returning partial results.
+Retry once `FT.INFO` reports `indexing` as `0`.
+`CREATE TABLE` creates its index with `SKIPINITIALSCAN`, so its tables are never in this state.
+
 === Statements
 
 [cols="1,2"]
@@ -285,10 +290,6 @@ These queries return wrong results or fail.
 |A scan without a SQL `LIMIT` stops at `redisearch.default-limit` documents (10,000 by default).
 |Raise `redisearch.default-limit`.
 |{project-url}/issues/35[#35]
-
-|Queries return partial results while an index is still being built.
-|Wait for `FT.INFO` to report `indexing` as `0`.
-|{project-url}/issues/36[#36]
 |===
 
 
