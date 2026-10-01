@@ -178,14 +178,10 @@ The container writes the `redisearch` catalog from these environment variables:
 |`REDISEARCH_USERNAME` |`redisearch.username` |
 |`REDISEARCH_PASSWORD` |`redisearch.password` |
 |`REDISEARCH_CLUSTER` |`redisearch.cluster` |`false`
-|`REDISEARCH_RESP2` |`redisearch.resp2` |`false`
-|`REDISEARCH_INSECURE` |`redisearch.insecure` |`false`
 |`REDISEARCH_CACERT_PATH` |`redisearch.cacert-path` |
 |`REDISEARCH_CERT_PATH` |`redisearch.cert-path` |
 |`REDISEARCH_KEY_PATH` |`redisearch.key-path` |
 |`REDISEARCH_KEY_PASSWORD` |`redisearch.key-password` |
-|`REDISEARCH_CASE_INSENSITIVE_NAMES` |`redisearch.case-insensitive-names` |`false`
-|`REDISEARCH_CURSOR_COUNT` |`redisearch.cursor-count` |`1000`
 |===
 
 The container runs a single-node Trino cluster by default.
