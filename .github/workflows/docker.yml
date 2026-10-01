@@ -11,33 +11,19 @@ on:
         required: false
         type: string
     secrets:
-      github-token:
-        required: true
       docker-username:
         required: true
       docker-password:
         required: true
 
 # Inlined from redis-github-workflows docker.yml, which pins Node 20 actions
-# that GitHub has deprecated.
+# that GitHub has deprecated. build-push-action builds from the Git context, so no checkout is
+# needed, and the Dockerfile has no RUN in its per-platform stage, so no QEMU is needed either.
 jobs:
   docker:
     name: 'Docker'
     runs-on: ubuntu-latest
     steps:
-      - name: Cancel previous run
-        uses: styfle/cancel-workflow-action@0.13.1
-        with:
-          access_token: ${{ secrets.github-token }}
-
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
