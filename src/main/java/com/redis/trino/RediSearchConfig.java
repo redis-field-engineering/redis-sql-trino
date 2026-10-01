@@ -32,12 +32,14 @@ import jakarta.validation.constraints.Pattern;
 import io.airlift.configuration.Config;
 import io.airlift.configuration.ConfigDescription;
 import io.airlift.configuration.ConfigSecuritySensitive;
+import io.airlift.configuration.DefunctConfig;
 
+// redisearch.default-limit capped every scan without a SQL LIMIT, silently truncating the rows Trino aggregated and
+// joined over
+@DefunctConfig("redisearch.default-limit")
 public class RediSearchConfig {
 
     public static final String DEFAULT_SCHEMA = "default";
-
-    public static final long DEFAULT_LIMIT = 10000;
 
     public static final long DEFAULT_CURSOR_COUNT = 1000;
 
@@ -69,8 +71,6 @@ public class RediSearchConfig {
 
     private boolean caseInsensitiveNames;
 
-    private long defaultLimit = DEFAULT_LIMIT;
-
     private long cursorCount = DEFAULT_CURSOR_COUNT;
 
     private long tableCacheExpiration = DEFAULT_TABLE_CACHE_EXPIRATION.toSeconds();
@@ -85,17 +85,6 @@ public class RediSearchConfig {
     @Config("redisearch.cursor-count")
     public RediSearchConfig setCursorCount(long cursorCount) {
         this.cursorCount = cursorCount;
-        return this;
-    }
-
-    public long getDefaultLimit() {
-        return defaultLimit;
-    }
-
-    @Config("redisearch.default-limit")
-    @ConfigDescription("Default search limit number to use")
-    public RediSearchConfig setDefaultLimit(long defaultLimit) {
-        this.defaultLimit = defaultLimit;
         return this;
     }
 
