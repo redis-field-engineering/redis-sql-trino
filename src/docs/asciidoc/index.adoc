@@ -145,6 +145,12 @@ A table has these columns:
 |VARCHAR
 |===
 
+[[index-not-ready]]
+After `FT.CREATE` over existing keys, or `ALTER TABLE \... ADD COLUMN` (which runs `FT.ALTER`), Redis indexes the documents in the background.
+Until it finishes, queries on that index fail with `REDISEARCH_INDEX_NOT_READY` (`Index beers is still being built (42% indexed) \...`) instead of returning incomplete results.
+Retry once `FT.INFO` reports `indexing` as `0`.
+`CREATE TABLE` creates its index with `SKIPINITIALSCAN`, so a new table can be queried right away.
+
 === Statements
 
 [cols="1,2"]
@@ -184,6 +190,7 @@ Each row is a new hash with key `<prefix><ULID>`, where `<prefix>` is the index'
 
 |`ALTER TABLE \... ADD COLUMN`
 |Adds a field to the index with `FT.ALTER`. Columns are always added at the end.
+Queries on the table <<index-not-ready,fail>> until Redis finishes reindexing its documents.
 
 |`DROP TABLE`
 |Drops the index *and deletes its documents* (`FT.DROPINDEX \... DD`).
@@ -281,10 +288,6 @@ These queries return wrong results or fail.
 |`INSERT` into a JSON index writes a hash the index never sees. `UPDATE` and `MERGE` on a JSON index fail.
 |
 |{project-url}/issues/44[#44]
-
-|Queries return partial results while an index is still being built.
-|Wait for `FT.INFO` to report `indexing` as `0`.
-|{project-url}/issues/36[#36]
 |===
 
 
