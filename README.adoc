@@ -21,7 +21,7 @@
 '''
 
 image:https://github.com/{project-owner}/{project-name}/actions/workflows/early-access.yml/badge.svg["Build Status", link="https://github.com/{project-owner}/{project-name}/actions/workflows/early-access.yml"]
-image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg?token={codecov-token}["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
+image:https://codecov.io/gh/{project-owner}/{project-name}/branch/master/graph/badge.svg["Coverage", link="https://codecov.io/gh/{project-owner}/{project-name}"]
 
 {name} lets you easily integrate with visualization frameworks — like Tableau and SuperSet — and platforms that support JDBC-compatible databases (e.g., Mulesoft).
 Query support includes SELECT statements across secondary indexes on both Redis hashes & JSON, aggregations (e.g., count, min, max, avg), ordering, and more.
@@ -64,6 +64,9 @@ Redis deployments that include the Query Engine:
 
 |Trino
 |483
+
+|Redis
+|8.x with the Query Engine (tested with 8.4)
 
 |Java (build and runtime)
 |25
@@ -151,6 +154,43 @@ If you run Kubernetes, see the https://trino.io/docs/current/installation/kubern
 
 Next, you'll need to install the {name} plugin and configure it.
 See our documentation for https://{project-owner}.github.io/{project-name}/#redisearch-connector[plugin installation] and https://{project-owner}.github.io/{project-name}/#configuration[plugin configuration].
+
+=== Docker image
+
+The `fieldengineering/redis-sql-trino` image is `trinodb/trino:483` with the connector installed, for `linux/amd64` and `linux/arm64`.
+The `early-access` tag is built from every push to `master`; `latest` and version tags are published with each release.
+
+[source,console]
+----
+docker run -d --name trino -p 8080:8080 -e REDISEARCH_URI=redis://host.docker.internal:6379 fieldengineering/redis-sql-trino:early-access
+docker exec -it trino trino --catalog redisearch --schema default
+----
+
+On Linux, add `--add-host=host.docker.internal:host-gateway` to reach a Redis running on the host.
+
+The container writes the `redisearch` catalog from these environment variables:
+
+[cols="2,2,2"]
+|===
+|Variable |Catalog property |Default
+
+|`REDISEARCH_URI` |`redisearch.uri` |`redis://host.docker.internal:6379`
+|`REDISEARCH_USERNAME` |`redisearch.username` |
+|`REDISEARCH_PASSWORD` |`redisearch.password` |
+|`REDISEARCH_CLUSTER` |`redisearch.cluster` |`false`
+|`REDISEARCH_RESP2` |`redisearch.resp2` |`false`
+|`REDISEARCH_INSECURE` |`redisearch.insecure` |`false`
+|`REDISEARCH_CACERT_PATH` |`redisearch.cacert-path` |
+|`REDISEARCH_CERT_PATH` |`redisearch.cert-path` |
+|`REDISEARCH_KEY_PATH` |`redisearch.key-path` |
+|`REDISEARCH_KEY_PASSWORD` |`redisearch.key-password` |
+|`REDISEARCH_CASE_INSENSITIVE_NAMES` |`redisearch.case-insensitive-names` |`false`
+|`REDISEARCH_CURSOR_COUNT` |`redisearch.cursor-count` |`1000`
+|`REDISEARCH_DEFAULT_LIMIT` |`redisearch.default-limit` |`10000`
+|===
+
+The container runs a single-node Trino cluster by default.
+For a multi-node cluster, set `TRINO_NODE_TYPE` to `coordinator` or `worker` on each container, and `TRINO_DISCOVERY_URI` to the coordinator's URL (default `http://localhost:8080`).
 
 === Redis installation
 

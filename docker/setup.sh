@@ -20,7 +20,7 @@ if [ ! -z "${REDISEARCH_URI}" ] || [ ! -z "${REDISEARCH_USERNAME}" ] || [ ! -z "
   REDISEARCH_ENVS=1
 fi
 
-export REDISEARCH_URI=${REDISEARCH_URI:-redis://docker.for.mac.host.internal:6379}
+export REDISEARCH_URI=${REDISEARCH_URI:-redis://host.docker.internal:6379}
 export REDISEARCH_USERNAME=${REDISEARCH_USERNAME}
 export REDISEARCH_PASSWORD=${REDISEARCH_PASSWORD}
 export REDISEARCH_RESP2=${REDISEARCH_RESP2:-false}
