@@ -11,4 +11,3 @@ redisearch.key-password=${REDISEARCH_KEY_PASSWORD}
 redisearch.cert-path=${REDISEARCH_CERT_PATH}
 redisearch.case-insensitive-names=${REDISEARCH_CASE_INSENSITIVE_NAMES}
 redisearch.cursor-count=${REDISEARCH_CURSOR_COUNT}
-redisearch.default-limit=${REDISEARCH_DEFAULT_LIMIT}

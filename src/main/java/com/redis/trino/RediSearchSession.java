@@ -52,7 +52,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.UncheckedExecutionException;
 import com.redis.trino.RediSearchTranslator.Aggregation;
-import com.redis.trino.RediSearchTranslator.Search;
 
 import io.airlift.log.Logger;
 import io.lettuce.core.AbstractRedisClient;
@@ -370,12 +369,6 @@ public class RediSearchSession {
             return DOUBLE;
         }
         return createUnboundedVarcharType();
-    }
-
-    public SearchReply<String> search(RediSearchTableHandle tableHandle, String[] columns) {
-        Search search = translator.search(tableHandle, columns);
-        log.info("Running %s", search);
-        return sync.ftSearch(search.getIndex(), search.getQuery(), search.getArgs());
     }
 
     /**
