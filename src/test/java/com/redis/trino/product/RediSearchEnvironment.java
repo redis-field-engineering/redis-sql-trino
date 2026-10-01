@@ -17,6 +17,8 @@ import org.testcontainers.trino.TrinoContainer;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
+import com.redis.trino.RediSearchServer;
+
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
@@ -104,6 +106,7 @@ public class RediSearchEnvironment extends ProductTestEnvironment {
 				List.of(TagFieldArgs.builder().name("id").build(), TextFieldArgs.builder().name("name").build(),
 						NumericFieldArgs.builder().name("abv").build(),
 						TagFieldArgs.builder().name("style_name").build()));
+		RediSearchServer.awaitIndexed(redis, "beers");
 		redis.hset("beer:1", Map.of("id", "1", "name", "Hocus Pocus", "abv", "4.5", "style_name",
 				"Light American Wheat Ale or Lager", "last_mod", "2010-07-22 20:00:20 UTC"));
 		redis.hset("beer:2", Map.of("id", "2", "name", "Grimm's Witbier", "abv", "5.0", "style_name",

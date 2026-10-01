@@ -116,6 +116,7 @@ public class TestCaseInsensitiveConnectorSmokeTest extends BaseConnectorSmokeTes
 		String index = "MixedCaseBeers";
 		redis.ftCreate(index, CreateArgs.builder().withPrefix(prefix).build(),
 				List.of(TagFieldArgs.builder().name("id").build(), TagFieldArgs.builder().name("name").build()));
+		redisearch.awaitIndexed(index);
 		getQueryRunner().execute(MessageFormat.format("SELECT * FROM {0}", index));
 		getQueryRunner().execute(MessageFormat.format("SELECT * FROM {0}", index.toLowerCase()));
 		getQueryRunner().execute(MessageFormat.format("SELECT * FROM {0}", index.toUpperCase()));

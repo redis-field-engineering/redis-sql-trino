@@ -93,18 +93,12 @@ public class RediSearchTranslator {
 		}
 		Optional<GroupBy> groupBy = queryBuilder.group(table);
 		groupBy.ifPresent(args::groupBy);
-		args.limit(0, limit(table));
+		// Only a pushed-down SQL LIMIT caps the results; otherwise the cursor streams every matching document
+		table.getLimit().ifPresent(limit -> args.limit(0, limit));
 		args.withCursor(WithCursor.of(config.getCursorCount() > 0 ? config.getCursorCount() : null));
 		List<RediSearchAggregationTerm> terms = table.getTermAggregations();
 		boolean global = groupBy.isPresent() && (terms == null || terms.isEmpty());
 		return new Aggregation(table.getIndex(), query, args.build(), global);
-	}
-
-	private long limit(RediSearchTableHandle tableHandle) {
-		if (tableHandle.getLimit().isPresent()) {
-			return tableHandle.getLimit().getAsLong();
-		}
-		return config.getDefaultLimit();
 	}
 
 }

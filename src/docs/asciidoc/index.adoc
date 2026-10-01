@@ -10,6 +10,7 @@ This guide provides documentation and usage information across the following top
 
 * <<Installation,Installation>>
 * <<Configuration,Configuration>>
+* <<sql-support,SQL support>>
 * <<Clients,Clients>>
 * <<Walkthrough,Walkthrough>>
 
@@ -52,13 +53,13 @@ redisearch.uri=redis://localhost:6379
 |Match index names case insensitively.
 |`false`
 
-|`redisearch.default-limit`
-|Max number of documents returned by FT.AGGREGATE when no limit is present in the SQL query.
-|`10000`
-
 |`redisearch.cursor-count`
 |Number of rows read during each https://redis.io/docs/stack/search/reference/aggregations/#cursor-api[aggregation cursor] fetch.
 |`1000`
+
+|`redisearch.table-cache-refresh`
+|Seconds an index's schema is cached. Indexes and fields created outside Trino can take this long to appear.
+|`60`
 |===
 
 .Redis connection properties
@@ -114,6 +115,180 @@ The RediSearch connector provides additional security options to support Redis s
 |`redisearch.cert-path`
 |X.509 certificate chain file to authenticate with (PEM format).
 |
+|===
+
+[[sql-support]]
+== SQL support
+
+=== Tables and columns
+
+Each Redis Query Engine index is a table in the `default` schema (see `redisearch.default-schema-name`).
+A table has these columns:
+
+* One per indexed field, named by its attribute (the `AS` name for JSON paths).
+* One per field that isn't indexed but appears in the first 10 documents returned by `FT.SEARCH <index> *`.
+* For JSON indexes, a `$` column holding the whole document as JSON text.
+* A hidden `__key` column holding the document's Redis key. Hidden columns are left out of `SELECT *`, so name it: `SELECT __key, * FROM beers`.
+
+[cols="1,1"]
+.Type mapping
+|===
+|Redis field type |Trino type
+
+|NUMERIC
+|DOUBLE
+
+|TAG, TEXT, GEO, GEOSHAPE, VECTOR
+|VARCHAR
+
+|Not indexed
+|VARCHAR
+|===
+
+=== Statements
+
+[cols="1,2"]
+.Supported statements
+|===
+|Statement |Notes
+
+|`SELECT`
+|All of Trino's query syntax, including joins (also across catalogs), subqueries, `WITH`, `UNION`, `DISTINCT`, `GROUP BY`, `ORDER BY` and window functions.
+<<pushdown,Pushdown>> describes which parts run in Redis.
+
+|`SHOW SCHEMAS`, `SHOW TABLES`, `SHOW COLUMNS`, `DESCRIBE`, `SHOW CREATE TABLE`, `information_schema`
+|`SHOW TABLES` lists the indexes returned by `FT._LIST`.
+
+|`EXPLAIN`
+|The table scan shows the filters, limit and aggregations sent to Redis.
+
+|`CREATE TABLE`
+|Creates a hash index named after the table, with key prefix `<table>:`. See <<create-table-types,column types>>.
+`IF NOT EXISTS` is supported.
+
+|`CREATE TABLE AS SELECT`
+|BOOLEAN and DATE values are written but not indexed ({project-url}/issues/43[#43]).
+
+|`INSERT`, `INSERT \... SELECT`
+|Hash indexes only ({project-url}/issues/44[#44]).
+Each row is a new hash with key `<prefix><ULID>`, where `<prefix>` is the index's first key prefix.
+
+|`UPDATE`
+|Hash indexes only. Setting a column to `NULL` removes the field from the hash.
+
+|`DELETE`
+|Deletes the matching keys, on hash and JSON indexes.
+
+|`MERGE`
+|Hash indexes only. A `WHEN NOT MATCHED THEN INSERT` column list must include the table's last column ({project-url}/issues/42[#42]).
+
+|`ALTER TABLE \... ADD COLUMN`
+|Adds a field to the index with `FT.ALTER`. Columns are always added at the end.
+
+|`DROP TABLE`
+|Drops the index *and deletes its documents* (`FT.DROPINDEX \... DD`).
+|===
+
+These statements fail with a `This connector does not support \...` error:
+
+* `CREATE SCHEMA`, `DROP SCHEMA`, `ALTER SCHEMA`
+* `CREATE OR REPLACE TABLE`
+* `ALTER TABLE \... RENAME TO`, `DROP COLUMN`, `RENAME COLUMN`, `ALTER COLUMN \... SET DATA TYPE`
+* `TRUNCATE`
+* `COMMENT ON`
+* `CREATE VIEW`, `CREATE MATERIALIZED VIEW`
+* Queries on table versions (`FOR VERSION AS OF`, `FOR TIMESTAMP AS OF`)
+
+Writes also fail when fault-tolerant execution is enabled (`retry-policy` other than `NONE`).
+
+[[create-table-types]]
+[cols="2,1,2"]
+.Column types in CREATE TABLE
+|===
+|Trino type |Index field |Read back as
+
+|BIGINT, INTEGER, SMALLINT, TINYINT, DOUBLE, REAL, DECIMAL
+|NUMERIC
+|DOUBLE
+
+|BOOLEAN, DATE, TIMESTAMP(3), TIMESTAMP(3) WITH TIME ZONE
+|NUMERIC
+|DOUBLE. Timestamps are stored as epoch milliseconds.
+
+|VARCHAR, CHAR
+|TAG
+|VARCHAR
+
+|UUID
+|TAG
+|VARCHAR. `CREATE TABLE AS SELECT` with UUID values fails ({project-url}/issues/43[#43]).
+|===
+
+Other types, such as ARRAY, MAP, ROW, VARBINARY and TIME, are rejected.
+Because columns are read back from the index, a column declared as BIGINT or BOOLEAN becomes DOUBLE, and later `INSERT` statements must supply numbers.
+VARCHAR columns become TAG fields, which match exactly and support `LIKE` but not full-text search.
+
+[[pushdown]]
+=== Pushdown
+
+Redis evaluates these parts of a query. Trino evaluates everything else on the rows Redis returns.
+
+* Filters on indexed fields, combined with `AND`:
+** `=` and `IN`. TAG fields match exactly. TEXT fields use full-text matching ({project-url}/issues/46[#46]).
+** `<`, `\<=`, `>`, `>=` and `BETWEEN` on NUMERIC fields.
+** `LIKE` on TAG and TEXT fields, as a wildcard query. Trino rewrites prefix patterns such as `'abc%'` into a range, which it evaluates itself.
+* `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`, as `FT.AGGREGATE` with `GROUPBY` and `REDUCE`.
+If any aggregate in a query can't be pushed down, such as `count(DISTINCT \...)`, Trino computes all of them.
+* `LIMIT`. Trino sorts `ORDER BY \... LIMIT` itself.
+
+[[known-limitations]]
+=== Known limitations
+
+These queries return wrong results or fail.
+
+[cols="2,2,1"]
+|===
+|Problem |Workaround |Issue
+
+|`IS NULL` and `IS NOT NULL` on an indexed field return every row.
+|
+|{project-url}/issues/39[#39]
+
+|`count(column)` counts every row, including those where the column is null.
+|`count_if(column IS NOT NULL)`
+|{project-url}/issues/45[#45]
+
+|`=` and `IN` on a TEXT field match any document containing the words, not just equal values.
+|Index the field as TAG for exact matches.
+|{project-url}/issues/46[#46]
+
+|`<>`, `<`, `>` and `BETWEEN` on an indexed VARCHAR column fail with `Range constraint not supported`.
+|
+|{project-url}/issues/40[#40]
+
+|`HAVING`, or a filter on a subquery's aggregate, fails with `Unknown field \... syntheticColumn0` when the aggregation is pushed down.
+|
+|{project-url}/issues/41[#41]
+
+|`MERGE \... WHEN NOT MATCHED THEN INSERT` fails when the column list leaves out the table's last column.
+|List every column and pass `NULL` for the ones you don't have.
+|{project-url}/issues/42[#42]
+
+|`CREATE TABLE AS SELECT` with BOOLEAN or DATE values succeeds, but those rows can't be queried.
+|Cast them first, e.g. `CAST(flag AS integer)` or `CAST(day AS varchar)`.
+|{project-url}/issues/43[#43]
+
+|`INSERT` into a JSON index writes a hash the index never sees. `UPDATE` and `MERGE` on a JSON index fail.
+|
+|{project-url}/issues/44[#44]
+
+|A scan without a SQL `LIMIT` stops at `redisearch.default-limit` documents (10,000 by default).
+|Raise `redisearch.default-limit`.
+|{project-url}/issues/35[#35]
+
+|Queries return partial results while an index is still being built.
+|Wait for `FT.INFO` to report `indexing` as `0`.
+|{project-url}/issues/36[#36]
 |===
 
 

@@ -13,9 +13,9 @@ envsubst() {
   }'
 }
 
-# REDISEARCH_<NAME> sets redisearch.<name>, e.g. REDISEARCH_CURSOR_COUNT sets redisearch.cursor-count.
+# REDISEARCH_<NAME> sets redisearch.<name>, e.g. REDISEARCH_CACERT_PATH sets redisearch.cacert-path.
 # Unset variables are left out so the connector's defaults apply.
-REDISEARCH_PROPERTIES="USERNAME PASSWORD CLUSTER RESP2 INSECURE CACERT_PATH CERT_PATH KEY_PATH KEY_PASSWORD CASE_INSENSITIVE_NAMES CURSOR_COUNT DEFAULT_LIMIT"
+REDISEARCH_PROPERTIES="USERNAME PASSWORD CLUSTER CACERT_PATH CERT_PATH KEY_PATH KEY_PASSWORD"
 
 redisearch_catalog() {
   echo "connector.name=redisearch"
