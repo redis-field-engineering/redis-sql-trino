@@ -35,15 +35,14 @@ import io.airlift.configuration.ConfigSecuritySensitive;
 import io.airlift.configuration.DefunctConfig;
 
 // redisearch.default-limit capped every scan without a SQL LIMIT, silently truncating the rows Trino aggregated and
-// joined over
-@DefunctConfig("redisearch.default-limit")
+// joined over. redisearch.table-cache-expiration was never read; the table cache only uses
+// redisearch.table-cache-refresh
+@DefunctConfig({ "redisearch.default-limit", "redisearch.table-cache-expiration" })
 public class RediSearchConfig {
 
     public static final String DEFAULT_SCHEMA = "default";
 
     public static final long DEFAULT_CURSOR_COUNT = 1000;
-
-    public static final Duration DEFAULT_TABLE_CACHE_EXPIRATION = Duration.ofHours(1);
 
     public static final Duration DEFAULT_TABLE_CACHE_REFRESH = Duration.ofMinutes(1);
 
@@ -72,8 +71,6 @@ public class RediSearchConfig {
     private boolean caseInsensitiveNames;
 
     private long cursorCount = DEFAULT_CURSOR_COUNT;
-
-    private long tableCacheExpiration = DEFAULT_TABLE_CACHE_EXPIRATION.toSeconds();
 
     private long tableCacheRefresh = DEFAULT_TABLE_CACHE_REFRESH.toSeconds();
 
@@ -108,17 +105,6 @@ public class RediSearchConfig {
     public RediSearchConfig setResp2(boolean resp2) {
         this.resp2 = resp2;
         return this;
-    }
-
-    @Config("redisearch.table-cache-expiration")
-    @ConfigDescription("Duration in seconds since the entry creation after which a table should be automatically removed from the cache.")
-    public RediSearchConfig setTableCacheExpiration(long expirationDuration) {
-        this.tableCacheExpiration = expirationDuration;
-        return this;
-    }
-
-    public long getTableCacheExpiration() {
-        return tableCacheExpiration;
     }
 
     @Config("redisearch.table-cache-refresh")

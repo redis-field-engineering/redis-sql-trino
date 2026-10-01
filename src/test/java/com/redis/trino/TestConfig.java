@@ -21,7 +21,6 @@ public class TestConfig {
 				.setResp2(false).setPassword(null).setDefaultSchema(RediSearchConfig.DEFAULT_SCHEMA)
 				.setCaseInsensitiveNames(false)
 				.setCursorCount(RediSearchConfig.DEFAULT_CURSOR_COUNT)
-				.setTableCacheExpiration(RediSearchConfig.DEFAULT_TABLE_CACHE_EXPIRATION.toSeconds())
 				.setTableCacheRefresh(RediSearchConfig.DEFAULT_TABLE_CACHE_REFRESH.toSeconds()).setCluster(false)
 				.setCaCertPath(null).setKeyPassword(null).setKeyPath(null).setCertPath(null));
 	}
@@ -49,6 +48,14 @@ public class TestConfig {
 				ImmutableMap.of("redisearch.default-limit", "10000"));
 		assertThatThrownBy(() -> configurationFactory.build(RediSearchConfig.class))
 				.hasMessageContaining("Defunct property 'redisearch.default-limit'");
+	}
+
+	@Test
+	public void testTableCacheExpirationIsDefunct() {
+		ConfigurationFactory configurationFactory = new ConfigurationFactory(
+				ImmutableMap.of("redisearch.table-cache-expiration", "3600"));
+		assertThatThrownBy(() -> configurationFactory.build(RediSearchConfig.class))
+				.hasMessageContaining("Defunct property 'redisearch.table-cache-expiration'");
 	}
 
 }
