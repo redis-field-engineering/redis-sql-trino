@@ -25,6 +25,7 @@ package com.redis.trino;
 
 import static java.util.Objects.requireNonNull;
 
+import java.util.List;
 import java.util.Optional;
 
 import io.lettuce.core.search.arguments.AggregateArgs;
@@ -53,13 +54,13 @@ public class RediSearchTranslator {
 		private final String index;
 		private final String query;
 		private final AggregateArgs args;
-		private final boolean grouped;
+		private final boolean global;
 
-		public Aggregation(String index, String query, AggregateArgs args, boolean grouped) {
+		public Aggregation(String index, String query, AggregateArgs args, boolean global) {
 			this.index = index;
 			this.query = query;
 			this.args = args;
-			this.grouped = grouped;
+			this.global = global;
 		}
 
 		public String getIndex() {
@@ -74,13 +75,17 @@ public class RediSearchTranslator {
 			return args;
 		}
 
-		public boolean isGrouped() {
-			return grouped;
+		/**
+		 * Whether this aggregates all matching documents into a single row: reducers without GROUP BY terms, e.g.
+		 * count(*).
+		 */
+		public boolean isGlobal() {
+			return global;
 		}
 
 		@Override
 		public String toString() {
-			return "Aggregation [index=" + index + ", query=" + query + ", grouped=" + grouped + "]";
+			return "Aggregation [index=" + index + ", query=" + query + ", global=" + global + "]";
 		}
 	}
 
@@ -134,7 +139,9 @@ public class RediSearchTranslator {
 		groupBy.ifPresent(args::groupBy);
 		args.limit(0, limit(table));
 		args.withCursor(WithCursor.of(config.getCursorCount() > 0 ? config.getCursorCount() : null));
-		return new Aggregation(table.getIndex(), query, args.build(), groupBy.isPresent());
+		List<RediSearchAggregationTerm> terms = table.getTermAggregations();
+		boolean global = groupBy.isPresent() && (terms == null || terms.isEmpty());
+		return new Aggregation(table.getIndex(), query, args.build(), global);
 	}
 
 	private long limit(RediSearchTableHandle tableHandle) {

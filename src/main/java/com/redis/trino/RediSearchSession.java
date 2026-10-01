@@ -404,13 +404,21 @@ public class RediSearchSession {
         log.info("Running %s", aggregation);
         AggregateResult result = result(sync.ftAggregate(aggregation.getIndex(), aggregation.getQuery(),
                 aggregation.getArgs()));
-        if (result.getRows().isEmpty() && aggregation.isGrouped()) {
-            // An aggregation over no documents still returns one row, e.g. count(*) = 0
+        // A batch can come back empty while the cursor still has rows, so the aggregation is only empty once the
+        // cursor is exhausted
+        while (result.getRows().isEmpty() && result.getCursor() != 0) {
+            result = cursorRead(table, result.getCursor());
+        }
+        if (result.getRows().isEmpty() && aggregation.isGlobal()) {
+            // A global aggregation over no documents still returns one row: count is 0 and the other metrics are null.
+            // With GROUP BY terms there are no groups, so no rows.
             Map<String, String> row = new HashMap<>();
             for (RediSearchAggregation metric : table.getMetricAggregations()) {
-                row.put(metric.getAlias(), "0");
+                if (RediSearchAggregation.COUNT.equals(metric.getFunctionName())) {
+                    row.put(metric.getAlias(), "0");
+                }
             }
-            return new AggregateResult(List.of(row), result.getCursor());
+            return new AggregateResult(List.of(row), 0);
         }
         return result;
     }
