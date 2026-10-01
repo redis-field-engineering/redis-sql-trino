@@ -29,6 +29,9 @@
 		<lettucemod.version>3.7.3</lettucemod.version>
 		<lettuce.version>6.2.6.RELEASE</lettuce.version>
 		<testcontainers-redis.version>1.6.4</testcontainers-redis.version>
+		<!-- Override Trino 403's managed Testcontainers (too old for current Docker Desktop API) -->
+		<testcontainers.version>1.21.4</testcontainers.version>
+		<docker-java.version>3.4.2</docker-java.version>
 		<ulid.version>5.1.0</ulid.version>
 
 		<air.check.skip-license>true</air.check.skip-license>
@@ -53,6 +56,43 @@
 			</roles>
 		</developer>
 	</developers>
+	<dependencyManagement>
+		<!-- Overrides of Trino 403 parent-managed versions so Testcontainers ${testcontainers.version}
+		     (and its jib-core dependency) passes requireUpperBoundDeps.
+		     Order is enforced by pedantic-pom-enforcers: groupId alphabetical. -->
+		<dependencies>
+			<dependency>
+				<groupId>com.fasterxml.jackson.core</groupId>
+				<artifactId>jackson-databind</artifactId>
+				<version>2.13.4.2</version>
+			</dependency>
+			<dependency>
+				<groupId>com.github.docker-java</groupId>
+				<artifactId>docker-java-api</artifactId>
+				<version>${docker-java.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>com.github.docker-java</groupId>
+				<artifactId>docker-java-transport-zerodep</artifactId>
+				<version>${docker-java.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>net.java.dev.jna</groupId>
+				<artifactId>jna</artifactId>
+				<version>5.13.0</version>
+			</dependency>
+			<dependency>
+				<groupId>org.apache.commons</groupId>
+				<artifactId>commons-compress</artifactId>
+				<version>1.24.0</version>
+			</dependency>
+			<dependency>
+				<groupId>org.ow2.asm</groupId>
+				<artifactId>asm</artifactId>
+				<version>9.4</version>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 	<dependencies>
 
 	    <dependency>
@@ -378,6 +418,7 @@
 		<dependency>
 			<groupId>org.testcontainers</groupId>
 			<artifactId>testcontainers</artifactId>
+			<version>${testcontainers.version}</version>
 			<scope>test</scope>
 		</dependency>
 
