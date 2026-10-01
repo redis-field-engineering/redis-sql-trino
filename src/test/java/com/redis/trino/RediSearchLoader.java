@@ -51,6 +51,9 @@ public class RediSearchLoader implements AutoCloseable {
 				schema.add(field(columns.get(i), types.get(i)));
 			}
 			connection.sync().ftCreate(tableName, CreateArgs.builder().withPrefix(tableName + ":").build(), schema);
+			// FT.CREATE scans the existing keyspace in the background; rows written after it finishes are indexed
+			// synchronously, so they're queryable as soon as load() returns
+			RediSearchServer.awaitIndexed(connection.sync(), tableName);
 		}
 		connection.setAutoFlushCommands(false);
 		try {
