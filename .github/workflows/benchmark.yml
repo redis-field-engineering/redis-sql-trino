@@ -1,0 +1,87 @@
+name: Benchmark
+
+on:
+  pull_request:
+    paths:
+      - 'src/main/**'
+      - 'pom.xml'
+      - 'src/test/java/com/redis/trino/RediSearchQueryBenchmark.java'
+      - '.github/scripts/compare-benchmarks.py'
+      - '.github/workflows/benchmark.yml'
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Branch to compare the selected branch against'
+        default: 'master'
+        required: true
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Times RediSearchQueryBenchmark on the base and the head build on the same runner, alternating
+# base/head to even out runner drift, and writes the comparison to the job summary. Fails only if
+# a query returns different rows on the two builds; latency changes are reported, not enforced.
+jobs:
+  benchmark:
+    name: 'Benchmark'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          java-version: 25
+          distribution: 'temurin'
+
+      - name: Cache Maven
+        uses: actions/cache@v6
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Check out base
+        shell: bash
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || format('origin/{0}', inputs.base) }}
+        run: |
+          git worktree add --detach ../base "$BASE_REF"
+          # Run the head's benchmark against both builds so they time the same queries
+          cp src/test/java/com/redis/trino/RediSearchQueryBenchmark.java ../base/src/test/java/com/redis/trino/
+
+      - name: Run benchmarks
+        shell: bash
+        run: |
+          mkdir -p benchmark-results
+          for round in 1 2; do
+            for side in base head; do
+              if [ "$side" = base ]; then dir=../base; else dir=.; fi
+              (cd "$dir" && ./mvnw --no-transfer-progress -B test -Dtest=RediSearchQueryBenchmark \
+                  -Dair.check.skip-all=true -Dbenchmark.label="$side-$round")
+              cp "$dir/target/benchmark/$side-$round.csv" benchmark-results/
+            done
+          done
+
+      - name: Compare
+        shell: bash
+        run: |
+          {
+            echo "## Query benchmark: base vs head"
+            echo
+            python3 .github/scripts/compare-benchmarks.py --base benchmark-results/base-*.csv --head benchmark-results/head-*.csv
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-results
+          path: benchmark-results/
