@@ -277,8 +277,6 @@ Trino evaluates `IS NULL`, `IS NOT NULL`, and comparisons other than `=` and `IN
 
 These queries return wrong results or fail:
 
-* `count(column)` counts every row, including nulls. Use `count_if(column IS NOT NULL)` (https://github.com/{project-owner}/{project-name}/issues/45[#45]).
-* `HAVING` fails when the aggregation is pushed down (https://github.com/{project-owner}/{project-name}/issues/41[#41]).
 * `MERGE \... WHEN NOT MATCHED THEN INSERT` fails unless the column list includes the table's last column (https://github.com/{project-owner}/{project-name}/issues/42[#42]).
 * `CREATE TABLE AS SELECT` with BOOLEAN or DATE values succeeds, but those rows can't be queried. Cast them to INTEGER or VARCHAR first (https://github.com/{project-owner}/{project-name}/issues/43[#43]).
 * `INSERT` into a JSON index writes a hash the index never sees (https://github.com/{project-owner}/{project-name}/issues/44[#44]).

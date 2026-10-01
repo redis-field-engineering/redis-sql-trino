@@ -89,6 +89,24 @@ public class RediSearchAggregation {
 		return alias;
 	}
 
+	/**
+	 * Whether this reducer's value means its group had no values to aggregate, which SQL represents as null. Redis
+	 * returns nan for SUM and AVG, and inf and -inf for MIN and MAX, which an index of infinite values would also give.
+	 */
+	public boolean isEmptyResult(String value) {
+		switch (functionName) {
+		case SUM:
+		case AVG:
+			return "nan".equalsIgnoreCase(value);
+		case MIN:
+			return "inf".equalsIgnoreCase(value);
+		case MAX:
+			return "-inf".equalsIgnoreCase(value);
+		default:
+			return false;
+		}
+	}
+
 	public static boolean isNumericType(Type type) {
 		return NUMERIC_TYPES.contains(type);
 	}
@@ -98,13 +116,27 @@ public class RediSearchAggregation {
 		if (!SUPPORTED_AGGREGATION_FUNCTIONS.contains(function.getFunctionName())) {
 			return Optional.empty();
 		}
+		// Reducers aggregate every document in a group
+		if (function.isDistinct() || function.getFilter().isPresent()) {
+			return Optional.empty();
+		}
+		if (COUNT.equals(function.getFunctionName())) {
+			// COUNT counts documents, which is count(*). count(column) skips nulls, so Trino computes it.
+			if (!function.getArguments().isEmpty()) {
+				return Optional.empty();
+			}
+			return Optional.of(new RediSearchAggregation(COUNT, function.getOutputType(), Optional.empty(), alias));
+		}
+		// Other variants, such as max(x, n), return arrays
+		if (function.getArguments().size() != 1) {
+			return Optional.empty();
+		}
 		Optional<RediSearchColumnHandle> parameterColumnHandle = function.getArguments().stream()
 				.filter(Variable.class::isInstance).map(Variable.class::cast).map(Variable::getName)
 				.filter(assignments::containsKey).findFirst().map(assignments::get)
 				.map(RediSearchColumnHandle.class::cast)
 				.filter(column -> RediSearchAggregation.isNumericType(column.getType()));
-		// only count can accept empty RediSearchColumnHandle
-		if (parameterColumnHandle.isEmpty() && !COUNT.equals(function.getFunctionName())) {
+		if (parameterColumnHandle.isEmpty()) {
 			return Optional.empty();
 		}
 		return Optional.of(new RediSearchAggregation(function.getFunctionName(), function.getOutputType(),
