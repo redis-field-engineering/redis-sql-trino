@@ -371,23 +371,6 @@
     <build>
         <plugins>
             <plugin>
-                <!-- The shared redis-github-workflows CI installs Azul Zulu, which trino-root rejects by default -->
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-enforcer-plugin</artifactId>
-                <configuration>
-                    <rules>
-                        <requireJavaVendor>
-                            <message>Requires a Temurin, Oracle or Azul Zulu JDK.</message>
-                            <includes>
-                                <include>Eclipse Adoptium</include>
-                                <include>Oracle Corporation</include>
-                                <include>Azul Systems, Inc.</include>
-                            </includes>
-                        </requireJavaVendor>
-                    </rules>
-                </configuration>
-            </plugin>
-            <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <executions>
