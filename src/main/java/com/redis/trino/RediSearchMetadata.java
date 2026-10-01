@@ -492,8 +492,9 @@ public class RediSearchMetadata implements ConnectorMetadata {
 				return Optional.empty();
 			}
 			io.trino.spi.type.Type outputType = function.getOutputType();
+			// Not a field Redis can filter on: the query runs before GROUPBY, so Trino evaluates HAVING
 			RediSearchColumnHandle newColumn = new RediSearchColumnHandle(colName, outputType,
-					RediSearchSession.toFieldType(outputType), false, true);
+					RediSearchSession.toFieldType(outputType), false, false);
 			projections.add(new Variable(colName, function.getOutputType()));
 			resultAssignments.add(new Assignment(colName, newColumn, function.getOutputType()));
 			aggregations.add(aggregation.get());

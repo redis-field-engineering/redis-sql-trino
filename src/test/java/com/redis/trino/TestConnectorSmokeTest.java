@@ -176,12 +176,6 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 
 	@Test
 	@Override
-	public void testHaving() {
-		abort("Not supported by RediSearch connector");
-	}
-
-	@Test
-	@Override
 	public void testShowCreateTable() {
 		abort("Not supported by RediSearch connector");
 	}
