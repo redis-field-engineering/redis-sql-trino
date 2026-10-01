@@ -24,9 +24,11 @@ public class TestTagAndLikePushdown extends AbstractTestQueryFramework {
 	// More distinct matching values than Redis expands a wildcard to by default (MAXEXPANSIONS 200)
 	private static final int MANY = 300;
 
+	private RediSearchServer redisearch;
+
 	@Override
 	protected QueryRunner createQueryRunner() throws Exception {
-		RediSearchServer redisearch = closeAfterClass(new RediSearchServer());
+		redisearch = closeAfterClass(new RediSearchServer());
 		RedisCommands<String, String> redis = redisearch.getConnection().sync();
 		redis.ftCreate("beers", CreateArgs.builder().withPrefix("beer:").build(),
 				List.of(TagFieldArgs.builder().name("id").build(), TagFieldArgs.builder().name("style").build(),
@@ -112,6 +114,30 @@ public class TestTagAndLikePushdown extends AbstractTestQueryFramework {
 	public void testLikeMatchesMoreValuesThanRedisExpands() {
 		assertThat(query("SELECT count(*) FROM many WHERE tag LIKE '%cus'")).matches("VALUES BIGINT '" + MANY + "'");
 		assertThat(query("SELECT count(*) FROM many WHERE name LIKE '%cus'")).matches("VALUES BIGINT '" + MANY + "'");
+	}
+
+	@Test
+	public void testCreatedTagFields() {
+		// CREATE TABLE and ADD COLUMN make TAG fields that are CASESENSITIVE and don't split values on ','
+		assertUpdate("CREATE TABLE drinks (id varchar, style varchar)");
+		assertUpdate("INSERT INTO drinks VALUES ('1', 'Wheat'), ('2', 'wheat'), ('3', 'a,b'), ('4', 'a')", 4);
+		assertUpdate("ALTER TABLE drinks ADD COLUMN code varchar");
+		redisearch.awaitIndexed("drinks");
+		assertUpdate("INSERT INTO drinks VALUES ('5', 'x', 'a,b')", 1);
+		assertThat(searchIds("drinks", "@style:{wheat}")).containsExactly("2");
+		assertThat(searchIds("drinks", "@style:{a}")).containsExactly("4");
+		assertThat(searchIds("drinks", "@style:{a\\,b}")).containsExactly("3");
+		assertThat(searchIds("drinks", "@code:{a\\,b}")).containsExactly("5");
+		// So Redis can prefilter values with commas
+		assertThat(query("SELECT id FROM drinks WHERE style = 'a,b'")).matches("VALUES VARCHAR '3'");
+		assertThat(explain("SELECT id FROM drinks WHERE style = 'a,b'")).doesNotContain("constraint=ALL");
+		assertThat(query("SELECT id FROM drinks WHERE code IN ('a,b', 'x')")).matches("VALUES VARCHAR '5'");
+		assertThat(explain("SELECT id FROM drinks WHERE code IN ('a,b', 'x')")).doesNotContain("constraint=ALL");
+	}
+
+	private List<String> searchIds(String index, String query) {
+		return redisearch.getConnection().sync().ftSearch(index, query).getResults().stream()
+				.map(result -> result.getFields().get("id").asString()).sorted().toList();
 	}
 
 	private String explain(String sql) {
