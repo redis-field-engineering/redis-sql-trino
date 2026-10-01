@@ -1,6 +1,18 @@
 #!/bin/bash
 set -e
 
+# The Trino image has no package manager to install gettext, so substitute ${VAR} references with awk
+envsubst() {
+  awk '{
+    line = $0; out = ""
+    while (match(line, /\$\{[A-Za-z_][A-Za-z0-9_]*\}/)) {
+      out = out substr(line, 1, RSTART - 1) ENVIRON[substr(line, RSTART + 2, RLENGTH - 3)]
+      line = substr(line, RSTART + RLENGTH)
+    }
+    print out line
+  }'
+}
+
 REDISEARCH_ENVS=0
 if [ ! -z "${REDISEARCH_URI}" ] || [ ! -z "${REDISEARCH_USERNAME}" ] || [ ! -z "${REDISEARCH_PASSWORD}" ] || [ ! -z "${REDISEARCH_CLUSTER}" ] \
 || [ ! -z "${REDISEARCH_INSECURE}" ] || [ ! -z "${REDISEARCH_CACERT_PATH}" ] || [ ! -z "${REDISEARCH_KEY_PATH}" ] || [ ! -z "${REDISEARCH_KEY_PASSWORD}" ] || [ ! -z "${REDISEARCH_CERT_PATH}" ] \
@@ -26,7 +38,7 @@ if [ -f /tmp/redisearch.properties.template ] && [ $REDISEARCH_ENVS -eq 1 ]; the
   envsubst < /tmp/redisearch.properties.template > /etc/trino/catalog/redisearch.properties
 fi
 
-export TRINO_NODE_ID=$(uuidgen)
+export TRINO_NODE_ID=$(cat /proc/sys/kernel/random/uuid)
 echo "TRINO_NODE_ID=$TRINO_NODE_ID"
 envsubst < /tmp/trino.node.properties.template > /etc/trino/node.properties
 
