@@ -11,12 +11,44 @@ on:
         default: 'master'
         required: true
 
+# Inlined from redis-github-workflows publish-maven.yml, which hard-codes the Zulu JDK;
+# trino-root's enforcer rules only accept Temurin or Oracle.
 jobs:
   publish:
     name: Publish
-    uses: redis-field-engineering/redis-github-workflows/.github/workflows/publish-maven.yml@main
-    with:
-      branch: ${{ github.event.inputs.branch }}
-      version: ${{ github.event.inputs.version }}
-    secrets:
-      github-token: ${{ secrets.GIT_ACCESS_TOKEN }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: 25
+          distribution: 'temurin'
+
+      - name: Cache Maven
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Set release version
+        run: |
+          VERSION=${{ inputs.version }}
+          ./mvnw versions:set -DnewVersion=$VERSION
+
+      - name: Build
+        run: |
+          ./mvnw --no-transfer-progress -B --file pom.xml process-resources
+
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GIT_ACCESS_TOKEN }}
+          publish_dir: ./target/generated-docs
