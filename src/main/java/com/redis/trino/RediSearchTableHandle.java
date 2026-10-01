@@ -27,7 +27,6 @@ import static java.util.Objects.requireNonNull;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalLong;
 
@@ -49,11 +48,10 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	// for group by fields
 	private final List<RediSearchAggregationTerm> aggregationTerms;
 	private final List<RediSearchAggregation> aggregations;
-	private final Map<String, String> wildcards;
 
 	public RediSearchTableHandle(SchemaTableName schemaTableName, String index) {
 		this(schemaTableName, index, TupleDomain.all(), OptionalLong.empty(), Collections.emptyList(),
-				Collections.emptyList(), Map.of());
+				Collections.emptyList());
 	}
 
 	@JsonCreator
@@ -61,15 +59,13 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 			@JsonProperty("index") String index, @JsonProperty("constraint") TupleDomain<ColumnHandle> constraint,
 			@JsonProperty("limit") OptionalLong limit,
 			@JsonProperty("aggTerms") List<RediSearchAggregationTerm> termAggregations,
-			@JsonProperty("aggregates") List<RediSearchAggregation> metricAggregations,
-			@JsonProperty("wildcards") Map<String, String> wildcards) {
+			@JsonProperty("aggregates") List<RediSearchAggregation> metricAggregations) {
 		this.schemaTableName = requireNonNull(schemaTableName, "schemaTableName is null");
 		this.index = requireNonNull(index, "index is null");
 		this.constraint = requireNonNull(constraint, "constraint is null");
 		this.limit = requireNonNull(limit, "limit is null");
 		this.aggregationTerms = requireNonNull(termAggregations, "aggTerms is null");
 		this.aggregations = requireNonNull(metricAggregations, "aggregates is null");
-		this.wildcards = requireNonNull(wildcards, "wildcards is null");
 	}
 
 	@JsonProperty
@@ -102,14 +98,9 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 		return aggregations;
 	}
 
-	@JsonProperty
-	public Map<String, String> getWildcards() {
-		return wildcards;
-	}
-
 	@Override
 	public int hashCode() {
-		return Objects.hash(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, wildcards);
+		return Objects.hash(schemaTableName, index, constraint, limit, aggregationTerms, aggregations);
 	}
 
 	@Override
@@ -124,7 +115,7 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 		return Objects.equals(this.schemaTableName, other.schemaTableName) && Objects.equals(this.index, other.index)
 				&& Objects.equals(this.constraint, other.constraint) && Objects.equals(this.limit, other.limit)
 				&& Objects.equals(this.aggregationTerms, other.aggregationTerms)
-				&& Objects.equals(this.aggregations, other.aggregations) && Objects.equals(this.wildcards, other.wildcards);
+				&& Objects.equals(this.aggregations, other.aggregations);
 	}
 
 	@Override

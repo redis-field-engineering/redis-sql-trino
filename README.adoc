@@ -267,11 +267,13 @@ These aren't supported:
 
 Redis evaluates these parts of a query. Trino evaluates everything else on the rows Redis returns.
 
-* `WHERE` on indexed fields, combined with `AND`: `=` and `IN`; `<`, `+<=+`, `>`, `>=` and `BETWEEN` on NUMERIC fields; and `LIKE`.
-On TEXT fields, `=` and `IN` find the documents containing the value's words, and Trino keeps the equal ones.
-Trino evaluates `IS NULL`, `IS NOT NULL`, and comparisons other than `=` and `IN` on VARCHAR columns.
-* `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`
-* `LIMIT`
+* `WHERE` on indexed fields, combined with `AND`: `=` and `IN`; and `<`, `+<=+`, `>`, `>=` and `BETWEEN` on NUMERIC fields.
+On TAG and TEXT fields, Redis can also return rows that aren't equal, which Trino filters out.
+A TEXT query finds the documents containing the value's words.
+A TAG query matches any of the tags Redis splits a value into on the field's `SEPARATOR`, ignoring surrounding whitespace and, unless the field is `CASESENSITIVE`, case.
+Trino evaluates `LIKE`, `IS NULL`, `IS NOT NULL`, and comparisons other than `=` and `IN` on VARCHAR columns.
+* `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`, when Redis evaluates the whole `WHERE` clause
+* `LIMIT`, when Redis evaluates the whole `WHERE` clause
 
 === Known limitations
 

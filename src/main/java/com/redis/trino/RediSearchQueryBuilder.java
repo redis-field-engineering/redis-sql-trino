@@ -36,7 +36,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
@@ -86,6 +85,12 @@ public class RediSearchQueryBuilder {
 			"but", "by", "for", "if", "in", "into", "it", "no", "not", "of", "on", "or", "such", "that", "their", "then",
 			"there", "these", "they", "this", "to", "was", "will", "with");
 
+	// Redis trims ASCII whitespace around each tag, so a query for a value that starts or ends with it matches nothing
+	private static final Pattern TAG_SURROUNDING_WHITESPACE = Pattern.compile("^\\s|\\s\\z");
+
+	// ASCII control characters that a tag query can't express, even escaped
+	private static final Pattern TAG_UNSUPPORTED_CHARACTERS = Pattern.compile("[\\x00-\\x08\\x0E-\\x1F\\x7F]");
+
 	private static String property(String field) {
 		return "@" + field;
 	}
@@ -93,7 +98,7 @@ public class RediSearchQueryBuilder {
 	/**
 	 * Whether {@link #buildQuery} can translate a column's domain into a query that matches every row in it. Redis
 	 * can't match a missing field, so domains that allow nulls are left to Trino, and so is {@code IS NOT NULL}. On
-	 * VARCHAR columns only {@code =} and {@code IN} are supported.
+	 * VARCHAR columns only {@code =} and {@code IN} are supported, for values a TAG or TEXT query can match.
 	 */
 	public static boolean isSupported(RediSearchColumnHandle column, Domain domain) {
 		ValueSet values = domain.getValues();
@@ -104,9 +109,8 @@ public class RediSearchQueryBuilder {
 		case NUMERIC:
 			return NUMERIC_TYPES.contains(column.getType());
 		case TAG:
-			// An empty tag query is a syntax error
-			return column.getType() instanceof VarcharType && values.isDiscreteSet()
-					&& values.getDiscreteSet().stream().allMatch(value -> ((Slice) value).length() > 0);
+			return column.getType() instanceof VarcharType && values.isDiscreteSet() && values.getDiscreteSet().stream()
+					.allMatch(value -> isTagQueryable(((Slice) value).toStringUtf8(), column.getTagSeparator()));
 		case TEXT:
 			return column.getType() instanceof VarcharType && values.isDiscreteSet() && values.getDiscreteSet().stream()
 					.allMatch(value -> textTerms(((Slice) value).toStringUtf8()).isPresent());
@@ -117,10 +121,23 @@ public class RediSearchQueryBuilder {
 
 	/**
 	 * Whether the query for a supported domain matches exactly the rows in it. A TEXT query matches the documents
-	 * containing the value's terms, with stemming, so Trino still has to filter the rows Redis returns.
+	 * containing the value's terms, with stemming. A TAG query matches the documents with that value among the tags
+	 * Redis splits a stored value into and trims, ignoring case unless the field is CASESENSITIVE. Trino still has to
+	 * filter the rows Redis returns for both.
 	 */
 	public static boolean isExact(RediSearchColumnHandle column) {
-		return column.getFieldType() != RediSearchFieldType.TEXT;
+		return column.getFieldType() == RediSearchFieldType.NUMERIC;
+	}
+
+	/**
+	 * Whether a tag query for the value matches every document with that value. It matches nothing if the value is
+	 * empty, contains the field's separator, starts or ends with whitespace, or has a control character Redis can't
+	 * query.
+	 */
+	static boolean isTagQueryable(String value, Optional<Character> separator) {
+		return !value.isEmpty() && (separator.isEmpty() || value.indexOf(separator.get()) < 0)
+				&& !TAG_SURROUNDING_WHITESPACE.matcher(value).find()
+				&& !TAG_UNSUPPORTED_CHARACTERS.matcher(value).find();
 	}
 
 	/**
@@ -137,10 +154,6 @@ public class RediSearchQueryBuilder {
 	}
 
 	public String buildQuery(TupleDomain<ColumnHandle> tupleDomain) {
-		return buildQuery(tupleDomain, Map.of());
-	}
-
-	public String buildQuery(TupleDomain<ColumnHandle> tupleDomain, Map<String, String> wildcards) {
 		List<String> nodes = new ArrayList<>();
 		Optional<Map<ColumnHandle, Domain>> domains = tupleDomain.getDomains();
 		if (domains.isPresent()) {
@@ -152,9 +165,6 @@ public class RediSearchQueryBuilder {
 					buildPredicate(column, domain).ifPresent(nodes::add);
 				}
 			}
-		}
-		for (Entry<String, String> wildcard : wildcards.entrySet()) {
-			nodes.add(field(wildcard.getKey(), wildcard.getValue()));
 		}
 		if (nodes.isEmpty()) {
 			return "*";
@@ -309,11 +319,13 @@ public class RediSearchQueryBuilder {
 
 	// Query syntax helpers, formatted the same way as the lettucemod 3.x query builder
 
+	// Escapes ASCII punctuation, whitespace and control characters. Redis matches nothing for a value with a backslash
+	// before a non-ASCII character, unless it's the first one.
 	public static String escapeTag(String value) {
-		return value.replaceAll("([^a-zA-Z0-9])", "\\\\$1");
+		return value.replaceAll("([\\p{ASCII}&&[^a-zA-Z0-9]])", "\\\\$1");
 	}
 
-	public static String tags(List<String> tags) {
+	private static String tags(List<String> tags) {
 		checkArgument(!tags.isEmpty(), "Must have at least one tag");
 		return "{" + String.join(" | ", tags) + "}";
 	}

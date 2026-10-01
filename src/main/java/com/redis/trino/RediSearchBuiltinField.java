@@ -2,6 +2,8 @@ package com.redis.trino;
 
 import static io.trino.spi.type.VarcharType.VARCHAR;
 
+import java.util.Optional;
+
 import io.trino.spi.type.Type;
 
 enum RediSearchBuiltinField {
@@ -23,7 +25,7 @@ enum RediSearchBuiltinField {
 	}
 
 	public RediSearchColumnHandle getColumnHandle() {
-		return new RediSearchColumnHandle(name, type, fieldType, true, false);
+		return new RediSearchColumnHandle(name, type, fieldType, true, false, Optional.empty());
 	}
 
 	public static boolean isKeyColumn(String columnName) {

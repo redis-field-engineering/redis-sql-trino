@@ -336,7 +336,7 @@ public class RediSearchSession {
                     continue;
                 }
                 columns.add(new RediSearchColumnHandle(docField, VarcharType.VARCHAR, RediSearchFieldType.TEXT, false,
-                        false));
+                        false, Optional.empty()));
                 fields.add(docField);
             }
         }
@@ -359,7 +359,8 @@ public class RediSearchSession {
 
     private RediSearchColumnHandle buildColumnHandle(RediSearchIndexInfo.Field field) {
         RediSearchFieldType type = field.getType();
-        return new RediSearchColumnHandle(field.getAttribute(), columnType(type), type, false, true);
+        return new RediSearchColumnHandle(field.getAttribute(), columnType(type), type, false, true,
+                field.getSeparator());
     }
 
     private Type columnType(RediSearchFieldType type) {
