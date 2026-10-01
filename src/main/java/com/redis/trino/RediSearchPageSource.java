@@ -55,7 +55,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	private final List<Type> columnTypes;
 	private final CursorIterator iterator;
 	private Map<String, String> currentDoc;
-	private long count;
+	private long completedBytes;
 	private boolean finished;
 
 	private final PageBuilder pageBuilder;
@@ -71,7 +71,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 
 	@Override
 	public long getCompletedBytes() {
-		return count;
+		return completedBytes;
 	}
 
 	@Override
@@ -87,14 +87,12 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	@Override
 	public SourcePage getNextSourcePage() {
 		verify(pageBuilder.isEmpty());
-		count = 0;
 		for (int i = 0; i < ROWS_PER_REQUEST; i++) {
 			if (!iterator.hasNext()) {
 				finished = true;
 				break;
 			}
 			currentDoc = iterator.next();
-			count++;
 
 			pageBuilder.declarePosition();
 			for (int column = 0; column < columnTypes.size(); column++) {
@@ -109,6 +107,8 @@ public class RediSearchPageSource implements ConnectorPageSource {
 		}
 		Page page = pageBuilder.build();
 		pageBuilder.reset();
+		// Trino requires completed bytes to be cumulative across pages
+		completedBytes += page.getSizeInBytes();
 		return SourcePage.create(page);
 	}
 
