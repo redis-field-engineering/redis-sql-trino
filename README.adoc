@@ -175,6 +175,15 @@ Run the test suite:
 ./mvnw test
 ----
 
+Time a set of representative queries against TPC-H data in Redis (not part of the test suite):
+[source,console]
+----
+./mvnw test -Dtest=RediSearchQueryBenchmark -Dair.check.skip-all=true -Dbenchmark.label=mine
+----
+
+Results are written to `target/benchmark/mine.csv`. Compare two runs with `.github/scripts/compare-benchmarks.py --base <csv>... --head <csv>...`.
+Pull requests that change the connector run the same comparison against their base branch; see the Benchmark job summary.
+
 == Documentation
 
 {name} documentation is available at https://{project-owner}.github.io/{project-name}
