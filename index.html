@@ -14,7 +14,7 @@
 <div id="header">
 <h1>Redis SQL Trino</h1>
 <div class="details">
-<span id="revnumber">version 0.3.4</span>
+<span id="revnumber">version 0.4.0-SNAPSHOT</span>
 </div>
 <div id="toc" class="toc2">
 <div id="toctitle">Table of Contents</div>
@@ -27,21 +27,29 @@
 </ul>
 </li>
 <li><a href="#configuration">3. Configuration</a></li>
-<li><a href="#clients">4. Clients</a>
+<li><a href="#sql-support">4. SQL support</a>
 <ul class="sectlevel2">
-<li><a href="#jdbc-driver">4.1. JDBC Driver</a></li>
-<li><a href="#tableau">4.2. Tableau</a></li>
-<li><a href="#trino-cli">4.3. Trino CLI</a></li>
+<li><a href="#tables-and-columns">4.1. Tables and columns</a></li>
+<li><a href="#statements">4.2. Statements</a></li>
+<li><a href="#pushdown">4.3. Pushdown</a></li>
+<li><a href="#known-limitations">4.4. Known limitations</a></li>
 </ul>
 </li>
-<li><a href="#build">5. Build</a></li>
-<li><a href="#Walkthrough">6. Complete Walkthrough</a>
+<li><a href="#clients">5. Clients</a>
 <ul class="sectlevel2">
-<li><a href="#install-java">6.1. Install Java</a></li>
-<li><a href="#set-up-trino">6.2. Set up Trino</a></li>
-<li><a href="#set-up-redis-sql-trino">6.3. Set up Redis SQL Trino</a></li>
-<li><a href="#start-trino">6.4. Start Trino</a></li>
-<li><a href="#run-trino-cli">6.5. Run Trino CLI</a></li>
+<li><a href="#jdbc-driver">5.1. JDBC Driver</a></li>
+<li><a href="#tableau">5.2. Tableau</a></li>
+<li><a href="#trino-cli">5.3. Trino CLI</a></li>
+</ul>
+</li>
+<li><a href="#build">6. Build</a></li>
+<li><a href="#Walkthrough">7. Complete Walkthrough</a>
+<ul class="sectlevel2">
+<li><a href="#install-java">7.1. Install Java</a></li>
+<li><a href="#set-up-trino">7.2. Set up Trino</a></li>
+<li><a href="#set-up-redis-sql-trino">7.3. Set up Redis SQL Trino</a></li>
+<li><a href="#start-trino">7.4. Start Trino</a></li>
+<li><a href="#run-trino-cli">7.5. Run Trino CLI</a></li>
 </ul>
 </li>
 </ul>
@@ -64,6 +72,9 @@
 </li>
 <li>
 <p><a href="#configuration">Configuration</a></p>
+</li>
+<li>
+<p><a href="#sql-support">SQL support</a></p>
 </li>
 <li>
 <p><a href="#clients">Clients</a></p>
@@ -137,14 +148,14 @@ redisearch.uri=redis://localhost:6379</code></pre>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><code>false</code></p></td>
 </tr>
 <tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.default-limit</code></p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Max number of documents returned by FT.SEARCH and FT.AGGREGATE when no limit is present in the SQL query.</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><code>10000</code></p></td>
-</tr>
-<tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.cursor-count</code></p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Number of rows read during each <a href="https://redis.io/docs/stack/search/reference/aggregations/#cursor-api">aggregation cursor</a> fetch.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><code>1000</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.table-cache-refresh</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Seconds an index&#8217;s schema is cached. Indexes and fields created outside Trino can take this long to appear.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>60</code></p></td>
 </tr>
 </tbody>
 </table>
@@ -238,10 +249,308 @@ redisearch.uri=redis://localhost:6379</code></pre>
 </div>
 </div>
 <div class="sect1">
-<h2 id="clients"><a class="anchor" href="#clients"></a>4. Clients</h2>
+<h2 id="sql-support"><a class="anchor" href="#sql-support"></a>4. SQL support</h2>
 <div class="sectionbody">
 <div class="sect2">
-<h3 id="jdbc-driver"><a class="anchor" href="#jdbc-driver"></a>4.1. JDBC Driver</h3>
+<h3 id="tables-and-columns"><a class="anchor" href="#tables-and-columns"></a>4.1. Tables and columns</h3>
+<div class="paragraph">
+<p>Each Redis Query Engine index is a table in the <code>default</code> schema (see <code>redisearch.default-schema-name</code>).
+A table has these columns:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>One per indexed field, named by its attribute (the <code>AS</code> name for JSON paths).</p>
+</li>
+<li>
+<p>One per field that isn&#8217;t indexed but appears in the first 10 documents returned by <code>FT.SEARCH &lt;index&gt; *</code>.</p>
+</li>
+<li>
+<p>For JSON indexes, a <code>$</code> column holding the whole document as JSON text.</p>
+</li>
+<li>
+<p>A hidden <code><em>key</code> column holding the document&#8217;s Redis key. Hidden columns are left out of <code>SELECT *</code>, so name it: <code>SELECT </em>key, * FROM beers</code>.</p>
+</li>
+</ul>
+</div>
+<table class="tableblock frame-all grid-all stretch">
+<caption class="title">Table 4. Type mapping</caption>
+<colgroup>
+<col style="width: 50%;">
+<col style="width: 50%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Redis field type</th>
+<th class="tableblock halign-left valign-top">Trino type</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">NUMERIC</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">DOUBLE</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">TAG, TEXT, GEO, GEOSHAPE, VECTOR</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">VARCHAR</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Not indexed</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">VARCHAR</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="sect2">
+<h3 id="statements"><a class="anchor" href="#statements"></a>4.2. Statements</h3>
+<table class="tableblock frame-all grid-all stretch">
+<caption class="title">Table 5. Supported statements</caption>
+<colgroup>
+<col style="width: 33.3333%;">
+<col style="width: 66.6667%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Statement</th>
+<th class="tableblock halign-left valign-top">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>SELECT</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">All of Trino&#8217;s query syntax, including joins (also across catalogs), subqueries, <code>WITH</code>, <code>UNION</code>, <code>DISTINCT</code>, <code>GROUP BY</code>, <code>ORDER BY</code> and window functions.
+<a href="#pushdown">Pushdown</a> describes which parts run in Redis.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>SHOW SCHEMAS</code>, <code>SHOW TABLES</code>, <code>SHOW COLUMNS</code>, <code>DESCRIBE</code>, <code>SHOW CREATE TABLE</code>, <code>information_schema</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>SHOW TABLES</code> lists the indexes returned by <code>FT._LIST</code>.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>EXPLAIN</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">The table scan shows the filters, limit and aggregations sent to Redis.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>CREATE TABLE</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Creates a hash index named after the table, with key prefix <code>&lt;table&gt;:</code>. See <a href="#create-table-types">column types</a>.
+<code>IF NOT EXISTS</code> is supported.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>CREATE TABLE AS SELECT</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">BOOLEAN and DATE values are written but not indexed (<a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/43">#43</a>).</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>INSERT</code>, <code>INSERT ... SELECT</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Hash indexes only (<a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/44">#44</a>).
+Each row is a new hash with key <code>&lt;prefix&gt;&lt;ULID&gt;</code>, where <code>&lt;prefix&gt;</code> is the index&#8217;s first key prefix.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>UPDATE</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Hash indexes only. Setting a column to <code>NULL</code> removes the field from the hash.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>DELETE</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Deletes the matching keys, on hash and JSON indexes.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>MERGE</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Hash indexes only. A <code>WHEN NOT MATCHED THEN INSERT</code> column list must include the table&#8217;s last column (<a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/42">#42</a>).</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>ALTER TABLE ... ADD COLUMN</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Adds a field to the index with <code>FT.ALTER</code>. Columns are always added at the end.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>DROP TABLE</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Drops the index <strong>and deletes its documents</strong> (<code>FT.DROPINDEX ... DD</code>).</p></td>
+</tr>
+</tbody>
+</table>
+<div class="paragraph">
+<p>These statements fail with a <code>This connector does not support ...</code> error:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><code>CREATE SCHEMA</code>, <code>DROP SCHEMA</code>, <code>ALTER SCHEMA</code></p>
+</li>
+<li>
+<p><code>CREATE OR REPLACE TABLE</code></p>
+</li>
+<li>
+<p><code>ALTER TABLE ... RENAME TO</code>, <code>DROP COLUMN</code>, <code>RENAME COLUMN</code>, <code>ALTER COLUMN ... SET DATA TYPE</code></p>
+</li>
+<li>
+<p><code>TRUNCATE</code></p>
+</li>
+<li>
+<p><code>COMMENT ON</code></p>
+</li>
+<li>
+<p><code>CREATE VIEW</code>, <code>CREATE MATERIALIZED VIEW</code></p>
+</li>
+<li>
+<p>Queries on table versions (<code>FOR VERSION AS OF</code>, <code>FOR TIMESTAMP AS OF</code>)</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Writes also fail when fault-tolerant execution is enabled (<code>retry-policy</code> other than <code>NONE</code>).</p>
+</div>
+<table id="create-table-types" class="tableblock frame-all grid-all stretch">
+<caption class="title">Table 6. Column types in CREATE TABLE</caption>
+<colgroup>
+<col style="width: 40%;">
+<col style="width: 20%;">
+<col style="width: 40%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Trino type</th>
+<th class="tableblock halign-left valign-top">Index field</th>
+<th class="tableblock halign-left valign-top">Read back as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">BIGINT, INTEGER, SMALLINT, TINYINT, DOUBLE, REAL, DECIMAL</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">NUMERIC</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">DOUBLE</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">BOOLEAN, DATE, TIMESTAMP(3), TIMESTAMP(3) WITH TIME ZONE</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">NUMERIC</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">DOUBLE. Timestamps are stored as epoch milliseconds.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">VARCHAR, CHAR</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">TAG</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">VARCHAR</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">UUID</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">TAG</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">VARCHAR. <code>CREATE TABLE AS SELECT</code> with UUID values fails (<a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/43">#43</a>).</p></td>
+</tr>
+</tbody>
+</table>
+<div class="paragraph">
+<p>Other types, such as ARRAY, MAP, ROW, VARBINARY and TIME, are rejected.
+Because columns are read back from the index, a column declared as BIGINT or BOOLEAN becomes DOUBLE, and later <code>INSERT</code> statements must supply numbers.
+VARCHAR columns become TAG fields, which match exactly and support <code>LIKE</code> but not full-text search.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="pushdown"><a class="anchor" href="#pushdown"></a>4.3. Pushdown</h3>
+<div class="paragraph">
+<p>Redis evaluates these parts of a query. Trino evaluates everything else on the rows Redis returns.</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Filters on indexed fields, combined with <code>AND</code>:</p>
+<div class="ulist">
+<ul>
+<li>
+<p><code>=</code> and <code>IN</code>. TAG fields match exactly. TEXT fields use full-text matching (<a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/46">#46</a>).</p>
+</li>
+<li>
+<p><code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code> and <code>BETWEEN</code> on NUMERIC fields.</p>
+</li>
+<li>
+<p><code>LIKE</code> on TAG and TEXT fields, as a wildcard query. Trino rewrites prefix patterns such as <code>'abc%'</code> into a range, which it evaluates itself.</p>
+</li>
+</ul>
+</div>
+</li>
+<li>
+<p><code>count(*)</code>, <code>min</code>, <code>max</code>, <code>sum</code> and <code>avg</code> on numeric columns, with or without <code>GROUP BY</code>, as <code>FT.AGGREGATE</code> with <code>GROUPBY</code> and <code>REDUCE</code>.
+If any aggregate in a query can&#8217;t be pushed down, such as <code>count(DISTINCT ...)</code>, Trino computes all of them.</p>
+</li>
+<li>
+<p><code>LIMIT</code>. Trino sorts <code>ORDER BY ... LIMIT</code> itself.</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="known-limitations"><a class="anchor" href="#known-limitations"></a>4.4. Known limitations</h3>
+<div class="paragraph">
+<p>These queries return wrong results or fail.</p>
+</div>
+<table class="tableblock frame-all grid-all stretch">
+<colgroup>
+<col style="width: 40%;">
+<col style="width: 40%;">
+<col style="width: 20%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Problem</th>
+<th class="tableblock halign-left valign-top">Workaround</th>
+<th class="tableblock halign-left valign-top">Issue</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>IS NULL</code> and <code>IS NOT NULL</code> on an indexed field return every row.</p></td>
+<td class="tableblock halign-left valign-top"></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/39">#39</a></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>count(column)</code> counts every row, including those where the column is null.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>count_if(column IS NOT NULL)</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/45">#45</a></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>=</code> and <code>IN</code> on a TEXT field match any document containing the words, not just equal values.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Index the field as TAG for exact matches.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/46">#46</a></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>&lt;&gt;</code>, <code>&lt;</code>, <code>&gt;</code> and <code>BETWEEN</code> on an indexed VARCHAR column fail with <code>Range constraint not supported</code>.</p></td>
+<td class="tableblock halign-left valign-top"></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/40">#40</a></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>HAVING</code>, or a filter on a subquery&#8217;s aggregate, fails with <code>Unknown field ... syntheticColumn0</code> when the aggregation is pushed down.</p></td>
+<td class="tableblock halign-left valign-top"></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/41">#41</a></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>MERGE ... WHEN NOT MATCHED THEN INSERT</code> fails when the column list leaves out the table&#8217;s last column.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">List every column and pass <code>NULL</code> for the ones you don&#8217;t have.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/42">#42</a></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>CREATE TABLE AS SELECT</code> with BOOLEAN or DATE values succeeds, but those rows can&#8217;t be queried.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Cast them first, e.g. <code>CAST(flag AS integer)</code> or <code>CAST(day AS varchar)</code>.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/43">#43</a></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>INSERT</code> into a JSON index writes a hash the index never sees. <code>UPDATE</code> and <code>MERGE</code> on a JSON index fail.</p></td>
+<td class="tableblock halign-left valign-top"></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/44">#44</a></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">A scan without a SQL <code>LIMIT</code> stops at <code>redisearch.default-limit</code> documents (10,000 by default).</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Raise <code>redisearch.default-limit</code>.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/35">#35</a></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Queries return partial results while an index is still being built.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Wait for <code>FT.INFO</code> to report <code>indexing</code> as <code>0</code>.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="https://github.com/redis-field-engineering/redis-sql-trino/issues/36">#36</a></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="clients"><a class="anchor" href="#clients"></a>5. Clients</h2>
+<div class="sectionbody">
+<div class="sect2">
+<h3 id="jdbc-driver"><a class="anchor" href="#jdbc-driver"></a>5.1. JDBC Driver</h3>
 <div class="paragraph">
 <p>The Trino JDBC driver allows users to access Trino from Java-based applications, and other non-Java applications running in a JVM.</p>
 </div>
@@ -258,13 +567,13 @@ redisearch.uri=redis://localhost:6379</code></pre>
 </div>
 </div>
 <div class="sect2">
-<h3 id="tableau"><a class="anchor" href="#tableau"></a>4.2. Tableau</h3>
+<h3 id="tableau"><a class="anchor" href="#tableau"></a>5.2. Tableau</h3>
 <div class="paragraph">
 <p>Refer to the <a href="https://help.tableau.com/current/pro/desktop/en-us/examples_presto.htm">Tableau documentation</a> for setup instructions.</p>
 </div>
 </div>
 <div class="sect2">
-<h3 id="trino-cli"><a class="anchor" href="#trino-cli"></a>4.3. Trino CLI</h3>
+<h3 id="trino-cli"><a class="anchor" href="#trino-cli"></a>5.3. Trino CLI</h3>
 <div class="paragraph">
 <p>Refer to the <a href="https://trino.io/docs/current/client/cli.html">Trino CLI documentation</a> for setup instructions.</p>
 </div>
@@ -272,10 +581,10 @@ redisearch.uri=redis://localhost:6379</code></pre>
 </div>
 </div>
 <div class="sect1">
-<h2 id="build"><a class="anchor" href="#build"></a>5. Build</h2>
+<h2 id="build"><a class="anchor" href="#build"></a>6. Build</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>Run these commands to build the Trino connector for RediSearch from source (requires Java 17+):</p>
+<p>Run these commands to build the Trino connector for RediSearch from source (requires Java 25+):</p>
 </div>
 <div class="listingblock">
 <div class="content">
@@ -287,36 +596,36 @@ cd Redis SQL Trino
 </div>
 </div>
 <div class="sect1">
-<h2 id="Walkthrough"><a class="anchor" href="#Walkthrough"></a>6. Complete Walkthrough</h2>
+<h2 id="Walkthrough"><a class="anchor" href="#Walkthrough"></a>7. Complete Walkthrough</h2>
 <div class="sectionbody">
 <div class="paragraph">
 <p>Follow these step-by-step instructions to deploy a single-node Trino server on Ubuntu.</p>
 </div>
 <div class="sect2">
-<h3 id="install-java"><a class="anchor" href="#install-java"></a>6.1. Install Java</h3>
+<h3 id="install-java"><a class="anchor" href="#install-java"></a>7.1. Install Java</h3>
 <div class="paragraph">
-<p>Trino requires a 64-bit version of Java 17.
+<p>Trino requires a 64-bit version of Java 25.
 It is recommended to use <a href="https://www.azul.com/downloads/?package=jdk">Azul Zulu</a> as the JDK.</p>
 </div>
 <div class="listingblock">
 <div class="content">
 <pre class="CodeRay highlight"><code data-lang="console">$ java -version
-openjdk version &quot;17.0.4.1&quot; 2022-08-12 LTS
-OpenJDK Runtime Environment Zulu17.36+17-CA (build 17.0.4.1+1-LTS)
-OpenJDK 64-Bit Server VM Zulu17.36+17-CA (build 17.0.4.1+1-LTS, mixed mode, sharing)</code></pre>
+openjdk version &quot;25.0.1&quot; 2025-10-21 LTS
+OpenJDK Runtime Environment Zulu25.30+17-CA (build 25.0.1+8-LTS)
+OpenJDK 64-Bit Server VM Zulu25.30+17-CA (build 25.0.1+8-LTS, mixed mode, sharing)</code></pre>
 </div>
 </div>
 </div>
 <div class="sect2">
-<h3 id="set-up-trino"><a class="anchor" href="#set-up-trino"></a>6.2. Set up Trino</h3>
+<h3 id="set-up-trino"><a class="anchor" href="#set-up-trino"></a>7.2. Set up Trino</h3>
 <div class="paragraph">
 <p>Download the Trino server tarball and unpack it.</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="CodeRay highlight"><code data-lang="console">wget https://repo1.maven.org/maven2/io/trino/trino-server/403/trino-server-403.tar.gz
+<pre class="CodeRay highlight"><code data-lang="console">wget https://repo1.maven.org/maven2/io/trino/trino-server/483/trino-server-483.tar.gz
 mkdir /usr/lib/trino
-tar xzvf trino-server-403.tar.gz --directory /usr/lib/trino --strip-components 1</code></pre>
+tar xzvf trino-server-483.tar.gz --directory /usr/lib/trino --strip-components 1</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -395,14 +704,14 @@ discovery.uri=http://localhost:8080</code></pre>
 </div>
 </div>
 <div class="sect2">
-<h3 id="set-up-redis-sql-trino"><a class="anchor" href="#set-up-redis-sql-trino"></a>6.3. Set up Redis SQL Trino</h3>
+<h3 id="set-up-redis-sql-trino"><a class="anchor" href="#set-up-redis-sql-trino"></a>7.3. Set up Redis SQL Trino</h3>
 <div class="paragraph">
 <p>Download latest <a href="https://github.com/redis-field-engineering/redis-sql-trino/releases/latest">release</a> and unzip without any directory structure under <code>plugin/redisearch</code>:</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="CodeRay highlight"><code data-lang="console">wget https://github.com/redis-field-engineering/redis-sql-trino/releases/download/v0.3.4/redis-sql-trino-0.3.4.zip
-unzip -j redis-sql-trino-0.3.4.zip -d /usr/lib/trino/plugin/redisearch</code></pre>
+<pre class="CodeRay highlight"><code data-lang="console">wget https://github.com/redis-field-engineering/redis-sql-trino/releases/download/v0.4.0-SNAPSHOT/redis-sql-trino-0.4.0-SNAPSHOT.zip
+unzip -j redis-sql-trino-0.4.0-SNAPSHOT.zip -d /usr/lib/trino/plugin/redisearch</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -428,7 +737,7 @@ redisearch.uri=redis://localhost:6379</code></pre>
 </div>
 </div>
 <div class="sect2">
-<h3 id="start-trino"><a class="anchor" href="#start-trino"></a>6.4. Start Trino</h3>
+<h3 id="start-trino"><a class="anchor" href="#start-trino"></a>7.4. Start Trino</h3>
 <div class="paragraph">
 <p>Start the Trino server:</p>
 </div>
@@ -439,13 +748,13 @@ redisearch.uri=redis://localhost:6379</code></pre>
 </div>
 </div>
 <div class="sect2">
-<h3 id="run-trino-cli"><a class="anchor" href="#run-trino-cli"></a>6.5. Run Trino CLI</h3>
+<h3 id="run-trino-cli"><a class="anchor" href="#run-trino-cli"></a>7.5. Run Trino CLI</h3>
 <div class="paragraph">
-<p>Download and run <a href="https://repo1.maven.org/maven2/io/trino/trino-cli/403/trino-cli-403-executable.jar">trino-cli-403-executable.jar</a>:</p>
+<p>Download and run <a href="https://repo1.maven.org/maven2/io/trino/trino-cli/483/trino-cli-483-executable.jar">trino-cli-483-executable.jar</a>:</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="CodeRay highlight"><code data-lang="console">wget https://repo1.maven.org/maven2/io/trino/trino-cli/403/trino-cli-403-executable.jar -O /usr/local/bin/trino
+<pre class="CodeRay highlight"><code data-lang="console">wget https://repo1.maven.org/maven2/io/trino/trino-cli/483/trino-cli-483-executable.jar -O /usr/local/bin/trino
 chmod +x /usr/local/bin/trino
 trino --catalog redisearch --schema default</code></pre>
 </div>
@@ -464,8 +773,8 @@ trino --catalog redisearch --schema default</code></pre>
 </div>
 <div id="footer">
 <div id="footer-text">
-Version 0.3.4<br>
-Last updated 2023-09-26 06:05:16 UTC
+Version 0.4.0-SNAPSHOT<br>
+Last updated 2026-10-01 20:56:36 UTC
 </div>
 </div>
 <link rel="stylesheet" href="./coderay-asciidoctor.css">
