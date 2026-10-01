@@ -281,9 +281,10 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	@Override
 	public ConnectorTableProperties getTableProperties(ConnectorSession session, ConnectorTableHandle table) {
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
-		// A TEXT prefilter doesn't guarantee its domain: Redis also returns rows that Trino then filters out
+		// A TAG or TEXT prefilter without a FILTER doesn't guarantee its domain: Redis also returns rows that Trino
+		// then filters out
 		TupleDomain<ColumnHandle> predicate = handle.getConstraint()
-				.filter((column, domain) -> RediSearchQueryBuilder.isExact((RediSearchColumnHandle) column));
+				.filter((column, domain) -> RediSearchQueryBuilder.isExact((RediSearchColumnHandle) column, domain));
 		return new ConnectorTableProperties(predicate, Optional.empty(), Optional.empty(), List.of());
 	}
 
@@ -322,7 +323,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			if (column.isSupportsPredicates() && RediSearchQueryBuilder.isSupported(column, domain)
 					&& !hasCustomStopwords(handle, column)) {
 				supported.put(column, domain);
-				if (!RediSearchQueryBuilder.isExact(column)) {
+				if (!RediSearchQueryBuilder.isExact(column, domain)) {
 					// Redis returns a superset of the matching rows, which Trino filters
 					unsupported.put(column, domain);
 				}
