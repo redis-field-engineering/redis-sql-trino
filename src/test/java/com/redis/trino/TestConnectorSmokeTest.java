@@ -146,6 +146,16 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 	}
 
 	@Test
+	public void testPushedDownAggregationOverNoDocuments() {
+		// With GROUP BY terms there are no groups, so no rows
+		assertThat(query("SELECT orderstatus, count(*) FROM orders WHERE totalprice < 0 GROUP BY orderstatus"))
+				.isFullyPushedDown().returnsEmptyResult();
+		// Without them there is one row: count is 0 and the other aggregates are null
+		assertThat(query("SELECT count(*), sum(totalprice), max(totalprice) FROM orders WHERE totalprice < 0"))
+				.isFullyPushedDown().matches("VALUES (BIGINT '0', CAST(NULL AS double), CAST(NULL AS double))");
+	}
+
+	@Test
 	public void testJsonSearch() {
 		RedisCommands<String, String> sync = redisearch.getConnection().sync();
 		sync.ftCreate("jsontest", CreateArgs.builder().on(TargetType.JSON).build(),
