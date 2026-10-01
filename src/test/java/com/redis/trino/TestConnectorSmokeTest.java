@@ -264,4 +264,29 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 		}
 	}
 
+	@Test
+	public void testAddColumnRebuildsIndex() {
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		String index = "alteridx";
+		redis.eval("for i = 1, 50000 do redis.call('HSET', 'alter:' .. i, 'id', i) end return 1", ScriptOutputType.INTEGER);
+		redis.ftCreate(index, CreateArgs.builder().withPrefix("alter:").build(),
+				List.of(NumericFieldArgs.builder().name("id").build()));
+		redisearch.awaitIndexed(index);
+		try {
+			// FT.ALTER ... SCHEMA ADD reindexes the existing documents in the background; reads during that can miss
+			// documents or return some twice
+			getQueryRunner().execute("ALTER TABLE " + index + " ADD COLUMN extra varchar");
+			assertQueryFails("SELECT count(*) FROM " + index,
+					"Index alteridx is still being built \\(\\d+% indexed\\), so its results would be incomplete.*");
+			redisearch.awaitIndexed(index);
+			assertQuery("SELECT count(*) FROM " + index, "VALUES 50000");
+			assertQuery("SELECT count(*) FROM " + index + " WHERE extra IS NULL", "VALUES 50000");
+			assertUpdate("INSERT INTO " + index + " (id, extra) VALUES (50001, 'x')", 1);
+			assertQuery("SELECT count(*) FROM " + index + " WHERE extra = 'x'", "VALUES 1");
+			assertQuery("SELECT count(*) FROM " + index, "VALUES 50001");
+		} finally {
+			redis.ftDropindex(index, true);
+		}
+	}
+
 }
