@@ -41,6 +41,7 @@ import io.trino.spi.connector.ConnectorTableCredentials;
 import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.ConnectorTransactionHandle;
 import io.trino.spi.connector.DynamicFilter;
+import io.trino.spi.connector.MemoryContext;
 
 public class RediSearchPageSourceProvider implements ConnectorPageSourceProvider {
 	private final RediSearchSession rediSearchSession;
@@ -50,10 +51,11 @@ public class RediSearchPageSourceProvider implements ConnectorPageSourceProvider
 		this.rediSearchSession = requireNonNull(rediSearchSession, "rediSearchSession is null");
 	}
 
+	// RediSearchPageSource reports no memory usage, so there is nothing to send to memoryContext
 	@Override
 	public ConnectorPageSource createPageSource(ConnectorTransactionHandle transaction, ConnectorSession session,
 			ConnectorSplit split, ConnectorTableHandle table, Optional<ConnectorTableCredentials> tableCredentials,
-			List<ColumnHandle> columns, DynamicFilter dynamicFilter) {
+			List<ColumnHandle> columns, DynamicFilter dynamicFilter, MemoryContext memoryContext) {
 		RediSearchTableHandle tableHandle = (RediSearchTableHandle) table;
 		ImmutableList.Builder<RediSearchColumnHandle> handles = ImmutableList.builder();
 		for (ColumnHandle handle : requireNonNull(columns, "columns is null")) {
