@@ -30,6 +30,10 @@ jobs:
       - name: Build
         run: ./mvnw -B package --file pom.xml
 
+      # Runs the packaged plugin from the Build step in a trinodb/trino container
+      - name: Product tests
+        run: ./mvnw -B -Pproduct-tests failsafe:integration-test failsafe:verify --file pom.xml
+
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v7
