@@ -51,10 +51,12 @@ public class RediSearchIndexInfo {
 	public static class Field {
 		private final String attribute;
 		private final RediSearchFieldType type;
+		private final Optional<Character> separator;
 
-		public Field(String attribute, RediSearchFieldType type) {
+		public Field(String attribute, RediSearchFieldType type, Optional<Character> separator) {
 			this.attribute = requireNonNull(attribute, "attribute is null");
 			this.type = requireNonNull(type, "type is null");
+			this.separator = requireNonNull(separator, "separator is null");
 		}
 
 		/**
@@ -67,7 +69,17 @@ public class RediSearchIndexInfo {
 		public RediSearchFieldType getType() {
 			return type;
 		}
+
+		/**
+		 * @return the character a TAG field's values are split into tags on; empty for other fields and for JSON TAG
+		 *         fields, which don't split values by default
+		 */
+		public Optional<Character> getSeparator() {
+			return separator;
+		}
 	}
+
+	private static final char DEFAULT_TAG_SEPARATOR = ',';
 
 	private final Optional<KeyType> keyType;
 	private final List<String> prefixes;
@@ -140,8 +152,8 @@ public class RediSearchIndexInfo {
 				Map<String, Object> attributeMap = toMap((List<?>) attribute);
 				String identifier = string(attributeMap.get("identifier"));
 				String alias = string(attributeMap.get("attribute"));
-				fields.add(new Field(alias == null ? identifier : alias,
-						RediSearchFieldType.of(string(attributeMap.get("type")))));
+				RediSearchFieldType type = RediSearchFieldType.of(string(attributeMap.get("type")));
+				fields.add(new Field(alias == null ? identifier : alias, type, separator(type, attributeMap)));
 			}
 		}
 		boolean indexing = number(info.get("indexing"), 0) != 0;
@@ -149,6 +161,18 @@ public class RediSearchIndexInfo {
 		// Only listed for an index created with STOPWORDS
 		boolean customStopwords = info.containsKey("stopwords_list");
 		return new RediSearchIndexInfo(keyType, prefixes, fields, indexing, percentIndexed, customStopwords);
+	}
+
+	// FT.INFO lists each TAG field's SEPARATOR, empty when values aren't split; without one, assume the default
+	private static Optional<Character> separator(RediSearchFieldType type, Map<String, Object> attribute) {
+		if (type != RediSearchFieldType.TAG) {
+			return Optional.empty();
+		}
+		String separator = string(attribute.get("SEPARATOR"));
+		if (separator == null) {
+			return Optional.of(DEFAULT_TAG_SEPARATOR);
+		}
+		return separator.isEmpty() ? Optional.empty() : Optional.of(separator.charAt(0));
 	}
 
 	// FT.INFO numbers arrive as integers, doubles or strings depending on the field and protocol

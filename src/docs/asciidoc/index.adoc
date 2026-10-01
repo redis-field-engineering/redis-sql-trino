@@ -233,7 +233,7 @@ Writes also fail when fault-tolerant execution is enabled (`retry-policy` other 
 
 Other types, such as ARRAY, MAP, ROW, VARBINARY and TIME, are rejected.
 Because columns are read back from the index, a column declared as BIGINT or BOOLEAN becomes DOUBLE, and later `INSERT` statements must supply numbers.
-VARCHAR columns become TAG fields, which match exactly and support `LIKE` but not full-text search.
+VARCHAR columns become TAG fields with the default `,` separator and without `CASESENSITIVE`, not full-text TEXT fields.
 
 [[pushdown]]
 === Pushdown
@@ -241,18 +241,21 @@ VARCHAR columns become TAG fields, which match exactly and support `LIKE` but no
 Redis evaluates these parts of a query. Trino evaluates everything else on the rows Redis returns.
 
 * Filters on indexed fields, combined with `AND`:
-** `=` and `IN` on TAG and NUMERIC fields.
+** `=`, `IN`, `<`, `\<=`, `>`, `>=` and `BETWEEN` on NUMERIC fields.
+** `=` and `IN` on TAG fields, as a tag query. Redis splits stored values into tags on the field's `SEPARATOR` (by default `,` on hashes and none on JSON), trims whitespace around each tag, and ignores case unless the field is `CASESENSITIVE`.
+It returns the documents with a tag that matches the value, and Trino keeps those equal to it.
+Trino evaluates the filter alone when a value contains the separator, starts or ends with whitespace, or has a control character other than whitespace, since a tag query can't match it.
 ** `=` and `IN` on TEXT fields, as a full-text query for the value's words. Redis returns the documents containing all of them, and Trino keeps those equal to the value.
 Trino evaluates the filter alone when a value has only stop words, and for every TEXT field of an index created with its own `STOPWORDS`.
-** `<`, `\<=`, `>`, `>=` and `BETWEEN` on NUMERIC fields.
-** `LIKE` on TAG and TEXT fields, as a wildcard query. Trino rewrites prefix patterns such as `'abc%'` into a range, which it evaluates itself.
 +
 Redis can't match a missing field or compare strings, so Trino evaluates `IS NULL`, `IS NOT NULL`, a condition combined with `OR \... IS NULL`, and `<>`, `<`, `>` and `BETWEEN` on VARCHAR columns.
++
+Trino also evaluates `LIKE`. A Redis wildcard query matches single words of a TEXT field, ignores case on a TAG field without `CASESENSITIVE`, and leaves out documents once it has matched `MAXEXPANSIONS` (200 by default) distinct values.
 * `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`, as `FT.AGGREGATE` with `GROUPBY` and `REDUCE`.
-If any aggregate in a query can't be pushed down, such as `count(DISTINCT \...)` or `count(column)`, Trino computes all of them.
+If any aggregate in a query can't be pushed down, such as `count(DISTINCT \...)` or `count(column)`, or Trino filters the rows itself, as it does for filters on TAG and TEXT fields, Trino computes all of them.
 `count(column)` skips nulls, but Redis's `COUNT` counts documents, so only `count(*)` is pushed down.
 Trino evaluates `HAVING` on the groups Redis returns.
-* `LIMIT`. Trino sorts `ORDER BY \... LIMIT` itself.
+* `LIMIT`, unless Trino filters the rows itself. Trino sorts `ORDER BY \... LIMIT` itself.
 
 [[known-limitations]]
 === Known limitations

@@ -77,15 +77,9 @@ public class TestFilterPushdown extends AbstractTestQueryFramework {
 
 	@Test
 	public void testExactFiltersPushedDown() {
-		assertThat(query("SELECT id FROM beers WHERE style = 'Wheat'")).isFullyPushedDown()
-				.matches("VALUES VARCHAR '1', '5'");
-		assertThat(query("SELECT id FROM beers WHERE style IN ('Brown Ale', 'Witbier')")).isFullyPushedDown()
-				.matches("VALUES VARCHAR '2', '3'");
 		assertThat(query("SELECT id FROM beers WHERE abv > 5")).isFullyPushedDown().matches("VALUES VARCHAR '3', '4'");
 		assertThat(query("SELECT id FROM beers WHERE abv BETWEEN 4 AND 5")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '1', '2'");
-		// An empty tag isn't a valid query, so Trino evaluates it
-		assertThat(query("SELECT id FROM beers WHERE style = ''")).returnsEmptyResult();
 	}
 
 	private String explain(String sql) {

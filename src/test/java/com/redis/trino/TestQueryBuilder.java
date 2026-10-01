@@ -27,11 +27,15 @@ import io.trino.spi.type.DoubleType;
 public class TestQueryBuilder {
 
 	private static final RediSearchColumnHandle COL1 = new RediSearchColumnHandle("col1", BIGINT, RediSearchFieldType.NUMERIC,
-			false, true);
-	private static final RediSearchColumnHandle COL2 = new RediSearchColumnHandle("col2", createUnboundedVarcharType(),
-			RediSearchFieldType.TAG, false, true);
+			false, true, Optional.empty());
+	private static final RediSearchColumnHandle COL2 = tag("col2", Optional.of(','));
 	private static final RediSearchColumnHandle TEXT_COL = new RediSearchColumnHandle("name",
-			createUnboundedVarcharType(), RediSearchFieldType.TEXT, false, true);
+			createUnboundedVarcharType(), RediSearchFieldType.TEXT, false, true, Optional.empty());
+
+	private static RediSearchColumnHandle tag(String name, Optional<Character> separator) {
+		return new RediSearchColumnHandle(name, createUnboundedVarcharType(), RediSearchFieldType.TAG, false, true,
+				separator);
+	}
 
 	private static Domain varchars(String... values) {
 		return Domain.multipleValues(createUnboundedVarcharType(), Stream.of(values).map(value -> utf8Slice(value)).toList());
@@ -74,7 +78,38 @@ public class TestQueryBuilder {
 		assertThat(new RediSearchQueryBuilder().buildQuery(tupleDomain))
 				.isEqualTo("(@name:(Grimm s Witbier)|@name:(Pocus))");
 		assertThat(RediSearchQueryBuilder.isExact(TEXT_COL)).isFalse();
-		assertThat(RediSearchQueryBuilder.isExact(COL2)).isTrue();
+	}
+
+	@Test
+	public void testBuildQueryTagEscapesAsciiOnly() {
+		// Redis matches nothing for a backslash before a non-ASCII character
+		TupleDomain<ColumnHandle> tupleDomain = TupleDomain.withColumnDomains(ImmutableMap.of(COL2,
+				varchars("Café", "日本 & co.", "a\\b")));
+		assertThat(new RediSearchQueryBuilder().buildQuery(tupleDomain))
+				.isEqualTo("@col2:{Café | a\\\\b | 日本\\ \\&\\ co\\.}");
+		// Values of a JSON TAG field aren't split, so a separator character is escaped like any other
+		TupleDomain<ColumnHandle> json = TupleDomain.withColumnDomains(ImmutableMap.of(tag("col2", Optional.empty()),
+				varchars("a,b")));
+		assertThat(new RediSearchQueryBuilder().buildQuery(json)).isEqualTo("@col2:{a\\,b}");
+	}
+
+	@Test
+	public void testTagValues() {
+		// Redis splits stored values into tags, trims them and folds their case, so Trino filters the rows
+		assertThat(RediSearchQueryBuilder.isExact(COL2)).isFalse();
+		assertThat(RediSearchQueryBuilder.isExact(COL1)).isTrue();
+		assertThat(RediSearchQueryBuilder.isSupported(COL2, varchars("Wheat", "brown ale", "a\tb", "Café"))).isTrue();
+		// A tag query can't match a value containing the separator, surrounded by whitespace or with control characters
+		assertThat(RediSearchQueryBuilder.isSupported(COL2, varchars("Wheat", "a,b"))).isFalse();
+		assertThat(RediSearchQueryBuilder.isSupported(COL2, varchars(" a"))).isFalse();
+		assertThat(RediSearchQueryBuilder.isSupported(COL2, varchars("a\n"))).isFalse();
+		assertThat(RediSearchQueryBuilder.isSupported(COL2, varchars("a\u0001b"))).isFalse();
+		assertThat(RediSearchQueryBuilder.isSupported(COL2, varchars("a\u007Fb"))).isFalse();
+		// The separator is the field's own
+		RediSearchColumnHandle semicolon = tag("col2", Optional.of(';'));
+		assertThat(RediSearchQueryBuilder.isSupported(semicolon, varchars("a,b"))).isTrue();
+		assertThat(RediSearchQueryBuilder.isSupported(semicolon, varchars("a;b"))).isFalse();
+		assertThat(RediSearchQueryBuilder.isSupported(tag("col2", Optional.empty()), varchars("a,b;c"))).isTrue();
 	}
 
 	@Test
@@ -127,7 +162,7 @@ public class TestQueryBuilder {
 	@Test
 	public void testBuildQueryInDouble() {
 		RediSearchColumnHandle orderkey = new RediSearchColumnHandle("orderkey", DoubleType.DOUBLE, RediSearchFieldType.NUMERIC,
-				false, true);
+				false, true, Optional.empty());
 		ValueSet values = ValueSet.ofRanges(equal(DoubleType.DOUBLE, 1.0), equal(DoubleType.DOUBLE, 2.0),
 				equal(DoubleType.DOUBLE, 3.0));
 		TupleDomain<ColumnHandle> tupleDomain = TupleDomain

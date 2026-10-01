@@ -284,7 +284,7 @@ SELECT name, abv FROM beers WHERE abv > 5 LIMIT 10
                                  FT.CURSOR READ beers <cursor> COUNT 1000, until the cursor is exhausted
  │
  ▼
-4. Finish in Trino               filters Redis can't evaluate, ORDER BY, joins, window functions
+4. Finish in Trino               filters Redis can't evaluate exactly, ORDER BY, joins, window functions
  │
  ▼
 Rows to the client
@@ -292,7 +292,7 @@ Rows to the client
 
 Redis returns the matching documents in batches of `redisearch.cursor-count` rows (default 1000), and Trino processes each batch as it arrives.
 Each table scan is a single split, so one Trino worker reads the whole index.
-With `GROUP BY` and `count(*)`, `min`, `max`, `sum` or `avg`, Redis computes the groups too (`GROUPBY` and `REDUCE`), and only the aggregated rows come back.
+With `GROUP BY` and `count(*)`, `min`, `max`, `sum` or `avg`, Redis computes the groups too (`GROUPBY` and `REDUCE`) when it evaluates the whole `WHERE` clause, and only the aggregated rows come back.
 A query with nothing to push down reads every document in the index.
 
 === How an INSERT is written
@@ -399,11 +399,13 @@ These aren't supported:
 
 Redis evaluates these parts of a query. Trino evaluates everything else on the rows Redis returns.
 
-* `WHERE` on indexed fields, combined with `AND`: `=` and `IN`; `<`, `+<=+`, `>`, `>=` and `BETWEEN` on NUMERIC fields; and `LIKE`.
-On TEXT fields, `=` and `IN` find the documents containing the value's words, and Trino keeps the equal ones.
-Trino evaluates `IS NULL`, `IS NOT NULL`, and comparisons other than `=` and `IN` on VARCHAR columns.
-* `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`
-* `LIMIT`
+* `WHERE` on indexed fields, combined with `AND`: `=` and `IN`; and `<`, `+<=+`, `>`, `>=` and `BETWEEN` on NUMERIC fields.
+On TAG and TEXT fields, Redis can also return rows that aren't equal, which Trino filters out.
+A TEXT query finds the documents containing the value's words.
+A TAG query matches any of the tags Redis splits a value into on the field's `SEPARATOR`, ignoring surrounding whitespace and, unless the field is `CASESENSITIVE`, case.
+Trino evaluates `LIKE`, `IS NULL`, `IS NOT NULL`, and comparisons other than `=` and `IN` on VARCHAR columns.
+* `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`, when Redis evaluates the whole `WHERE` clause
+* `LIMIT`, when Redis evaluates the whole `WHERE` clause
 
 === Known limitations
 

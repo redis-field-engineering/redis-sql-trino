@@ -85,7 +85,7 @@ public class RediSearchTranslator {
 	}
 
 	public Aggregation aggregate(RediSearchTableHandle table, String[] columnNames) {
-		String query = queryBuilder.buildQuery(table.getConstraint(), table.getWildcards());
+		String query = queryBuilder.buildQuery(table.getConstraint());
 		AggregateArgs.Builder args = AggregateArgs.builder().dialect(DIALECT);
 		args.load(RediSearchBuiltinField.KEY.getName());
 		for (String columnName : columnNames) {
