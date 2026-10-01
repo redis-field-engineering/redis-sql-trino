@@ -37,7 +37,7 @@ import com.google.common.collect.ImmutableList;
 import io.lettuce.core.codec.StringCodec;
 
 /**
- * The subset of an FT.INFO reply that the connector uses: key type, key prefixes and fields.
+ * The subset of an FT.INFO reply that the connector uses: key type, key prefixes, fields and indexing progress.
  * <p>
  * Parses the reply as returned by {@link io.lettuce.core.output.NestedMultiOutput}, where RESP2 arrays and
  * RESP3 maps both arrive as flat lists of alternating keys and values.
@@ -78,11 +78,16 @@ public class RediSearchIndexInfo {
 	private final Optional<KeyType> keyType;
 	private final List<String> prefixes;
 	private final List<Field> fields;
+	private final boolean indexing;
+	private final double percentIndexed;
 
-	public RediSearchIndexInfo(Optional<KeyType> keyType, List<String> prefixes, List<Field> fields) {
+	public RediSearchIndexInfo(Optional<KeyType> keyType, List<String> prefixes, List<Field> fields, boolean indexing,
+			double percentIndexed) {
 		this.keyType = requireNonNull(keyType, "keyType is null");
 		this.prefixes = ImmutableList.copyOf(requireNonNull(prefixes, "prefixes is null"));
 		this.fields = ImmutableList.copyOf(requireNonNull(fields, "fields is null"));
+		this.indexing = indexing;
+		this.percentIndexed = percentIndexed;
 	}
 
 	public Optional<KeyType> getKeyType() {
@@ -95,6 +100,21 @@ public class RediSearchIndexInfo {
 
 	public List<Field> getFields() {
 		return fields;
+	}
+
+	/**
+	 * @return whether the index is still indexing existing documents in the background, in which case queries
+	 *         return only the documents indexed so far
+	 */
+	public boolean isIndexing() {
+		return indexing;
+	}
+
+	/**
+	 * @return the fraction of existing documents indexed so far, from 0 to 1
+	 */
+	public double getPercentIndexed() {
+		return percentIndexed;
 	}
 
 	public static RediSearchIndexInfo parse(List<Object> reply) {
@@ -121,7 +141,25 @@ public class RediSearchIndexInfo {
 						RediSearchFieldType.of(string(attributeMap.get("type")))));
 			}
 		}
-		return new RediSearchIndexInfo(keyType, prefixes, fields);
+		boolean indexing = number(info.get("indexing"), 0) != 0;
+		double percentIndexed = number(info.get("percent_indexed"), 1);
+		return new RediSearchIndexInfo(keyType, prefixes, fields, indexing, percentIndexed);
+	}
+
+	// FT.INFO numbers arrive as integers, doubles or strings depending on the field and protocol
+	private static double number(Object value, double defaultValue) {
+		if (value instanceof Number) {
+			return ((Number) value).doubleValue();
+		}
+		String string = string(value);
+		if (string == null) {
+			return defaultValue;
+		}
+		try {
+			return Double.parseDouble(string);
+		} catch (NumberFormatException e) {
+			return defaultValue;
+		}
 	}
 
 	// Reads leading key/value pairs; stops at the first non-string key (e.g. trailing flags like SORTABLE).

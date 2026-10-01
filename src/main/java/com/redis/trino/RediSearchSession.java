@@ -25,6 +25,7 @@ package com.redis.trino;
 
 import static com.google.common.base.Throwables.throwIfInstanceOf;
 import static com.google.common.base.Verify.verify;
+import static com.redis.trino.RediSearchErrorCode.REDISEARCH_INDEX_NOT_READY;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
@@ -276,7 +277,9 @@ public class RediSearchSession {
         if (!sync.ftList().contains(index)) {
             List<FieldArgs> fields = columns.stream().filter(c -> !RediSearchBuiltinField.isKeyColumn(c.getName()))
                     .map(c -> buildField(c.getName(), c.getType())).collect(Collectors.toList());
-            sync.ftCreate(index, CreateArgs.builder().withPrefix(index + ":").build(), fields);
+            // A new table starts empty and its rows are indexed as they're written. Without SKIPINITIALSCAN, FT.CREATE
+            // scans the whole keyspace in the background, and queries on the table fail until that finishes.
+            sync.ftCreate(index, CreateArgs.builder().withPrefix(index + ":").skipInitialScan().build(), fields);
         }
     }
 
@@ -400,6 +403,7 @@ public class RediSearchSession {
     }
 
     public AggregateResult aggregate(RediSearchTableHandle table, String[] columnNames) {
+        verifyIndexed(table.getIndex());
         Aggregation aggregation = translator.aggregate(table, columnNames);
         log.info("Running %s", aggregation);
         AggregateResult result = result(sync.ftAggregate(aggregation.getIndex(), aggregation.getQuery(),
@@ -421,6 +425,16 @@ public class RediSearchSession {
             return new AggregateResult(List.of(row), 0);
         }
         return result;
+    }
+
+    // While Redis indexes existing documents in the background (e.g. after FT.CREATE on a populated keyspace), queries
+    // return only the documents indexed so far, with no warning in the reply
+    private void verifyIndexed(String index) {
+        indexInfo(index).filter(RediSearchIndexInfo::isIndexing).ifPresent(info -> {
+            throw new TrinoException(REDISEARCH_INDEX_NOT_READY, format(ENGLISH,
+                    "Index %s is still being built (%.0f%% indexed), so its results would be incomplete; retry once indexing finishes",
+                    index, info.getPercentIndexed() * 100));
+        });
     }
 
     public AggregateResult cursorRead(RediSearchTableHandle tableHandle, long cursor) {

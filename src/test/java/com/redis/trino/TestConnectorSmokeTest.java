@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import com.google.common.base.Throwables;
 
 import io.airlift.log.Logger;
+import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.api.sync.RedisCommands;
 import io.lettuce.core.json.JsonPath;
 import io.lettuce.core.search.arguments.CreateArgs;
@@ -50,6 +51,7 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 						TextFieldArgs.builder().name("name").build(), NumericFieldArgs.builder().name("abv").build(),
 						NumericFieldArgs.builder().name("ibu").build(), TextFieldArgs.builder().name("descript").build(),
 						TagFieldArgs.builder().name("style_name").build(), TagFieldArgs.builder().name("cat_name").build()));
+		redisearch.awaitIndexed("beers");
 		redis.hset("beer:1", Map.of("id", "1", "brewery_id", "812", "name", "Hocus Pocus", "abv", "4.5", "ibu", "0",
 				"style_name", "Light American Wheat Ale or Lager", "cat_name", "Other Style", "last_mod",
 				"2010-07-22 20:00:20 UTC"));
@@ -135,6 +137,7 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 		String index = "emptyidx";
 		redisearch.getConnection().sync().ftCreate(index, CreateArgs.builder().withPrefix(index + ":").build(),
 				List.of(TagFieldArgs.builder().name("field1").build()));
+		redisearch.awaitIndexed(index);
 		assertQuery("SELECT count(*) FROM " + index, "VALUES 0");
 	}
 
@@ -161,6 +164,7 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 		sync.ftCreate("jsontest", CreateArgs.builder().on(TargetType.JSON).build(),
 				List.of(TagFieldArgs.builder().name("$.id").as("id").build(),
 						TextFieldArgs.builder().name("$.message").as("message").build()));
+		redisearch.awaitIndexed("jsontest");
 		sync.jsonSet("doc:1", JsonPath.ROOT_PATH, "{\"id\": \"1\", \"message\": \"this is a test\"}");
 		sync.jsonSet("doc:2", JsonPath.ROOT_PATH, "{\"id\": \"2\", \"message\": \"this is another test\"}");
 		getQueryRunner().execute("select id, message from jsontest");
@@ -184,6 +188,7 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 		String prefix = index + ":";
 		redisearch.getConnection().sync().ftCreate(index, CreateArgs.builder().withPrefix(prefix).build(),
 				List.of(TagFieldArgs.builder().name("id").build(), TagFieldArgs.builder().name("name").build()));
+		redisearch.awaitIndexed(index);
 		assertUpdate(String.format("INSERT INTO %s (id, name) VALUES ('abc', 'mybeer')", index), 1);
 		assertThat(query(String.format("SELECT id, name FROM %s", index)))
 				.matches("VALUES (VARCHAR 'abc', VARCHAR 'mybeer')");
@@ -232,6 +237,24 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 	@Test
 	public void testInPredicateNumeric() {
 		assertQuery("SELECT name, regionkey FROM nation WHERE regionKey in (1, 2, 3)");
+	}
+
+	@Test
+	public void testQueryFailsWhileIndexBuilds() {
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		String index = "bulkidx";
+		redis.eval("for i = 1, 50000 do redis.call('HSET', 'bulk:' .. i, 'id', i) end return 1", ScriptOutputType.INTEGER);
+		// FT.CREATE over existing documents indexes them in the background, during which queries see only some of them
+		redis.ftCreate(index, CreateArgs.builder().withPrefix("bulk:").build(),
+				List.of(NumericFieldArgs.builder().name("id").build()));
+		try {
+			assertQueryFails("SELECT count(*) FROM " + index,
+					"Index bulkidx is still being built \\(\\d+% indexed\\), so its results would be incomplete.*");
+			redisearch.awaitIndexed(index);
+			assertQuery("SELECT count(*) FROM " + index, "VALUES 50000");
+		} finally {
+			redis.ftDropindex(index, true);
+		}
 	}
 
 }
