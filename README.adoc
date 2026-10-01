@@ -230,11 +230,143 @@ The example above uses the https://trino.io/docs/current/client/cli.html[Trino C
 Most real world applications will use the https://trino.io/docs/current/client/jdbc.html[Trino JDBC driver] to issue queries.
 See the https://{project-owner}.github.io/{project-name}/#clients[{name}] documentation for details.
 
-== SQL support
+== How it works
 
-Each Redis Query Engine index is a table in the `default` schema.
-Indexed fields are columns: NUMERIC fields are DOUBLE and all other field types are VARCHAR.
-Fields that appear in documents but aren't indexed are VARCHAR columns too, and a hidden `__key` column holds each document's Redis key.
+{name} reaches Redis only through the Query Engine.
+Each index is a table in the `default` schema, and the connector reads and writes the keys that index covers.
+
+=== Querying data that's already in Redis
+
+Trino can query the hashes and JSON documents your applications already write, as long as a Query Engine index covers them.
+It doesn't scan keys: `SHOW TABLES` lists the indexes from `FT._LIST`, and keys that no index covers are invisible to Trino.
+
+To query existing data, create an index over its key prefix with `FT.CREATE`.
+The Quick start does this for the beer hashes:
+
+[source,console]
+----
+127.0.0.1:6379> FT.CREATE beers ON HASH PREFIX 1 beer: SCHEMA id TAG SORTABLE name TEXT SORTABLE abv NUMERIC SORTABLE
+----
+
+The index is now the table `beers`, with no change to Trino:
+
+* Each indexed field is a column: NUMERIC fields are DOUBLE, and all other field types are VARCHAR. For JSON paths, the column is named by the `AS` alias. Filters on these columns can run in Redis (see Pushdown below).
+* Fields that aren't indexed but appear in the first 10 documents of `+FT.SEARCH beers *+` are VARCHAR columns too. You can select them, but Trino evaluates filters on them itself.
+* For JSON indexes, a `$` column holds the whole document as JSON text.
+* A hidden `+__key+` column holds each document's Redis key. `SELECT *` leaves it out, so name it: `+SELECT __key, * FROM beers+`.
+
+`FT.CREATE` indexes the existing keys in the background, and queries on the index fail with `REDISEARCH_INDEX_NOT_READY` until it finishes.
+From then on, Redis indexes each key as it's written, so rows your applications add appear in the next query.
+Fields added to an index outside Trino can take up to `redisearch.table-cache-refresh` seconds (default 60) to appear as columns.
+
+Use `FT.CREATE` rather than `CREATE TABLE` for data that already exists.
+`CREATE TABLE` creates its index with `SKIPINITIALSCAN`, so it only indexes keys written after it.
+Don't run `DROP TABLE` on an index over application data unless you mean to delete that data: it drops the index *and every document it covers*.
+
+=== How a SELECT runs
+
+[source]
+----
+SELECT name, abv FROM beers WHERE abv > 5 LIMIT 10
+ │
+ ▼
+1. Resolve the table             FT.INFO beers          indexed fields and their types
+   (cached)                      FT.SEARCH beers *      other fields, from the first 10 documents
+ │
+ ▼
+2. Push down what Redis can do   WHERE abv > 5    →     @abv:[(5.0 inf]
+   (coordinator)                 LIMIT 10         →     LIMIT 0 10
+ │
+ ▼
+3. Scan the index                FT.INFO beers          fails if the index is still being built
+   (one worker, one split)       FT.AGGREGATE beers "@abv:[(5.0 inf]" LOAD 3 __key name abv
+                                     LIMIT 0 10 WITHCURSOR COUNT 1000 DIALECT 2
+                                 FT.CURSOR READ beers <cursor> COUNT 1000, until the cursor is exhausted
+ │
+ ▼
+4. Finish in Trino               filters Redis can't evaluate exactly, ORDER BY, joins, window functions
+ │
+ ▼
+Rows to the client
+----
+
+Redis returns the matching documents in batches of `redisearch.cursor-count` rows (default 1000), and Trino processes each batch as it arrives.
+Each table scan is a single split, so one Trino worker reads the whole index.
+With `GROUP BY` and `count(*)`, `min`, `max`, `sum` or `avg`, Redis computes the groups too (`GROUPBY` and `REDUCE`) when it evaluates the whole `WHERE` clause, and only the aggregated rows come back.
+A query with nothing to push down reads every document in the index.
+
+=== How an INSERT is written
+
+[source]
+----
+INSERT INTO beers (id, name, abv) VALUES ('9999', 'Test Ale', 5.5)
+ │
+ ▼
+1. Resolve the table             FT.INFO beers          key type HASH, key prefix beer:, columns
+ │
+ ▼
+2. Write one hash per row        HSET beer:01K6H3Z5Q8XG7V2M4N9P0R1S2T id 9999 name "Test Ale" abv 5.5
+   (workers)
+ │
+ ▼
+3. Redis indexes the hash as it's written, so the next SELECT returns the row
+----
+
+* Each row becomes a new hash. Its key is the index's first key prefix followed by a generated https://github.com/ulid/spec[ULID], with a `:` added if the prefix doesn't end in one. Tables made with `CREATE TABLE` use the prefix `<table>:`.
+* The key doesn't come from any column, and `INSERT` never overwrites. Inserting a row whose `id` is `'190'` adds a second hash next to `beer:190` rather than replacing it. Use `UPDATE` or `MERGE` to change existing documents.
+* Each non-null value becomes a hash field named after its column. NULLs, and columns the `INSERT` leaves out, aren't written.
+* Values are stored as strings: VARCHAR as is, and DOUBLE as Java formats it, so `6` is stored as `6.0`.
+* Rows are sent as pipelined `HSET` commands, one batch per page of rows, outside any transaction. If an `INSERT` fails partway, the rows it already wrote stay in Redis.
+* The connector only writes hashes. `INSERT` into a JSON index writes a hash under `<table>:` that the index never sees (https://github.com/{project-owner}/{project-name}/issues/44[#44]).
+
+Applications read these rows like any other hash, for example with `HGETALL`.
+
+=== Redis commands by statement
+
+`UPDATE`, `DELETE` and `MERGE` first find the matching rows and their keys with `FT.AGGREGATE`, then change those keys.
+
+[cols="1,1"]
+|===
+|SQL |Redis commands
+
+|`SHOW TABLES`
+|`FT._LIST`
+
+|`DESCRIBE beers`
+|`FT.INFO beers`, then `+FT.SEARCH beers *+` for fields that aren't indexed
+
+|`+SELECT * FROM beers WHERE id = '190'+`
+|`+FT.AGGREGATE beers "@id:{190}" LOAD ... WITHCURSOR COUNT 1000 DIALECT 2+`, then `FT.CURSOR READ` until the cursor is exhausted
+
+|`+SELECT style_name, count(*) FROM beers GROUP BY style_name+`
+|`+FT.AGGREGATE beers * ... GROUPBY 1 @style_name REDUCE COUNT 0 ...+`
+
+|`+INSERT INTO beers (id, name, abv) VALUES ('9999', 'Test Ale', 5.5)+`
+|`+HSET beer:<ULID> id 9999 name "Test Ale" abv 5.5+`
+
+|`+UPDATE beers SET abv = 6 WHERE id = '9999'+`
+|`+HSET <key> abv 6.0+` for each matching key
+
+|`+UPDATE beers SET descript = NULL WHERE id = '9999'+`
+|`+HDEL <key> descript+` for each matching key
+
+|`+DELETE FROM beers WHERE id = '9999'+`
+|`+DEL <key> ...+`
+
+|`MERGE`
+|The `UPDATE`, `DELETE` and `INSERT` commands above, for each row. Inserted rows get new ULID keys.
+
+|`+CREATE TABLE drinks (id varchar, abv double)+`
+|`+FT.CREATE drinks ON HASH PREFIX 1 drinks: SKIPINITIALSCAN SCHEMA id TAG abv NUMERIC+`
+
+|`+ALTER TABLE drinks ADD COLUMN style varchar+`
+|`+FT.ALTER drinks SCHEMA ADD style TAG+`
+
+|`DROP TABLE drinks`
+|`+FT.DROPINDEX drinks DD+`, which also deletes every document the index covers
+|===
+
+== SQL support
 
 === Supported statements
 
@@ -279,8 +411,6 @@ Trino evaluates `LIKE`, `IS NULL`, `IS NOT NULL`, and comparisons other than `=`
 
 These queries return wrong results or fail:
 
-* `count(column)` counts every row, including nulls. Use `count_if(column IS NOT NULL)` (https://github.com/{project-owner}/{project-name}/issues/45[#45]).
-* `HAVING` fails when the aggregation is pushed down (https://github.com/{project-owner}/{project-name}/issues/41[#41]).
 * `MERGE \... WHEN NOT MATCHED THEN INSERT` fails unless the column list includes the table's last column (https://github.com/{project-owner}/{project-name}/issues/42[#42]).
 * `CREATE TABLE AS SELECT` with BOOLEAN or DATE values succeeds, but those rows can't be queried. Cast them to INTEGER or VARCHAR first (https://github.com/{project-owner}/{project-name}/issues/43[#43]).
 * `INSERT` into a JSON index writes a hash the index never sees (https://github.com/{project-owner}/{project-name}/issues/44[#44]).

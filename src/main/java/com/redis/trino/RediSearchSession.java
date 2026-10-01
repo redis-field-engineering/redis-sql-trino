@@ -395,7 +395,7 @@ public class RediSearchSession {
         verifyIndexed(table.getIndex());
         Aggregation aggregation = translator.aggregate(table, columnNames);
         log.info("Running %s", aggregation);
-        AggregateResult result = result(sync.ftAggregate(aggregation.getIndex(), aggregation.getQuery(),
+        AggregateResult result = result(table, sync.ftAggregate(aggregation.getIndex(), aggregation.getQuery(),
                 aggregation.getArgs()));
         // A batch can come back empty while the cursor still has rows, so the aggregation is only empty once the
         // cursor is exhausted
@@ -430,12 +430,12 @@ public class RediSearchSession {
         String index = tableHandle.getIndex();
         Cursor id = Cursor.of(cursor, null);
         if (config.getCursorCount() > 0) {
-            return result(sync.ftCursorread(index, id, Math.toIntExact(config.getCursorCount())));
+            return result(tableHandle, sync.ftCursorread(index, id, Math.toIntExact(config.getCursorCount())));
         }
-        return result(sync.ftCursorread(index, id));
+        return result(tableHandle, sync.ftCursorread(index, id));
     }
 
-    private static AggregateResult result(AggregationReply<String> reply) {
+    private static AggregateResult result(RediSearchTableHandle table, AggregationReply<String> reply) {
         List<Map<String, String>> rows = new ArrayList<>();
         for (SearchReply<String> searchReply : reply.getReplies()) {
             for (SearchReply.SearchResult<String> result : searchReply.getResults()) {
@@ -444,6 +444,11 @@ public class RediSearchSession {
                     FieldValue value = field.getValue();
                     if (value != null && !value.isNull()) {
                         row.put(field.getKey(), value.asString());
+                    }
+                }
+                for (RediSearchAggregation metric : table.getMetricAggregations()) {
+                    if (metric.isEmptyResult(row.get(metric.getAlias()))) {
+                        row.remove(metric.getAlias());
                     }
                 }
                 rows.add(row);

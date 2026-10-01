@@ -252,7 +252,9 @@ Redis can't match a missing field or compare strings, so Trino evaluates `IS NUL
 +
 Trino also evaluates `LIKE`. A Redis wildcard query matches single words of a TEXT field, ignores case on a TAG field without `CASESENSITIVE`, and leaves out documents once it has matched `MAXEXPANSIONS` (200 by default) distinct values.
 * `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`, as `FT.AGGREGATE` with `GROUPBY` and `REDUCE`.
-Trino computes all of them if any can't be pushed down, such as `count(DISTINCT \...)`, or if it filters the rows itself, as it does for filters on TAG and TEXT fields.
+If any aggregate in a query can't be pushed down, such as `count(DISTINCT \...)` or `count(column)`, or Trino filters the rows itself, as it does for filters on TAG and TEXT fields, Trino computes all of them.
+`count(column)` skips nulls, but Redis's `COUNT` counts documents, so only `count(*)` is pushed down.
+Trino evaluates `HAVING` on the groups Redis returns.
 * `LIMIT`, unless Trino filters the rows itself. Trino sorts `ORDER BY \... LIMIT` itself.
 
 [[known-limitations]]
@@ -263,14 +265,6 @@ These queries return wrong results or fail.
 [cols="2,2,1"]
 |===
 |Problem |Workaround |Issue
-
-|`count(column)` counts every row, including those where the column is null.
-|`count_if(column IS NOT NULL)`
-|{project-url}/issues/45[#45]
-
-|`HAVING`, or a filter on a subquery's aggregate, fails with `Unknown field \... syntheticColumn0` when the aggregation is pushed down.
-|
-|{project-url}/issues/41[#41]
 
 |`MERGE \... WHEN NOT MATCHED THEN INSERT` fails when the column list leaves out the table's last column.
 |List every column and pass `NULL` for the ones you don't have.
