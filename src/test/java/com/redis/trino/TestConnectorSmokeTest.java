@@ -139,6 +139,13 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 	}
 
 	@Test
+	public void testScanMultiplePages() {
+		// 15,000 orders span 15 pages of up to 1024 rows, the last one partial. The expression stops the filter
+		// and count(*) from being pushed down, so every row goes through RediSearchPageSource.
+		assertQuery("SELECT count(*) FROM orders WHERE custkey * 2 > 0", "VALUES 15000");
+	}
+
+	@Test
 	public void testJsonSearch() {
 		RedisCommands<String, String> sync = redisearch.getConnection().sync();
 		sync.ftCreate("jsontest", CreateArgs.builder().on(TargetType.JSON).build(),
