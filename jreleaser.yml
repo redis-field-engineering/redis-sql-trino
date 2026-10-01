@@ -9,7 +9,7 @@ project:
   license: MIT
   java:
     groupId: com.redis
-    version: 17
+    version: 25
     multiProject: true
   inceptionYear: 2020
   tags:

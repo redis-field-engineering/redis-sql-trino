@@ -45,23 +45,11 @@ import com.google.common.collect.Iterables;
 import com.google.common.primitives.Primitives;
 import com.google.common.primitives.Shorts;
 import com.google.common.primitives.SignedBytes;
-import com.redis.lettucemod.search.Field;
-import com.redis.lettucemod.search.Group;
-import com.redis.lettucemod.search.Reducer;
-import com.redis.lettucemod.search.Reducers.Avg;
-import com.redis.lettucemod.search.Reducers.Count;
-import com.redis.lettucemod.search.Reducers.Max;
-import com.redis.lettucemod.search.Reducers.Min;
-import com.redis.lettucemod.search.Reducers.Sum;
-import com.redis.lettucemod.search.querybuilder.Node;
-import com.redis.lettucemod.search.querybuilder.QueryBuilder;
-import com.redis.lettucemod.search.querybuilder.QueryNode;
-import com.redis.lettucemod.search.querybuilder.Value;
-import com.redis.lettucemod.search.querybuilder.Values;
-import com.redis.lettucemod.util.RedisModulesUtils;
 
 import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
+import io.lettuce.core.search.arguments.AggregateArgs.GroupBy;
+import io.lettuce.core.search.arguments.AggregateArgs.Reducer;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.Range;
@@ -75,18 +63,22 @@ public class RediSearchQueryBuilder {
 	private static final Logger log = Logger.get(RediSearchQueryBuilder.class);
 
 	private static final Map<String, BiFunction<String, String, Reducer>> CONVERTERS = Map.of(RediSearchAggregation.MAX,
-			(alias, field) -> Max.property(field).as(alias).build(), RediSearchAggregation.MIN,
-			(alias, field) -> Min.property(field).as(alias).build(), RediSearchAggregation.SUM,
-			(alias, field) -> Sum.property(field).as(alias).build(), RediSearchAggregation.AVG,
-			(alias, field) -> Avg.property(field).as(alias).build(), RediSearchAggregation.COUNT,
-			(alias, field) -> Count.as(alias));
+			(alias, field) -> Reducer.max(property(field)).as(alias), RediSearchAggregation.MIN,
+			(alias, field) -> Reducer.min(property(field)).as(alias), RediSearchAggregation.SUM,
+			(alias, field) -> Reducer.sum(property(field)).as(alias), RediSearchAggregation.AVG,
+			(alias, field) -> Reducer.avg(property(field)).as(alias), RediSearchAggregation.COUNT,
+			(alias, field) -> Reducer.count().as(alias));
+
+	private static String property(String field) {
+		return "@" + field;
+	}
 
 	public String buildQuery(TupleDomain<ColumnHandle> tupleDomain) {
 		return buildQuery(tupleDomain, Map.of());
 	}
 
 	public String buildQuery(TupleDomain<ColumnHandle> tupleDomain, Map<String, String> wildcards) {
-		List<Node> nodes = new ArrayList<>();
+		List<String> nodes = new ArrayList<>();
 		Optional<Map<ColumnHandle, Domain>> domains = tupleDomain.getDomains();
 		if (domains.isPresent()) {
 			for (Map.Entry<ColumnHandle, Domain> entry : domains.get().entrySet()) {
@@ -99,16 +91,16 @@ public class RediSearchQueryBuilder {
 			}
 		}
 		for (Entry<String, String> wildcard : wildcards.entrySet()) {
-			nodes.add(QueryBuilder.intersect(wildcard.getKey(), wildcard.getValue()));
+			nodes.add(field(wildcard.getKey(), wildcard.getValue()));
 		}
 		if (nodes.isEmpty()) {
 			return "*";
 		}
-		return QueryBuilder.intersect(nodes.toArray(new Node[0])).toString();
+		return intersect(nodes);
 	}
 
-	private Optional<Node> buildPredicate(RediSearchColumnHandle column, Domain domain) {
-		String columnName = RedisModulesUtils.escapeTag(column.getName());
+	private Optional<String> buildPredicate(RediSearchColumnHandle column, Domain domain) {
+		String columnName = escapeTag(column.getName());
 		checkArgument(domain.getType().isOrderable(), "Domain type must be orderable");
 		if (domain.getValues().isNone()) {
 			return Optional.empty();
@@ -117,17 +109,17 @@ public class RediSearchQueryBuilder {
 			return Optional.empty();
 		}
 		Set<Object> singleValues = new HashSet<>();
-		List<Node> disjuncts = new ArrayList<>();
+		List<String> disjuncts = new ArrayList<>();
 		for (Range range : domain.getValues().getRanges().getOrderedRanges()) {
 			if (range.isSingleValue()) {
 				singleValues.add(translateValue(range.getSingleValue(), column.getType()));
 			} else {
-				List<Value> rangeConjuncts = new ArrayList<>();
+				List<String> rangeConjuncts = new ArrayList<>();
 				if (!range.isLowUnbounded()) {
 					Object translated = translateValue(range.getLowBoundedValue(), column.getType());
 					if (translated instanceof Number) {
 						double doubleValue = ((Number) translated).doubleValue();
-						rangeConjuncts.add(range.isLowInclusive() ? Values.ge(doubleValue) : Values.gt(doubleValue));
+						rangeConjuncts.add(numericRange(doubleValue, range.isLowInclusive(), Double.POSITIVE_INFINITY, true));
 					} else {
 						throw new UnsupportedOperationException(
 								String.format("Range constraint not supported for type %s (column: '%s')",
@@ -138,7 +130,7 @@ public class RediSearchQueryBuilder {
 					Object translated = translateValue(range.getHighBoundedValue(), column.getType());
 					if (translated instanceof Number) {
 						double doubleValue = ((Number) translated).doubleValue();
-						rangeConjuncts.add(range.isHighInclusive() ? Values.le(doubleValue) : Values.lt(doubleValue));
+						rangeConjuncts.add(numericRange(Double.NEGATIVE_INFINITY, true, doubleValue, range.isHighInclusive()));
 					} else {
 						throw new UnsupportedOperationException(
 								String.format("Range constraint not supported for type %s (column: '%s')",
@@ -148,55 +140,57 @@ public class RediSearchQueryBuilder {
 				// If conjuncts is null, then the range was ALL, which should already have been
 				// checked for
 				if (!rangeConjuncts.isEmpty()) {
-					disjuncts.add(QueryBuilder.intersect(columnName, rangeConjuncts.toArray(Value[]::new)));
+					disjuncts.add(intersect(fields(columnName, rangeConjuncts)));
 				}
 			}
 		}
 		singleValues(column, singleValues).ifPresent(disjuncts::add);
-		return Optional.of(QueryBuilder.union(disjuncts.toArray(Node[]::new)));
+		return Optional.of(union(disjuncts));
 	}
 
-	private Optional<QueryNode> singleValues(RediSearchColumnHandle column, Set<Object> singleValues) {
+	private Optional<String> singleValues(RediSearchColumnHandle column, Set<Object> singleValues) {
 		if (singleValues.isEmpty()) {
 			return Optional.empty();
 		}
 		if (singleValues.size() == 1) {
-			return Optional.of(
-					QueryBuilder.intersect(column.getName(), value(Iterables.getOnlyElement(singleValues), column)));
+			return Optional.of(field(column.getName(), value(Iterables.getOnlyElement(singleValues), column)));
 		}
-		if (column.getType() instanceof VarcharType && column.getFieldType() == Field.Type.TAG) {
+		if (column.getType() instanceof VarcharType && column.getFieldType() == RediSearchFieldType.TAG) {
 			// Takes care of IN: col IN ('value1', 'value2', ...)
-			return Optional
-					.of(QueryBuilder.intersect(column.getName(), Values.tags(singleValues.toArray(String[]::new))));
+			return Optional.of(field(column.getName(), tags(singleValues.stream().map(String.class::cast).toList())));
 		}
-		Value[] values = singleValues.stream().map(v -> value(v, column)).toArray(Value[]::new);
-		return Optional.of(QueryBuilder.union(column.getName(), values));
+		List<String> values = singleValues.stream().map(v -> value(v, column)).collect(Collectors.toList());
+		if (column.getType() instanceof VarcharType) {
+			// Text terms combine under a single field prefix: @col:(a|b)
+			return Optional.of(field(column.getName(), "(" + String.join("|", values) + ")"));
+		}
+		return Optional.of(union(fields(column.getName(), values)));
 	}
 
-	private Value value(Object trinoNativeValue, RediSearchColumnHandle column) {
+	private String value(Object trinoNativeValue, RediSearchColumnHandle column) {
 		requireNonNull(trinoNativeValue, "trinoNativeValue is null");
 		requireNonNull(column, "column is null");
 		Type type = column.getType();
 		if (type == DOUBLE) {
-			return Values.eq((Double) trinoNativeValue);
+			return numericEquals((Double) trinoNativeValue);
 		}
 		if (type == TINYINT) {
-			return Values.eq((long) SignedBytes.checkedCast(((Long) trinoNativeValue)));
+			return numericEquals(SignedBytes.checkedCast(((Long) trinoNativeValue)));
 		}
 		if (type == SMALLINT) {
-			return Values.eq((long) Shorts.checkedCast(((Long) trinoNativeValue)));
+			return numericEquals(Shorts.checkedCast(((Long) trinoNativeValue)));
 		}
 		if (type == IntegerType.INTEGER) {
-			return Values.eq((long) toIntExact(((Long) trinoNativeValue)));
+			return numericEquals(toIntExact(((Long) trinoNativeValue)));
 		}
 		if (type == BIGINT) {
-			return Values.eq((Long) trinoNativeValue);
+			return numericEquals((Long) trinoNativeValue);
 		}
 		if (type instanceof VarcharType) {
-			if (column.getFieldType() == Field.Type.TAG) {
-				return Values.tags(RedisModulesUtils.escapeTag((String) trinoNativeValue));
+			if (column.getFieldType() == RediSearchFieldType.TAG) {
+				return tags(List.of(escapeTag((String) trinoNativeValue)));
 			}
-			return Values.value((String) trinoNativeValue);
+			return (String) trinoNativeValue;
 		}
 		throw new UnsupportedOperationException("Type " + type + " not supported");
 	}
@@ -237,7 +231,7 @@ public class RediSearchQueryBuilder {
 		return CONVERTERS.get(aggregation.getFunctionName()).apply(aggregation.getAlias(), field);
 	}
 
-	public Optional<Group> group(RediSearchTableHandle table) {
+	public Optional<GroupBy> group(RediSearchTableHandle table) {
 		List<RediSearchAggregationTerm> terms = table.getTermAggregations();
 		List<RediSearchAggregation> aggregates = table.getMetricAggregations();
 		List<String> groupFields = new ArrayList<>();
@@ -249,7 +243,61 @@ public class RediSearchQueryBuilder {
 			return Optional.empty();
 		}
 		log.info("Group fields=%s reducers=%s", groupFields, reducers);
-		return Optional
-				.of(Group.by(groupFields.toArray(String[]::new)).reducers(reducers.toArray(Reducer[]::new)).build());
+		GroupBy groupBy = GroupBy.of(groupFields.stream().map(RediSearchQueryBuilder::property).toArray(String[]::new));
+		reducers.forEach(groupBy::reduce);
+		return Optional.of(groupBy);
+	}
+
+	// Query syntax helpers, formatted the same way as the lettucemod 3.x query builder
+
+	public static String escapeTag(String value) {
+		return value.replaceAll("([^a-zA-Z0-9])", "\\\\$1");
+	}
+
+	public static String tags(List<String> tags) {
+		checkArgument(!tags.isEmpty(), "Must have at least one tag");
+		return "{" + String.join(" | ", tags) + "}";
+	}
+
+	private static String field(String name, String value) {
+		return "@" + name + ":" + value;
+	}
+
+	private static List<String> fields(String name, List<String> values) {
+		return values.stream().map(value -> field(name, value)).collect(Collectors.toList());
+	}
+
+	private static String intersect(List<String> nodes) {
+		return join(" ", nodes);
+	}
+
+	private static String union(List<String> nodes) {
+		return join("|", nodes);
+	}
+
+	private static String join(String separator, List<String> nodes) {
+		if (nodes.size() == 1) {
+			return nodes.get(0);
+		}
+		return "(" + String.join(separator, nodes) + ")";
+	}
+
+	private static String numericEquals(double value) {
+		return numericRange(value, true, value, true);
+	}
+
+	private static String numericRange(double from, boolean fromInclusive, double to, boolean toInclusive) {
+		return "[" + number(from, fromInclusive) + " " + number(to, toInclusive) + "]";
+	}
+
+	private static String number(double value, boolean inclusive) {
+		String prefix = inclusive ? "" : "(";
+		if (value == Double.NEGATIVE_INFINITY) {
+			return prefix + "-inf";
+		}
+		if (value == Double.POSITIVE_INFINITY) {
+			return prefix + "inf";
+		}
+		return prefix + value;
 	}
 }

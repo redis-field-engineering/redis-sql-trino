@@ -31,7 +31,7 @@ import static java.util.Objects.requireNonNull;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import javax.inject.Inject;
+import com.google.inject.Inject;
 
 import io.trino.spi.connector.Connector;
 import io.trino.spi.connector.ConnectorMetadata;

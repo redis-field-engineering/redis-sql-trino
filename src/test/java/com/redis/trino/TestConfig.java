@@ -2,11 +2,11 @@ package com.redis.trino;
 
 import static io.airlift.configuration.testing.ConfigAssertions.assertRecordedDefaults;
 import static io.airlift.configuration.testing.ConfigAssertions.recordDefaults;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Map;
 
-import org.testng.Assert;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.ImmutableMap;
 
@@ -29,17 +29,17 @@ public class TestConfig {
 	public void testExplicitPropertyMappings() {
 		String uri = "redis://redis.example.com:12000";
 		String defaultSchema = "myschema";
-		Map<String, String> properties = new ImmutableMap.Builder<String, String>().put("redisearch.uri", uri)
-				.put("redisearch.default-schema-name", defaultSchema).put("redisearch.resp2", "true").build();
+		Map<String, String> properties = ImmutableMap.<String, String>builder().put("redisearch.uri", uri)
+				.put("redisearch.default-schema-name", defaultSchema).put("redisearch.resp2", "true").buildOrThrow();
 
 		ConfigurationFactory configurationFactory = new ConfigurationFactory(properties);
 		RediSearchConfig config = configurationFactory.build(RediSearchConfig.class);
 
 		RediSearchConfig expected = new RediSearchConfig().setDefaultSchema(defaultSchema).setUri(uri);
 
-		Assert.assertEquals(config.getDefaultSchema(), expected.getDefaultSchema());
-		Assert.assertEquals(config.getUri(), expected.getUri());
-		Assert.assertTrue(config.isResp2());
+		assertThat(config.getDefaultSchema()).isEqualTo(expected.getDefaultSchema());
+		assertThat(config.getUri()).isEqualTo(expected.getUri());
+		assertThat(config.isResp2()).isTrue();
 	}
 
 }

@@ -47,8 +47,6 @@ import java.util.stream.IntStream;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.redis.lettucemod.search.Field;
-import com.redis.lettucemod.search.querybuilder.Values;
 
 import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
@@ -60,7 +58,9 @@ import io.trino.spi.connector.AggregationApplicationResult;
 import io.trino.spi.connector.Assignment;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ColumnMetadata;
+import io.trino.spi.connector.ColumnPosition;
 import io.trino.spi.connector.ConnectorInsertTableHandle;
+import io.trino.spi.connector.ConnectorMergeTableHandle;
 import io.trino.spi.connector.ConnectorMetadata;
 import io.trino.spi.connector.ConnectorOutputMetadata;
 import io.trino.spi.connector.ConnectorOutputTableHandle;
@@ -69,11 +69,14 @@ import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.ConnectorTableLayout;
 import io.trino.spi.connector.ConnectorTableMetadata;
 import io.trino.spi.connector.ConnectorTableProperties;
+import io.trino.spi.connector.ConnectorTableVersion;
 import io.trino.spi.connector.Constraint;
 import io.trino.spi.connector.ConstraintApplicationResult;
 import io.trino.spi.connector.LimitApplicationResult;
 import io.trino.spi.connector.NotFoundException;
 import io.trino.spi.connector.RetryMode;
+import io.trino.spi.connector.RowChangeParadigm;
+import io.trino.spi.connector.SaveMode;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.SchemaTablePrefix;
 import io.trino.spi.connector.TableNotFoundException;
@@ -109,8 +112,12 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	}
 
 	@Override
-	public RediSearchTableHandle getTableHandle(ConnectorSession session, SchemaTableName tableName) {
+	public RediSearchTableHandle getTableHandle(ConnectorSession session, SchemaTableName tableName,
+			Optional<ConnectorTableVersion> startVersion, Optional<ConnectorTableVersion> endVersion) {
 		requireNonNull(tableName, "tableName is null");
+		if (startVersion.isPresent() || endVersion.isPresent()) {
+			throw new TrinoException(StandardErrorCode.NOT_SUPPORTED, "This connector does not support versioned tables");
+		}
 
 		if (tableName.getSchemaName().equals(schemaName)) {
 			try {
@@ -147,7 +154,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		for (RediSearchColumnHandle columnHandle : columns) {
 			columnHandles.put(columnHandle.getName(), columnHandle);
 		}
-		return columnHandles.build();
+		return columnHandles.buildOrThrow();
 	}
 
 	@Override
@@ -179,7 +186,10 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	}
 
 	@Override
-	public void createTable(ConnectorSession session, ConnectorTableMetadata tableMetadata, boolean ignoreExisting) {
+	public void createTable(ConnectorSession session, ConnectorTableMetadata tableMetadata, SaveMode saveMode) {
+		if (saveMode == SaveMode.REPLACE) {
+			throw new TrinoException(StandardErrorCode.NOT_SUPPORTED, "This connector does not support replacing tables");
+		}
 		rediSearchSession.createTable(tableMetadata.getTable(), buildColumnHandles(tableMetadata));
 	}
 
@@ -190,7 +200,11 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	}
 
 	@Override
-	public void addColumn(ConnectorSession session, ConnectorTableHandle tableHandle, ColumnMetadata column) {
+	public void addColumn(ConnectorSession session, ConnectorTableHandle tableHandle, ColumnMetadata column,
+			ColumnPosition position) {
+		if (!(position instanceof ColumnPosition.Last)) {
+			throw new TrinoException(StandardErrorCode.NOT_SUPPORTED, "This connector only supports adding columns at the end");
+		}
 		rediSearchSession.addColumn(((RediSearchTableHandle) tableHandle).getSchemaTableName(), column);
 	}
 
@@ -202,8 +216,11 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 	@Override
 	public ConnectorOutputTableHandle beginCreateTable(ConnectorSession session, ConnectorTableMetadata tableMetadata,
-			Optional<ConnectorTableLayout> layout, RetryMode retryMode) {
+			Optional<ConnectorTableLayout> layout, RetryMode retryMode, boolean replace) {
 		checkRetry(retryMode);
+		if (replace) {
+			throw new TrinoException(StandardErrorCode.NOT_SUPPORTED, "This connector does not support replacing tables");
+		}
 		List<RediSearchColumnHandle> columns = buildColumnHandles(tableMetadata);
 
 		rediSearchSession.createTable(tableMetadata.getTable(), columns);
@@ -241,55 +258,46 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 	@Override
 	public Optional<ConnectorOutputMetadata> finishInsert(ConnectorSession session,
-			ConnectorInsertTableHandle insertHandle, Collection<Slice> fragments,
+			ConnectorInsertTableHandle insertHandle, List<ConnectorTableHandle> sourceTableHandles, Collection<Slice> fragments,
 			Collection<ComputedStatistics> computedStatistics) {
 		return Optional.empty();
 	}
 
 	@Override
-	public RediSearchColumnHandle getDeleteRowIdColumnHandle(ConnectorSession session,
+	public RowChangeParadigm getRowChangeParadigm(ConnectorSession session, ConnectorTableHandle tableHandle) {
+		return RowChangeParadigm.CHANGE_ONLY_UPDATED_COLUMNS;
+	}
+
+	@Override
+	public RediSearchColumnHandle getMergeRowIdColumnHandle(ConnectorSession session,
 			ConnectorTableHandle tableHandle) {
 		return RediSearchBuiltinField.KEY.getColumnHandle();
 	}
 
 	@Override
-	public RediSearchTableHandle beginDelete(ConnectorSession session, ConnectorTableHandle tableHandle,
-			RetryMode retryMode) {
-		checkRetry(retryMode);
-		return (RediSearchTableHandle) tableHandle;
-	}
-
-	@Override
-	public void finishDelete(ConnectorSession session, ConnectorTableHandle tableHandle, Collection<Slice> fragments) {
-		// Do nothing
-	}
-
-	@Override
-	public RediSearchColumnHandle getUpdateRowIdColumnHandle(ConnectorSession session, ConnectorTableHandle tableHandle,
-			List<ColumnHandle> updatedColumns) {
-		return RediSearchBuiltinField.KEY.getColumnHandle();
-	}
-
-	@Override
-	public RediSearchTableHandle beginUpdate(ConnectorSession session, ConnectorTableHandle tableHandle,
-			List<ColumnHandle> updatedColumns, RetryMode retryMode) {
+	public ConnectorMergeTableHandle beginMerge(ConnectorSession session, ConnectorTableHandle tableHandle,
+			Map<Integer, Collection<ColumnHandle>> updateCaseColumns, RetryMode retryMode) {
 		checkRetry(retryMode);
 		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
-		return new RediSearchTableHandle(table.getSchemaTableName(), table.getIndex(), table.getConstraint(),
-				table.getLimit(), table.getTermAggregations(), table.getMetricAggregations(), table.getWildcards(),
-				updatedColumns.stream().map(RediSearchColumnHandle.class::cast).collect(toImmutableList()));
+		List<RediSearchColumnHandle> dataColumns = rediSearchSession.getTable(table.getSchemaTableName()).getColumns()
+				.stream().filter(column -> !column.isHidden()).collect(toImmutableList());
+		ImmutableMap.Builder<Integer, List<Integer>> updateCaseChannels = ImmutableMap.builder();
+		updateCaseColumns.forEach((caseNumber, columns) -> updateCaseChannels.put(caseNumber,
+				columns.stream().map(dataColumns::indexOf).collect(toImmutableList())));
+		return new RediSearchMergeTableHandle(table, dataColumns, updateCaseChannels.buildOrThrow());
 	}
 
 	@Override
-	public void finishUpdate(ConnectorSession session, ConnectorTableHandle tableHandle, Collection<Slice> fragments) {
+	public void finishMerge(ConnectorSession session, ConnectorMergeTableHandle mergeTableHandle,
+			List<ConnectorTableHandle> sourceTableHandles, Collection<Slice> fragments,
+			Collection<ComputedStatistics> computedStatistics) {
 		// Do nothing
 	}
 
 	@Override
 	public ConnectorTableProperties getTableProperties(ConnectorSession session, ConnectorTableHandle table) {
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
-		return new ConnectorTableProperties(handle.getConstraint(), Optional.empty(), Optional.empty(),
-				Optional.empty(), List.of());
+		return new ConnectorTableProperties(handle.getConstraint(), Optional.empty(), Optional.empty(), List.of());
 	}
 
 	@Override
@@ -307,7 +315,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 		return Optional.of(new LimitApplicationResult<>(new RediSearchTableHandle(handle.getSchemaTableName(),
 				handle.getIndex(), handle.getConstraint(), OptionalLong.of(limit), handle.getTermAggregations(),
-				handle.getMetricAggregations(), handle.getWildcards(), handle.getUpdatedColumns()), true, false));
+				handle.getMetricAggregations(), handle.getWildcards()), true, false));
 	}
 
 	@Override
@@ -337,8 +345,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 					if (!newWildcards.containsKey(columnName) && pattern instanceof Slice) {
 						String wildcard = likeToWildcard((Slice) pattern, escape);
-						if (column.getFieldType() == Field.Type.TAG) {
-							wildcard = Values.tags(wildcard).toString();
+						if (column.getFieldType() == RediSearchFieldType.TAG) {
+							wildcard = RediSearchQueryBuilder.tags(List.of(wildcard));
 						}
 						newWildcards.put(columnName, wildcard);
 						continue;
@@ -370,7 +378,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		}
 
 		handle = new RediSearchTableHandle(handle.getSchemaTableName(), handle.getIndex(), newDomain, handle.getLimit(),
-				handle.getTermAggregations(), handle.getMetricAggregations(), newWildcards, handle.getUpdatedColumns());
+				handle.getTermAggregations(), handle.getMetricAggregations(), newWildcards);
 
 		return Optional.of(new ConstraintApplicationResult<>(handle, TupleDomain.withColumnDomains(unsupported),
 				newExpression, false));
@@ -496,8 +504,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			return Optional.empty();
 		}
 		RediSearchTableHandle tableHandle = new RediSearchTableHandle(table.getSchemaTableName(), table.getIndex(),
-				table.getConstraint(), table.getLimit(), terms.build(), aggregationList, table.getWildcards(),
-				table.getUpdatedColumns());
+				table.getConstraint(), table.getLimit(), terms.build(), aggregationList, table.getWildcards());
 		return Optional.of(new AggregationApplicationResult<>(tableHandle, projections.build(),
 				resultAssignments.build(), Map.of(), false));
 	}

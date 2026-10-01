@@ -2,41 +2,46 @@ package com.redis.trino;
 
 import java.io.Closeable;
 
-import com.redis.lettucemod.RedisModulesClient;
-import com.redis.lettucemod.api.StatefulRedisModulesConnection;
-import com.redis.lettucemod.cluster.RedisModulesClusterClient;
-import com.redis.lettucemod.util.RedisModulesUtils;
-import com.redis.testcontainers.RedisStackContainer;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
+import org.testcontainers.utility.DockerImageName;
 
-import io.lettuce.core.AbstractRedisClient;
+import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
+import io.lettuce.core.api.StatefulRedisConnection;
 
 public class RediSearchServer implements Closeable {
 
-    private final RedisStackContainer container = new RedisStackContainer(
-            RedisStackContainer.DEFAULT_IMAGE_NAME.withTag(RedisStackContainer.DEFAULT_TAG)).withEnv("REDISEARCH_ARGS",
-                    "MAXAGGREGATERESULTS -1");
+    // Redis 8 bundles the Query Engine (RediSearch), so no redis-stack image is needed.
+    // search-max-aggregate-results defaults to unlimited in Redis 8, replacing the old
+    // REDISEARCH_ARGS="MAXAGGREGATERESULTS -1" setting.
+    private static final DockerImageName REDIS_IMAGE = DockerImageName.parse("redis:8.4");
 
-    private final AbstractRedisClient client;
+    private static final int REDIS_PORT = 6379;
 
-    private final StatefulRedisModulesConnection<String, String> connection;
+    private final GenericContainer<?> container = new GenericContainer<>(REDIS_IMAGE)
+            .withExposedPorts(REDIS_PORT)
+            .waitingFor(Wait.forLogMessage(".*Ready to accept connections.*\\n", 1));
+
+    private final RedisClient client;
+
+    private final StatefulRedisConnection<String, String> connection;
 
     public RediSearchServer() {
         this.container.start();
-        RedisURI uri = RedisURI.create(container.getRedisURI());
-        this.client = container.isCluster() ? RedisModulesClusterClient.create(uri) : RedisModulesClient.create(uri);
-        this.connection = RedisModulesUtils.connection(client);
+        this.client = RedisClient.create(RedisURI.create(getRedisURI()));
+        this.connection = client.connect();
     }
 
     public String getRedisURI() {
-        return container.getRedisURI();
+        return "redis://" + container.getHost() + ":" + container.getMappedPort(REDIS_PORT);
     }
 
-    public AbstractRedisClient getClient() {
+    public RedisClient getClient() {
         return client;
     }
 
-    public StatefulRedisModulesConnection<String, String> getConnection() {
+    public StatefulRedisConnection<String, String> getConnection() {
         return connection;
     }
 

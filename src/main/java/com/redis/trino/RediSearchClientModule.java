@@ -26,7 +26,7 @@ package com.redis.trino;
 import static io.airlift.configuration.ConfigBinder.configBinder;
 import static java.util.Objects.requireNonNull;
 
-import javax.inject.Singleton;
+import com.google.inject.Singleton;
 
 import com.google.inject.Binder;
 import com.google.inject.Module;

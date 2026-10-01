@@ -70,7 +70,7 @@ public class RediSearchPageSourceResultWriter {
 			writeSlice(output, type, value);
 		} else {
 			throw new TrinoException(GENERIC_INTERNAL_ERROR,
-					"Unhandled type for " + javaType.getSimpleName() + ":" + type.getTypeSignature());
+					"Unhandled type for " + javaType.getSimpleName() + ":" + type.getDisplayName());
 		}
 	}
 
@@ -103,7 +103,7 @@ public class RediSearchPageSourceResultWriter {
 			return packDateTimeWithZone(Long.parseLong(value), UTC_KEY);
 		}
 		throw new TrinoException(GENERIC_INTERNAL_ERROR,
-				"Unhandled type for " + type.getJavaType().getSimpleName() + ":" + type.getTypeSignature());
+				"Unhandled type for " + type.getJavaType().getSimpleName() + ":" + type.getDisplayName());
 	}
 
 	private void writeSlice(BlockBuilder output, Type type, String value) {
@@ -116,7 +116,7 @@ public class RediSearchPageSourceResultWriter {
 		} else if (type.getBaseName().equals(JSON)) {
 			type.writeSlice(output, io.trino.plugin.base.util.JsonTypeUtil.jsonParse(utf8Slice(value)));
 		} else {
-			throw new TrinoException(GENERIC_INTERNAL_ERROR, "Unhandled type for Slice: " + type.getTypeSignature());
+			throw new TrinoException(GENERIC_INTERNAL_ERROR, "Unhandled type for Slice: " + type.getDisplayName());
 		}
 	}
 

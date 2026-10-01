@@ -11,25 +11,107 @@ on:
         default: 'master'
         required: true
 
+# Inlined from redis-github-workflows release-maven.yml, which hard-codes the Zulu JDK;
+# trino-root's enforcer rules only accept Temurin or Oracle.
 jobs:
   release:
     name: Release
-    uses: redis-field-engineering/redis-github-workflows/.github/workflows/release-maven.yml@main
-    with:
-      branch: ${{ github.event.inputs.branch }}
-      version: ${{ github.event.inputs.version }}
-      publish: true
-      java-version: 17
-    secrets:
-      github-token: ${{ secrets.GIT_ACCESS_TOKEN }}
-      gpg-passphrase: ${{ secrets.GPG_PASSPHRASE }}
-      gpg-public-key: ${{ secrets.GPG_PUBLIC_KEY }}
-      gpg-secret-key: ${{ secrets.GPG_SECRET_KEY }}
-      docker-username: ${{ secrets.DOCKER_USERNAME }}
-      docker-password: ${{ secrets.DOCKER_PASSWORD }}
-      sonatype-username: ${{ secrets.SONATYPE_USERNAME }}
-      sonatype-password: ${{ secrets.SONATYPE_PASSWORD }}
-      slack-webhook: ${{ secrets.SLACK_WEBHOOK }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel previous run
+        uses: styfle/cancel-workflow-action@0.12.1
+        with:
+          access_token: ${{ secrets.GIT_ACCESS_TOKEN }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: 25
+          distribution: 'temurin'
+
+      - name: Cache Maven
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Set release version
+        run: |
+          VERSION=${{ inputs.version }}
+          ./mvnw versions:set -DnewVersion=$VERSION
+
+      - name: Build
+        run: |
+          ./mvnw --no-transfer-progress -B --file pom.xml verify
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            target/
+
+      - name: Assemble
+        uses: jreleaser/release-action@v2
+        with:
+          arguments: assemble
+          version: latest
+        env:
+          JRELEASER_PROJECT_VERSION: ${{ inputs.version }}
+
+      - name: Release
+        uses: jreleaser/release-action@v2
+        with:
+          arguments: full-release
+          version: latest
+        env:
+          JRELEASER_PROJECT_VERSION: ${{ inputs.version }}
+          JRELEASER_GITHUB_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
+          JRELEASER_BRANCH: ${{ inputs.branch }}
+          JRELEASER_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          JRELEASER_GPG_PUBLIC_KEY: ${{ secrets.GPG_PUBLIC_KEY }}
+          JRELEASER_GPG_SECRET_KEY: ${{ secrets.GPG_SECRET_KEY }}
+          JRELEASER_DOCKER_DEFAULT_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          JRELEASER_DOCKER_DEFAULT_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          JRELEASER_MAVENCENTRAL_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          JRELEASER_MAVENCENTRAL_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          JRELEASER_GITHUB_PASSWORD: ${{ secrets.GIT_ACCESS_TOKEN }}
+          JRELEASER_SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
+      - name: JReleaser output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact
+          path: |
+            out/jreleaser/trace.log
+            out/jreleaser/output.properties
+
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GIT_ACCESS_TOKEN }}
+          publish_dir: ./target/generated-docs
+
+      - name: Commit release version
+        run: |
+          VERSION=${{ inputs.version }}
+          sed -i -e "s/^\:project-version\:\ .*/:project-version: $VERSION/g" README.adoc
+          ./mvnw build-helper:parse-version versions:set -DnewVersion=\${parsedVersion.majorVersion}.\${parsedVersion.minorVersion}.\${parsedVersion.nextIncrementalVersion}-SNAPSHOT
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "GitHub Action"
+          git add pom.xml README.adoc
+          git commit --allow-empty -a -m "Releasing version $VERSION"
+          git push origin ${{ inputs.branch }}
 
   docker:
     name: 'Docker'
