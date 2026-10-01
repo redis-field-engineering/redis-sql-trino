@@ -11,6 +11,10 @@ on:
         default: 'master'
         required: true
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 # Inlined from redis-github-workflows release-maven.yml, which hard-codes the Zulu JDK;
 # trino-root's enforcer rules only accept Temurin or Oracle.
 jobs:
@@ -18,11 +22,6 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     steps:
-      - name: Cancel previous run
-        uses: styfle/cancel-workflow-action@0.13.1
-        with:
-          access_token: ${{ secrets.GIT_ACCESS_TOKEN }}
-
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -120,6 +119,5 @@ jobs:
     with:
       tags: fieldengineering/redis-sql-trino:latest,fieldengineering/redis-sql-trino:${{ github.event.inputs.version }}
     secrets:
-      github-token: ${{ secrets.GIT_ACCESS_TOKEN }}
       docker-username: ${{ secrets.DOCKER_USERNAME }}
       docker-password: ${{ secrets.DOCKER_PASSWORD }}
