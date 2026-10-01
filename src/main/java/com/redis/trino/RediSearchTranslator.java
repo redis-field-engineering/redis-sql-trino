@@ -32,7 +32,6 @@ import io.lettuce.core.search.arguments.AggregateArgs;
 import io.lettuce.core.search.arguments.AggregateArgs.GroupBy;
 import io.lettuce.core.search.arguments.AggregateArgs.WithCursor;
 import io.lettuce.core.search.arguments.QueryDialects;
-import io.lettuce.core.search.arguments.SearchArgs;
 
 public class RediSearchTranslator {
 
@@ -89,45 +88,6 @@ public class RediSearchTranslator {
 		}
 	}
 
-	public static class Search {
-		private final String index;
-		private final String query;
-		private final SearchArgs<String> args;
-
-		public Search(String index, String query, SearchArgs<String> args) {
-			this.index = index;
-			this.query = query;
-			this.args = args;
-		}
-
-		public String getIndex() {
-			return index;
-		}
-
-		public String getQuery() {
-			return query;
-		}
-
-		public SearchArgs<String> getArgs() {
-			return args;
-		}
-
-		@Override
-		public String toString() {
-			return "Search [index=" + index + ", query=" + query + "]";
-		}
-	}
-
-	public Search search(RediSearchTableHandle table, String[] columnNames) {
-		String query = queryBuilder.buildQuery(table.getConstraint(), table.getWildcards());
-		SearchArgs.Builder<String> args = SearchArgs.<String>builder().withScores().limit(0, limit(table))
-				.dialect(DIALECT);
-		for (String columnName : columnNames) {
-			args.returnField(columnName);
-		}
-		return new Search(table.getIndex(), query, args.build());
-	}
-
 	public Aggregation aggregate(RediSearchTableHandle table, String[] columnNames) {
 		String query = queryBuilder.buildQuery(table.getConstraint(), table.getWildcards());
 		AggregateArgs.Builder args = AggregateArgs.builder().dialect(DIALECT);
@@ -137,18 +97,12 @@ public class RediSearchTranslator {
 		}
 		Optional<GroupBy> groupBy = queryBuilder.group(table);
 		groupBy.ifPresent(args::groupBy);
-		args.limit(0, limit(table));
+		// Only a pushed-down SQL LIMIT caps the results; otherwise the cursor streams every matching document
+		table.getLimit().ifPresent(limit -> args.limit(0, limit));
 		args.withCursor(WithCursor.of(config.getCursorCount() > 0 ? config.getCursorCount() : null));
 		List<RediSearchAggregationTerm> terms = table.getTermAggregations();
 		boolean global = groupBy.isPresent() && (terms == null || terms.isEmpty());
 		return new Aggregation(table.getIndex(), query, args.build(), global);
-	}
-
-	private long limit(RediSearchTableHandle tableHandle) {
-		if (tableHandle.getLimit().isPresent()) {
-			return tableHandle.getLimit().getAsLong();
-		}
-		return config.getDefaultLimit();
 	}
 
 }

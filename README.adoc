@@ -186,7 +186,6 @@ The container writes the `redisearch` catalog from these environment variables:
 |`REDISEARCH_KEY_PASSWORD` |`redisearch.key-password` |
 |`REDISEARCH_CASE_INSENSITIVE_NAMES` |`redisearch.case-insensitive-names` |`false`
 |`REDISEARCH_CURSOR_COUNT` |`redisearch.cursor-count` |`1000`
-|`REDISEARCH_DEFAULT_LIMIT` |`redisearch.default-limit` |`10000`
 |===
 
 The container runs a single-node Trino cluster by default.
