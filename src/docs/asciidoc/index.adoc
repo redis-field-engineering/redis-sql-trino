@@ -233,7 +233,8 @@ Writes also fail when fault-tolerant execution is enabled (`retry-policy` other 
 
 Other types, such as ARRAY, MAP, ROW, VARBINARY and TIME, are rejected.
 Because columns are read back from the index, a column declared as BIGINT or BOOLEAN becomes DOUBLE, and later `INSERT` statements must supply numbers.
-VARCHAR columns become TAG fields with the default `,` separator and without `CASESENSITIVE`, not full-text TEXT fields.
+VARCHAR, CHAR and UUID columns become TAG fields, not full-text TEXT fields.
+They're `CASESENSITIVE` and split values into tags on the ASCII unit separator (`\x1f`) instead of `,`, so Redis can prefilter `=` and `IN` on values containing commas, and doesn't return rows that only differ in case.
 
 [[pushdown]]
 === Pushdown

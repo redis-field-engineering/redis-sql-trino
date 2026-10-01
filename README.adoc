@@ -359,10 +359,10 @@ Applications read these rows like any other hash, for example with `HGETALL`.
 |The `UPDATE`, `DELETE` and `INSERT` commands above, for each row. Inserted rows get new ULID keys.
 
 |`+CREATE TABLE drinks (id varchar, abv double)+`
-|`+FT.CREATE drinks ON HASH PREFIX 1 drinks: SKIPINITIALSCAN SCHEMA id TAG abv NUMERIC+`
+|`+FT.CREATE drinks ON HASH PREFIX 1 drinks: SKIPINITIALSCAN SCHEMA id TAG SEPARATOR "\x1f" CASESENSITIVE abv NUMERIC+`
 
 |`+ALTER TABLE drinks ADD COLUMN style varchar+`
-|`+FT.ALTER drinks SCHEMA ADD style TAG+`
+|`+FT.ALTER drinks SCHEMA ADD style TAG SEPARATOR "\x1f" CASESENSITIVE+`
 
 |`DROP TABLE drinks`
 |`+FT.DROPINDEX drinks DD+`, which also deletes every document the index covers

@@ -117,6 +117,10 @@ public class RediSearchSession {
 
     private final RediSearchTranslator translator;
 
+    // TAG fields created here split values on the ASCII unit separator rather than the default ',', which SQL strings
+    // often contain. Redis can't query a value split into several tags, so Trino would evaluate the filter alone.
+    private static final String TAG_SEPARATOR = "\u001f";
+
     // FT.INFO is not part of Lettuce's RediSearch API
     private static final ProtocolKeyword FT_INFO = new ProtocolKeyword() {
         private final byte[] bytes = "FT.INFO".getBytes(StandardCharsets.US_ASCII);
@@ -474,7 +478,8 @@ public class RediSearchSession {
             case NUMERIC:
                 return NumericFieldArgs.builder().name(columnName).build();
             case TAG:
-                return TagFieldArgs.builder().name(columnName).build();
+                // Case-sensitive like SQL, so tag queries return fewer rows for Trino to drop
+                return TagFieldArgs.builder().name(columnName).separator(TAG_SEPARATOR).caseSensitive().build();
             case TEXT:
                 return TextFieldArgs.builder().name(columnName).build();
             case GEOSHAPE:
