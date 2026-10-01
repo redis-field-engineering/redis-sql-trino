@@ -51,7 +51,6 @@
         <air.check.skip-jacoco>false</air.check.skip-jacoco>
 
         <asciidoctor.maven.plugin.version>2.1.0</asciidoctor.maven.plugin.version>
-        <asciidoctorj.version>2.5.1</asciidoctorj.version>
         <asciidoctorj.pdf.version>2.3.4</asciidoctorj.pdf.version>
     </properties>
     <dependencyManagement>
@@ -82,23 +81,6 @@
                 <groupId>io.trino</groupId>
                 <artifactId>trino-exchange-filesystem</artifactId>
                 <version>${project.parent.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.trino</groupId>
-                <artifactId>trino-exchange-filesystem</artifactId>
-                <version>${project.parent.version}</version>
-                <type>test-jar</type>
-            </dependency>
-            <dependency>
-                <groupId>io.trino</groupId>
-                <artifactId>trino-filesystem</artifactId>
-                <version>${project.parent.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.trino</groupId>
-                <artifactId>trino-filesystem</artifactId>
-                <version>${project.parent.version}</version>
-                <type>test-jar</type>
             </dependency>
             <dependency>
                 <groupId>io.trino</groupId>
@@ -143,12 +125,6 @@
             </dependency>
             <dependency>
                 <groupId>io.trino</groupId>
-                <artifactId>trino-parser</artifactId>
-                <version>${project.parent.version}</version>
-                <type>test-jar</type>
-            </dependency>
-            <dependency>
-                <groupId>io.trino</groupId>
                 <artifactId>trino-plugin-toolkit</artifactId>
                 <version>${project.parent.version}</version>
             </dependency>
@@ -186,11 +162,6 @@
     </dependencyManagement>
 
     <dependencies>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-core</artifactId>
-        </dependency>
-
         <dependency>
             <groupId>com.github.f4b6a3</groupId>
             <artifactId>ulid-creator</artifactId>
@@ -409,25 +380,6 @@
                         <exclude>com/redis/trino/product/**</exclude>
                     </excludes>
                 </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.jacoco</groupId>
-                <artifactId>jacoco-maven-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <id>prepare-agent</id>
-                        <goals>
-                            <goal>prepare-agent</goal>
-                        </goals>
-                    </execution>
-                    <execution>
-                        <id>report</id>
-                        <goals>
-                            <goal>report</goal>
-                        </goals>
-                        <phase>test</phase>
-                    </execution>
-                </executions>
             </plugin>
             <plugin>
                 <groupId>org.asciidoctor</groupId>

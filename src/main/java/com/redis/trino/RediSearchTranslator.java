@@ -32,7 +32,6 @@ import io.lettuce.core.search.arguments.AggregateArgs;
 import io.lettuce.core.search.arguments.AggregateArgs.GroupBy;
 import io.lettuce.core.search.arguments.AggregateArgs.WithCursor;
 import io.lettuce.core.search.arguments.QueryDialects;
-import io.lettuce.core.search.arguments.SearchArgs;
 
 public class RediSearchTranslator {
 
@@ -44,10 +43,6 @@ public class RediSearchTranslator {
 
 	public RediSearchTranslator(RediSearchConfig config) {
 		this.config = requireNonNull(config, "config is null");
-	}
-
-	public RediSearchConfig getConfig() {
-		return config;
 	}
 
 	public static class Aggregation {
@@ -87,45 +82,6 @@ public class RediSearchTranslator {
 		public String toString() {
 			return "Aggregation [index=" + index + ", query=" + query + ", global=" + global + "]";
 		}
-	}
-
-	public static class Search {
-		private final String index;
-		private final String query;
-		private final SearchArgs<String> args;
-
-		public Search(String index, String query, SearchArgs<String> args) {
-			this.index = index;
-			this.query = query;
-			this.args = args;
-		}
-
-		public String getIndex() {
-			return index;
-		}
-
-		public String getQuery() {
-			return query;
-		}
-
-		public SearchArgs<String> getArgs() {
-			return args;
-		}
-
-		@Override
-		public String toString() {
-			return "Search [index=" + index + ", query=" + query + "]";
-		}
-	}
-
-	public Search search(RediSearchTableHandle table, String[] columnNames) {
-		String query = queryBuilder.buildQuery(table.getConstraint(), table.getWildcards());
-		SearchArgs.Builder<String> args = SearchArgs.<String>builder().withScores().limit(0, limit(table))
-				.dialect(DIALECT);
-		for (String columnName : columnNames) {
-			args.returnField(columnName);
-		}
-		return new Search(table.getIndex(), query, args.build());
 	}
 
 	public Aggregation aggregate(RediSearchTableHandle table, String[] columnNames) {

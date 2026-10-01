@@ -53,7 +53,7 @@ redisearch.uri=redis://localhost:6379
 |`false`
 
 |`redisearch.default-limit`
-|Max number of documents returned by FT.SEARCH and FT.AGGREGATE when no limit is present in the SQL query.
+|Max number of documents returned by FT.AGGREGATE when no limit is present in the SQL query.
 |`10000`
 
 |`redisearch.cursor-count`
@@ -226,8 +226,7 @@ Create a JVM config file.
 -XX:PerBytecodeRecompilationCutoff=10000
 -Djdk.attach.allowAttachSelf=true
 -Djdk.nio.maxCachedBufferSize=2000000
--XX:+UnlockDiagnosticVMOptions
--XX:+UseAESCTRIntrinsics
+--add-modules=jdk.incubator.vector
 ----
 
 Create a config properties file.

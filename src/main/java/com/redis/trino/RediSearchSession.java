@@ -25,7 +25,6 @@ package com.redis.trino;
 
 import static com.google.common.base.Throwables.throwIfInstanceOf;
 import static com.google.common.base.Verify.verify;
-import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static java.lang.String.format;
@@ -52,7 +51,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.UncheckedExecutionException;
 import com.redis.trino.RediSearchTranslator.Aggregation;
-import com.redis.trino.RediSearchTranslator.Search;
 
 import io.airlift.log.Logger;
 import io.lettuce.core.AbstractRedisClient;
@@ -304,10 +302,6 @@ public class RediSearchSession {
         return tableName;
     }
 
-    public void dropColumn(SchemaTableName schemaTableName, String columnName) {
-        throw new TrinoException(NOT_SUPPORTED, "This connector does not support dropping columns");
-    }
-
     /**
      * 
      * @param schemaTableName SchemaTableName to load
@@ -370,12 +364,6 @@ public class RediSearchSession {
             return DOUBLE;
         }
         return createUnboundedVarcharType();
-    }
-
-    public SearchReply<String> search(RediSearchTableHandle tableHandle, String[] columns) {
-        Search search = translator.search(tableHandle, columns);
-        log.info("Running %s", search);
-        return sync.ftSearch(search.getIndex(), search.getQuery(), search.getArgs());
     }
 
     /**

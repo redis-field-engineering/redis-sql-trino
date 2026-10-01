@@ -206,12 +206,6 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	}
 
 	@Override
-	public void dropColumn(ConnectorSession session, ConnectorTableHandle tableHandle, ColumnHandle column) {
-		rediSearchSession.dropColumn(((RediSearchTableHandle) tableHandle).getSchemaTableName(),
-				((RediSearchColumnHandle) column).getName());
-	}
-
-	@Override
 	public ConnectorOutputTableHandle beginCreateTable(ConnectorSession session, ConnectorTableMetadata tableMetadata,
 			Optional<ConnectorTableLayout> layout, RetryMode retryMode, boolean replace) {
 		checkRetry(retryMode);

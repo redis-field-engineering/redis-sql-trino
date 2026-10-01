@@ -1,11 +1,4 @@
-HELP.md
-.gradle
-build/
-!gradle/wrapper/gradle-wrapper.jar
-!**/src/main/**/build/
-!**/src/test/**/build/
 hs_err*.log
-test-output/
 *.dylib
 
 ### STS ###
@@ -35,7 +28,6 @@ out/
 /nbbuild/
 /dist/
 /nbdist/
-/.nb-gradle/
 
 ### VS Code ###
 .vscode/

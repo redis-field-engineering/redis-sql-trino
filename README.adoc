@@ -168,7 +168,7 @@ docker exec -it trino trino --catalog redisearch --schema default
 
 On Linux, add `--add-host=host.docker.internal:host-gateway` to reach a Redis running on the host.
 
-The container writes the `redisearch` catalog from these environment variables:
+When any of these environment variables is set, the container writes the `redisearch` catalog from them; unset ones get the default shown.
 
 [cols="2,2,2"]
 |===

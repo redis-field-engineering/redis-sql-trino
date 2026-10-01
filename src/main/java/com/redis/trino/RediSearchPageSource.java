@@ -25,18 +25,12 @@ package com.redis.trino;
 
 import static com.google.common.base.Verify.verify;
 
-import java.io.IOException;
-import java.io.OutputStream;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonGenerator;
-
 import io.airlift.log.Logger;
-import io.airlift.slice.SliceOutput;
 import io.trino.spi.Page;
 import io.trino.spi.PageBuilder;
 import io.trino.spi.block.BlockBuilder;
@@ -117,10 +111,6 @@ public class RediSearchPageSource implements ConnectorPageSource {
 			return currentDoc.get(RediSearchBuiltinField.KEY.getName());
 		}
 		return currentDoc.get(columnName);
-	}
-
-	public static JsonGenerator createJsonGenerator(JsonFactory factory, SliceOutput output) throws IOException {
-		return factory.createGenerator((OutputStream) output);
 	}
 
 	@Override

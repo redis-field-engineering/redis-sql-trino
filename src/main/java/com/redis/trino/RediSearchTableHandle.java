@@ -42,10 +42,6 @@ import io.trino.spi.predicate.TupleDomain;
 
 public class RediSearchTableHandle implements ConnectorTableHandle {
 
-	public enum Type {
-		SEARCH, AGGREGATE
-	}
-
 	private final SchemaTableName schemaTableName;
 	private final String index;
 	private final TupleDomain<ColumnHandle> constraint;

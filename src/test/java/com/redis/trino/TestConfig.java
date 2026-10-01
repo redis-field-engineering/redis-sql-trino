@@ -20,7 +20,6 @@ public class TestConfig {
 				.setResp2(false).setPassword(null).setDefaultSchema(RediSearchConfig.DEFAULT_SCHEMA)
 				.setDefaultLimit(RediSearchConfig.DEFAULT_LIMIT).setCaseInsensitiveNames(false)
 				.setCursorCount(RediSearchConfig.DEFAULT_CURSOR_COUNT)
-				.setTableCacheExpiration(RediSearchConfig.DEFAULT_TABLE_CACHE_EXPIRATION.toSeconds())
 				.setTableCacheRefresh(RediSearchConfig.DEFAULT_TABLE_CACHE_REFRESH.toSeconds()).setCluster(false)
 				.setCaCertPath(null).setKeyPassword(null).setKeyPath(null).setCertPath(null));
 	}
