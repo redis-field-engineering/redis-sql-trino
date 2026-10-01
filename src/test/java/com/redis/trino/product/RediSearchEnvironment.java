@@ -7,17 +7,19 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
-import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.trino.TrinoContainer;
-import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
 import com.redis.trino.RediSearchServer;
+import com.redis.trino.RedisEnterprise;
+import com.redis.trino.RedisEnterprise.Database;
+import com.redis.trino.RedisEnterprise.Deployment;
 
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.api.StatefulRedisConnection;
@@ -32,11 +34,15 @@ import io.trino.testing.containers.TrinoTestImages;
 import io.trino.testing.containers.environment.ProductTestEnvironment;
 
 /**
- * A stock Trino server with the packaged plugin installed, talking to Redis over a shared Docker network.
+ * A stock Trino server with the packaged plugin installed, talking to a Redis Enterprise node over a shared Docker
+ * network.
  * <p>
  * Unlike the smoke tests, which register {@code RediSearchConnectorFactory} in an in-process query runner, this
  * installs the plugin directory produced by {@code mvn package} the way a real deployment does, so it also catches
  * packaging and classloading problems.
+ * <p>
+ * {@link #CATALOG} uses a non-sharded database and {@link #SHARDED_CATALOG} a sharded one, through the connector's
+ * cluster client. Both hold the same test data.
  */
 public class RediSearchEnvironment extends ProductTestEnvironment {
 
@@ -44,21 +50,22 @@ public class RediSearchEnvironment extends ProductTestEnvironment {
 
 	public static final String CATALOG = "redisearch";
 
-	public static final String SCHEMA = "default";
+	public static final String SHARDED_CATALOG = "redisearch_sharded";
 
-	private static final DockerImageName REDIS_IMAGE = DockerImageName.parse("redis:8.4");
+	public static final String SCHEMA = "default";
 
 	private static final String REDIS_ALIAS = "redis";
 
-	private static final int REDIS_PORT = 6379;
-
 	private Network network;
 
-	private GenericContainer<?> redis;
+	private RedisEnterprise redis;
 
-	private RedisClient client;
+	// Catalog name to its database
+	private final Map<String, Database> databases = new LinkedHashMap<>();
 
-	private StatefulRedisConnection<String, String> connection;
+	private final List<RedisClient> clients = new ArrayList<>();
+
+	private final Map<String, StatefulRedisConnection<String, String>> connections = new LinkedHashMap<>();
 
 	private TrinoContainer trino;
 
@@ -70,27 +77,31 @@ public class RediSearchEnvironment extends ProductTestEnvironment {
 		Path pluginDir = pluginDir();
 
 		network = Network.newNetwork();
-		redis = new GenericContainer<>(REDIS_IMAGE).withNetwork(network).withNetworkAliases(REDIS_ALIAS)
-				.withExposedPorts(REDIS_PORT)
-				.waitingFor(Wait.forLogMessage(".*Ready to accept connections.*\\n", 1));
-		redis.start();
-		client = RedisClient.create("redis://" + redis.getHost() + ":" + redis.getMappedPort(REDIS_PORT));
-		connection = client.connect();
+		redis = new RedisEnterprise(network, REDIS_ALIAS);
+		databases.put(CATALOG, redis.createDatabase(Deployment.NON_SHARDED));
+		databases.put(SHARDED_CATALOG, redis.createDatabase(Deployment.SHARDED));
+		TrinoProductTestContainer.Builder builder = TrinoProductTestContainer.builder().withImage(trinoImage())
+				.withNetwork(network);
+		databases.forEach((catalog, database) -> {
+			RedisClient client = RedisClient.create(database.getRedisURI());
+			clients.add(client);
+			connections.put(catalog, client.connect());
+			builder.withCatalog(catalog, Map.of("connector.name", "redisearch", "redisearch.uri",
+					redis.getNetworkRedisURI(database), "redisearch.cluster",
+					String.valueOf(database.getDeployment().isCluster())));
+		});
 		loadTestData();
 
-		trino = TrinoProductTestContainer.builder().withImage(trinoImage()).withNetwork(network)
-				.withCatalog(CATALOG, Map.of("connector.name", "redisearch", "redisearch.uri",
-						"redis://" + REDIS_ALIAS + ":" + REDIS_PORT))
-				.build();
+		trino = builder.build();
 		trino.withCopyFileToContainer(MountableFile.forHostPath(pluginDir), "/usr/lib/trino/plugin/redisearch");
 		TrinoProductTestContainer.startAndWait(trino);
 	}
 
 	/**
-	 * Direct Redis access for test setup that shouldn't go through the connector.
+	 * Direct access to a catalog's database, for test setup that shouldn't go through the connector.
 	 */
-	public RedisCommands<String, String> redis() {
-		return connection.sync();
+	public RedisCommands<String, String> redis(String catalog) {
+		return connections.get(catalog).sync();
 	}
 
 	@Override
@@ -98,9 +109,13 @@ public class RediSearchEnvironment extends ProductTestEnvironment {
 		loadTestData();
 	}
 
-	// Same shape as the beers fixture in TestConnectorSmokeTest, including an unindexed last_mod field
 	private void loadTestData() {
-		RedisCommands<String, String> redis = redis();
+		connections.keySet().forEach(this::loadTestData);
+	}
+
+	// Same shape as the beers fixture in TestConnectorSmokeTest, including an unindexed last_mod field
+	private void loadTestData(String catalog) {
+		RedisCommands<String, String> redis = redis(catalog);
 		redis.flushall();
 		redis.ftCreate("beers", CreateArgs.builder().withPrefix("beer:").build(),
 				List.of(TagFieldArgs.builder().name("id").build(), TextFieldArgs.builder().name("name").build(),
@@ -139,14 +154,11 @@ public class RediSearchEnvironment extends ProductTestEnvironment {
 			trino.close();
 			trino = null;
 		}
-		if (connection != null) {
-			connection.close();
-			connection = null;
-		}
-		if (client != null) {
-			client.shutdown();
-			client = null;
-		}
+		connections.values().forEach(StatefulRedisConnection::close);
+		connections.clear();
+		clients.forEach(RedisClient::shutdown);
+		clients.clear();
+		databases.clear();
 		if (redis != null) {
 			redis.close();
 			redis = null;

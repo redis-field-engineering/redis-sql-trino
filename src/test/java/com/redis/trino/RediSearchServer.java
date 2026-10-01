@@ -3,12 +3,16 @@ package com.redis.trino;
 import java.io.Closeable;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.utility.DockerImageName;
+import com.google.common.collect.ImmutableMap;
+import com.redis.trino.RedisEnterprise.Deployment;
 
+import io.lettuce.core.LettuceFutures;
 import io.lettuce.core.RedisClient;
+import io.lettuce.core.RedisFuture;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
@@ -17,14 +21,13 @@ import io.lettuce.core.output.NestedMultiOutput;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.ProtocolKeyword;
 
+/**
+ * A database for one test class, on the Redis Enterprise cluster shared by the JVM.
+ * <p>
+ * {@link #getConnection()} is a plain (non-cluster) connection for test setup. A sharded database's shards are all on
+ * the one node, so it serves every key, but scripts can only touch keys on a single shard.
+ */
 public class RediSearchServer implements Closeable {
-
-    // Redis 8 bundles the Query Engine (RediSearch), so no redis-stack image is needed.
-    // search-max-aggregate-results defaults to unlimited in Redis 8, replacing the old
-    // REDISEARCH_ARGS="MAXAGGREGATERESULTS -1" setting.
-    private static final DockerImageName REDIS_IMAGE = DockerImageName.parse("redis:8.4");
-
-    private static final int REDIS_PORT = 6379;
 
     private static final Duration INDEXING_TIMEOUT = Duration.ofMinutes(1);
 
@@ -42,22 +45,62 @@ public class RediSearchServer implements Closeable {
         }
     };
 
-    private final GenericContainer<?> container = new GenericContainer<>(REDIS_IMAGE)
-            .withExposedPorts(REDIS_PORT)
-            .waitingFor(Wait.forLogMessage(".*Ready to accept connections.*\\n", 1));
+    private final RedisEnterprise cluster;
+
+    private final RedisEnterprise.Database database;
 
     private final RedisClient client;
 
     private final StatefulRedisConnection<String, String> connection;
 
     public RediSearchServer() {
-        this.container.start();
-        this.client = RedisClient.create(RedisURI.create(getRedisURI()));
-        this.connection = client.connect();
+        this(Deployment.NON_SHARDED);
+    }
+
+    public RediSearchServer(Deployment deployment) {
+        this.cluster = RedisEnterprise.shared();
+        this.database = cluster.createDatabase(deployment);
+        try {
+            this.client = RedisClient.create(RedisURI.create(getRedisURI()));
+            this.connection = client.connect();
+        } catch (RuntimeException e) {
+            cluster.deleteDatabase(database);
+            throw e;
+        }
+    }
+
+    public Deployment getDeployment() {
+        return database.getDeployment();
     }
 
     public String getRedisURI() {
-        return "redis://" + container.getHost() + ":" + container.getMappedPort(REDIS_PORT);
+        return database.getRedisURI();
+    }
+
+    /**
+     * @return the catalog properties that connect the connector to this database
+     */
+    public Map<String, String> getConnectorProperties() {
+        return ImmutableMap.of("redisearch.uri", getRedisURI(), "redisearch.cluster",
+                String.valueOf(getDeployment().isCluster()));
+    }
+
+    /**
+     * Writes {@code count} hashes {@code <keyPrefix><i>} with an {@code id} field of {@code i}, from 1, pipelined.
+     * Unlike a script, this works when the keys are on different shards.
+     */
+    public void writeHashes(String keyPrefix, int count) {
+        // Its own connection: test methods run concurrently and share getConnection(), whose commands would sit
+        // unsent while auto-flush is off
+        try (StatefulRedisConnection<String, String> pipeline = client.connect()) {
+            pipeline.setAutoFlushCommands(false);
+            List<RedisFuture<?>> futures = new ArrayList<>();
+            for (int i = 1; i <= count; i++) {
+                futures.add(pipeline.async().hset(keyPrefix + i, "id", String.valueOf(i)));
+            }
+            pipeline.flushCommands();
+            LettuceFutures.awaitAll(pipeline.getTimeout(), futures.toArray(new RedisFuture[0]));
+        }
     }
 
     public RedisClient getClient() {
@@ -97,7 +140,7 @@ public class RediSearchServer implements Closeable {
         connection.close();
         client.shutdown();
         client.getResources().shutdown();
-        container.close();
+        cluster.deleteDatabase(database);
     }
 
 }

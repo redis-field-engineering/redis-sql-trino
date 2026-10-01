@@ -62,6 +62,7 @@ import io.lettuce.core.SslOptions;
 import io.lettuce.core.SslOptions.Builder;
 import io.lettuce.core.api.StatefulConnection;
 import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.api.sync.RediSearchCommands;
 import io.lettuce.core.cluster.ClusterClientOptions;
 import io.lettuce.core.cluster.RedisClusterClient;
 import io.lettuce.core.cluster.api.StatefulRedisClusterConnection;
@@ -371,13 +372,14 @@ public class RediSearchSession {
     }
 
     /**
-     * A batch of aggregation rows and the cursor to read the next batch with (0 when there are no more).
+     * A batch of aggregation rows and the cursor to read the next batch with, if there are more. In cluster mode the
+     * cursor also names the node that holds it, which reads and deletes are sent to.
      */
     public static class AggregateResult {
         private final List<Map<String, String>> rows;
-        private final long cursor;
+        private final Optional<Cursor> cursor;
 
-        public AggregateResult(List<Map<String, String>> rows, long cursor) {
+        public AggregateResult(List<Map<String, String>> rows, Optional<Cursor> cursor) {
             this.rows = rows;
             this.cursor = cursor;
         }
@@ -386,7 +388,7 @@ public class RediSearchSession {
             return rows;
         }
 
-        public long getCursor() {
+        public Optional<Cursor> getCursor() {
             return cursor;
         }
     }
@@ -399,8 +401,8 @@ public class RediSearchSession {
                 aggregation.getArgs()));
         // A batch can come back empty while the cursor still has rows, so the aggregation is only empty once the
         // cursor is exhausted
-        while (result.getRows().isEmpty() && result.getCursor() != 0) {
-            result = cursorRead(table, result.getCursor());
+        while (result.getRows().isEmpty() && result.getCursor().isPresent()) {
+            result = cursorRead(table, result.getCursor().get());
         }
         if (result.getRows().isEmpty() && aggregation.isGlobal()) {
             // A global aggregation over no documents still returns one row: count is 0 and the other metrics are null.
@@ -411,7 +413,7 @@ public class RediSearchSession {
                     row.put(metric.getAlias(), "0");
                 }
             }
-            return new AggregateResult(List.of(row), 0);
+            return new AggregateResult(List.of(row), Optional.empty());
         }
         return result;
     }
@@ -426,13 +428,19 @@ public class RediSearchSession {
         });
     }
 
-    public AggregateResult cursorRead(RediSearchTableHandle tableHandle, long cursor) {
+    public AggregateResult cursorRead(RediSearchTableHandle tableHandle, Cursor cursor) {
         String index = tableHandle.getIndex();
-        Cursor id = Cursor.of(cursor, null);
+        RediSearchCommands<String> commands = cursorCommands(cursor);
+        AggregateResult result;
         if (config.getCursorCount() > 0) {
-            return result(tableHandle, sync.ftCursorread(index, id, Math.toIntExact(config.getCursorCount())));
+            result = result(tableHandle, commands.ftCursorread(index, cursor, Math.toIntExact(config.getCursorCount())));
+        } else {
+            result = result(tableHandle, commands.ftCursorread(index, cursor));
         }
-        return result(tableHandle, sync.ftCursorread(index, id));
+        // The cursor stays on the node that created it
+        result.getCursor().filter(next -> next.getNodeId().isEmpty())
+                .ifPresent(next -> cursor.getNodeId().ifPresent(next::setNodeId));
+        return result;
     }
 
     private static AggregateResult result(RediSearchTableHandle table, AggregationReply<String> reply) {
@@ -454,8 +462,8 @@ public class RediSearchSession {
                 rows.add(row);
             }
         }
-        long cursor = reply.getCursor().map(Cursor::getCursorId).orElse(0L);
-        return new AggregateResult(rows, cursor);
+        // Cursor ID 0 means there are no more rows
+        return new AggregateResult(rows, reply.getCursor().filter(cursor -> cursor.getCursorId() != 0));
     }
 
     private FieldArgs buildField(String columnName, Type columnType) {
@@ -522,8 +530,20 @@ public class RediSearchSession {
         throw new IllegalArgumentException("unsupported type: " + type);
     }
 
-    public void cursorDelete(RediSearchTableHandle tableHandle, long cursor) {
-        sync.ftCursordel(tableHandle.getIndex(), Cursor.of(cursor, null));
+    // A cursor lives on the node that ran FT.AGGREGATE. Lettuce's cluster client would route cursor commands there over
+    // a read connection, which it opens with READONLY, a command Redis Enterprise doesn't support; so they go over the
+    // node's primary connection instead.
+    @SuppressWarnings("unchecked")
+    private RediSearchCommands<String> cursorCommands(Cursor cursor) {
+        if (connection instanceof StatefulRedisClusterConnection && cursor.getNodeId().isPresent()) {
+            return ((StatefulRedisClusterConnection<String, String>) connection).getConnection(cursor.getNodeId().get())
+                    .sync();
+        }
+        return sync;
+    }
+
+    public void cursorDelete(RediSearchTableHandle tableHandle, Cursor cursor) {
+        cursorCommands(cursor).ftCursordel(tableHandle.getIndex(), cursor);
     }
 
     public Long deleteDocs(List<String> docIds) {

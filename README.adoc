@@ -51,7 +51,7 @@ For example, {name} lets you query and visualize your Redis data from Tableau.
 
 Redis deployments that include the Query Engine:
 
-* https://redis.io/docs/latest/operate/oss_and_stack/[Redis 8] and later: the Query Engine and JSON are built in, so the stock `redis` image works. Tests and the Docker Compose example use `redis:8.4`.
+* https://redis.io/docs/latest/operate/oss_and_stack/[Redis 8] and later: the Query Engine and JSON are built in, so the stock `redis` image works. The Docker Compose example uses `redis:8.4`.
 * https://redis.com/try-free/[Redis Cloud]: Fully-managed, enterprise-grade Redis deployed on AWS, Azure, or GCP.
 * https://redis.com/redis-enterprise-software/overview/[Redis Enterprise]: Enterprise-grade Redis for on-premises and private cloud deployment.
 * https://redis.io/docs/stack/[Redis Stack]: The Redis 7.x distribution that bundled RediSearch and RedisJSON as modules.
@@ -195,7 +195,9 @@ For deployment in your own private cloud or data center, consider https://redis.
 
 == Building from source
 
-Building requires JDK 25. Docker is needed to run the tests, which start Redis in a container with Testcontainers.
+Building requires JDK 25. Docker is needed to run the tests.
+They start a single-node Redis Enterprise Software cluster (`redislabs/redis:8.2.0-78.18`) in a container with Testcontainers, using its trial license, and run against two kinds of database on it: one shard, and two shards behind the OSS Cluster API, which the connector reaches with `redisearch.cluster=true`.
+Give Docker at least 4 GB of memory.
 
 [source,console]
 ----
