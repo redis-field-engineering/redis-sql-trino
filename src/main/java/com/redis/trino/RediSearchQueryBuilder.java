@@ -29,16 +29,18 @@ import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.SmallintType.SMALLINT;
 import static io.trino.spi.type.TinyintType.TINYINT;
 import static java.lang.Math.toIntExact;
+import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
@@ -54,6 +56,7 @@ import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.Range;
 import io.trino.spi.predicate.TupleDomain;
+import io.trino.spi.predicate.ValueSet;
 import io.trino.spi.type.IntegerType;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
@@ -69,8 +72,68 @@ public class RediSearchQueryBuilder {
 			(alias, field) -> Reducer.avg(property(field)).as(alias), RediSearchAggregation.COUNT,
 			(alias, field) -> Reducer.count().as(alias));
 
+	private static final Set<Type> NUMERIC_TYPES = Set.of(DOUBLE, TINYINT, SMALLINT, IntegerType.INTEGER, BIGINT);
+
+	// Redis splits TEXT values into terms on space, tab and this ASCII punctuation. It keeps other characters, such as
+	// '_' and non-ASCII letters, inside terms.
+	private static final Pattern TEXT_SEPARATORS = Pattern.compile("[ \\t!\"#$%&'()*+,\\-./:;<=>?@\\[\\]^`{|}~]+");
+
+	// Characters Redis neither splits on nor indexes as they are: the escape character and the other control characters
+	private static final Pattern TEXT_UNSUPPORTED_CHARACTERS = Pattern.compile("[\\\\\\x00-\\x08\\x0A-\\x1F\\x7F]");
+
+	// A query term that is a stop word matches no documents
+	private static final Set<String> DEFAULT_STOPWORDS = Set.of("a", "is", "the", "an", "and", "are", "as", "at", "be",
+			"but", "by", "for", "if", "in", "into", "it", "no", "not", "of", "on", "or", "such", "that", "their", "then",
+			"there", "these", "they", "this", "to", "was", "will", "with");
+
 	private static String property(String field) {
 		return "@" + field;
+	}
+
+	/**
+	 * Whether {@link #buildQuery} can translate a column's domain into a query that matches every row in it. Redis
+	 * can't match a missing field, so domains that allow nulls are left to Trino, and so is {@code IS NOT NULL}. On
+	 * VARCHAR columns only {@code =} and {@code IN} are supported.
+	 */
+	public static boolean isSupported(RediSearchColumnHandle column, Domain domain) {
+		ValueSet values = domain.getValues();
+		if (domain.isNullAllowed() || values.isAll() || values.isNone()) {
+			return false;
+		}
+		switch (column.getFieldType()) {
+		case NUMERIC:
+			return NUMERIC_TYPES.contains(column.getType());
+		case TAG:
+			// An empty tag query is a syntax error
+			return column.getType() instanceof VarcharType && values.isDiscreteSet()
+					&& values.getDiscreteSet().stream().allMatch(value -> ((Slice) value).length() > 0);
+		case TEXT:
+			return column.getType() instanceof VarcharType && values.isDiscreteSet() && values.getDiscreteSet().stream()
+					.allMatch(value -> textTerms(((Slice) value).toStringUtf8()).isPresent());
+		default:
+			return false;
+		}
+	}
+
+	/**
+	 * Whether the query for a supported domain matches exactly the rows in it. A TEXT query matches the documents
+	 * containing the value's terms, with stemming, so Trino still has to filter the rows Redis returns.
+	 */
+	public static boolean isExact(RediSearchColumnHandle column) {
+		return column.getFieldType() != RediSearchFieldType.TEXT;
+	}
+
+	/**
+	 * The terms Redis indexes a TEXT value as, without default stop words. Empty if no terms are left, or if the value
+	 * has characters that a term query can't match.
+	 */
+	static Optional<List<String>> textTerms(String value) {
+		if (TEXT_UNSUPPORTED_CHARACTERS.matcher(value).find()) {
+			return Optional.empty();
+		}
+		List<String> terms = TEXT_SEPARATORS.splitAsStream(value).filter(term -> !term.isEmpty())
+				.filter(term -> !DEFAULT_STOPWORDS.contains(term.toLowerCase(ENGLISH))).toList();
+		return terms.isEmpty() ? Optional.empty() : Optional.of(terms);
 	}
 
 	public String buildQuery(TupleDomain<ColumnHandle> tupleDomain) {
@@ -102,13 +165,8 @@ public class RediSearchQueryBuilder {
 	private Optional<String> buildPredicate(RediSearchColumnHandle column, Domain domain) {
 		String columnName = escapeTag(column.getName());
 		checkArgument(domain.getType().isOrderable(), "Domain type must be orderable");
-		if (domain.getValues().isNone()) {
-			return Optional.empty();
-		}
-		if (domain.getValues().isAll()) {
-			return Optional.empty();
-		}
-		Set<Object> singleValues = new HashSet<>();
+		checkArgument(isSupported(column, domain), "Unsupported domain for %s: %s", column.getName(), domain);
+		Set<Object> singleValues = new LinkedHashSet<>();
 		List<String> disjuncts = new ArrayList<>();
 		for (Range range : domain.getValues().getRanges().getOrderedRanges()) {
 			if (range.isSingleValue()) {
@@ -152,19 +210,23 @@ public class RediSearchQueryBuilder {
 		if (singleValues.isEmpty()) {
 			return Optional.empty();
 		}
+		if (column.getFieldType() == RediSearchFieldType.TEXT) {
+			// Documents containing all of a value's terms: @col:(term1 term2), or a union of these for IN
+			return Optional.of(union(singleValues.stream()
+					.map(value -> field(column.getName(),
+							"(" + String.join(" ", textTerms((String) value).orElseThrow()) + ")"))
+					.collect(Collectors.toList())));
+		}
 		if (singleValues.size() == 1) {
 			return Optional.of(field(column.getName(), value(Iterables.getOnlyElement(singleValues), column)));
 		}
-		if (column.getType() instanceof VarcharType && column.getFieldType() == RediSearchFieldType.TAG) {
-			// Takes care of IN: col IN ('value1', 'value2', ...)
-			return Optional.of(field(column.getName(), tags(singleValues.stream().map(String.class::cast).toList())));
-		}
-		List<String> values = singleValues.stream().map(v -> value(v, column)).collect(Collectors.toList());
 		if (column.getType() instanceof VarcharType) {
-			// Text terms combine under a single field prefix: @col:(a|b)
-			return Optional.of(field(column.getName(), "(" + String.join("|", values) + ")"));
+			// Takes care of IN: col IN ('value1', 'value2', ...)
+			return Optional.of(field(column.getName(),
+					tags(singleValues.stream().map(String.class::cast).map(RediSearchQueryBuilder::escapeTag).toList())));
 		}
-		return Optional.of(union(fields(column.getName(), values)));
+		return Optional.of(union(fields(column.getName(),
+				singleValues.stream().map(v -> value(v, column)).collect(Collectors.toList()))));
 	}
 
 	private String value(Object trinoNativeValue, RediSearchColumnHandle column) {
@@ -187,10 +249,7 @@ public class RediSearchQueryBuilder {
 			return numericEquals((Long) trinoNativeValue);
 		}
 		if (type instanceof VarcharType) {
-			if (column.getFieldType() == RediSearchFieldType.TAG) {
-				return tags(List.of(escapeTag((String) trinoNativeValue)));
-			}
-			return (String) trinoNativeValue;
+			return tags(List.of(escapeTag((String) trinoNativeValue)));
 		}
 		throw new UnsupportedOperationException("Type " + type + " not supported");
 	}

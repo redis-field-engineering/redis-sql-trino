@@ -267,7 +267,9 @@ These aren't supported:
 
 Redis evaluates these parts of a query. Trino evaluates everything else on the rows Redis returns.
 
-* `WHERE` on indexed fields, combined with `AND`: `=` and `IN`; `<`, `+<=+`, `>`, `>=` and `BETWEEN` on NUMERIC fields; and `LIKE`
+* `WHERE` on indexed fields, combined with `AND`: `=` and `IN`; `<`, `+<=+`, `>`, `>=` and `BETWEEN` on NUMERIC fields; and `LIKE`.
+On TEXT fields, `=` and `IN` find the documents containing the value's words, and Trino keeps the equal ones.
+Trino evaluates `IS NULL`, `IS NOT NULL`, and comparisons other than `=` and `IN` on VARCHAR columns.
 * `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`
 * `LIMIT`
 
@@ -275,10 +277,7 @@ Redis evaluates these parts of a query. Trino evaluates everything else on the r
 
 These queries return wrong results or fail:
 
-* `IS NULL` and `IS NOT NULL` on an indexed field return every row (https://github.com/{project-owner}/{project-name}/issues/39[#39]).
 * `count(column)` counts every row, including nulls. Use `count_if(column IS NOT NULL)` (https://github.com/{project-owner}/{project-name}/issues/45[#45]).
-* `=` and `IN` on a TEXT field do full-text matching, not exact equality. Index the field as TAG for exact matches (https://github.com/{project-owner}/{project-name}/issues/46[#46]).
-* `<>`, `<`, `>` and `BETWEEN` on an indexed VARCHAR column fail (https://github.com/{project-owner}/{project-name}/issues/40[#40]).
 * `HAVING` fails when the aggregation is pushed down (https://github.com/{project-owner}/{project-name}/issues/41[#41]).
 * `MERGE \... WHEN NOT MATCHED THEN INSERT` fails unless the column list includes the table's last column (https://github.com/{project-owner}/{project-name}/issues/42[#42]).
 * `CREATE TABLE AS SELECT` with BOOLEAN or DATE values succeeds, but those rows can't be queried. Cast them to INTEGER or VARCHAR first (https://github.com/{project-owner}/{project-name}/issues/43[#43]).

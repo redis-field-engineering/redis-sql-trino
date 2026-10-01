@@ -241,9 +241,13 @@ VARCHAR columns become TAG fields, which match exactly and support `LIKE` but no
 Redis evaluates these parts of a query. Trino evaluates everything else on the rows Redis returns.
 
 * Filters on indexed fields, combined with `AND`:
-** `=` and `IN`. TAG fields match exactly. TEXT fields use full-text matching ({project-url}/issues/46[#46]).
+** `=` and `IN` on TAG and NUMERIC fields.
+** `=` and `IN` on TEXT fields, as a full-text query for the value's words. Redis returns the documents containing all of them, and Trino keeps those equal to the value.
+Trino evaluates the filter alone when a value has only stop words, and for every TEXT field of an index created with its own `STOPWORDS`.
 ** `<`, `\<=`, `>`, `>=` and `BETWEEN` on NUMERIC fields.
 ** `LIKE` on TAG and TEXT fields, as a wildcard query. Trino rewrites prefix patterns such as `'abc%'` into a range, which it evaluates itself.
++
+Redis can't match a missing field or compare strings, so Trino evaluates `IS NULL`, `IS NOT NULL`, a condition combined with `OR \... IS NULL`, and `<>`, `<`, `>` and `BETWEEN` on VARCHAR columns.
 * `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`, as `FT.AGGREGATE` with `GROUPBY` and `REDUCE`.
 If any aggregate in a query can't be pushed down, such as `count(DISTINCT \...)`, Trino computes all of them.
 * `LIMIT`. Trino sorts `ORDER BY \... LIMIT` itself.
@@ -257,21 +261,9 @@ These queries return wrong results or fail.
 |===
 |Problem |Workaround |Issue
 
-|`IS NULL` and `IS NOT NULL` on an indexed field return every row.
-|
-|{project-url}/issues/39[#39]
-
 |`count(column)` counts every row, including those where the column is null.
 |`count_if(column IS NOT NULL)`
 |{project-url}/issues/45[#45]
-
-|`=` and `IN` on a TEXT field match any document containing the words, not just equal values.
-|Index the field as TAG for exact matches.
-|{project-url}/issues/46[#46]
-
-|`<>`, `<`, `>` and `BETWEEN` on an indexed VARCHAR column fail with `Range constraint not supported`.
-|
-|{project-url}/issues/40[#40]
 
 |`HAVING`, or a filter on a subquery's aggregate, fails with `Unknown field \... syntheticColumn0` when the aggregation is pushed down.
 |

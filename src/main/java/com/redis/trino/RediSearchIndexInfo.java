@@ -74,14 +74,16 @@ public class RediSearchIndexInfo {
 	private final List<Field> fields;
 	private final boolean indexing;
 	private final double percentIndexed;
+	private final boolean customStopwords;
 
 	public RediSearchIndexInfo(Optional<KeyType> keyType, List<String> prefixes, List<Field> fields, boolean indexing,
-			double percentIndexed) {
+			double percentIndexed, boolean customStopwords) {
 		this.keyType = requireNonNull(keyType, "keyType is null");
 		this.prefixes = ImmutableList.copyOf(requireNonNull(prefixes, "prefixes is null"));
 		this.fields = ImmutableList.copyOf(requireNonNull(fields, "fields is null"));
 		this.indexing = indexing;
 		this.percentIndexed = percentIndexed;
+		this.customStopwords = customStopwords;
 	}
 
 	public Optional<KeyType> getKeyType() {
@@ -111,6 +113,13 @@ public class RediSearchIndexInfo {
 		return percentIndexed;
 	}
 
+	/**
+	 * @return whether the index was created with its own STOPWORDS list instead of the default one
+	 */
+	public boolean hasCustomStopwords() {
+		return customStopwords;
+	}
+
 	public static RediSearchIndexInfo parse(List<Object> reply) {
 		Map<String, Object> info = toMap(reply);
 		Optional<KeyType> keyType = Optional.empty();
@@ -137,7 +146,9 @@ public class RediSearchIndexInfo {
 		}
 		boolean indexing = number(info.get("indexing"), 0) != 0;
 		double percentIndexed = number(info.get("percent_indexed"), 1);
-		return new RediSearchIndexInfo(keyType, prefixes, fields, indexing, percentIndexed);
+		// Only listed for an index created with STOPWORDS
+		boolean customStopwords = info.containsKey("stopwords_list");
+		return new RediSearchIndexInfo(keyType, prefixes, fields, indexing, percentIndexed, customStopwords);
 	}
 
 	// FT.INFO numbers arrive as integers, doubles or strings depending on the field and protocol

@@ -288,7 +288,10 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	@Override
 	public ConnectorTableProperties getTableProperties(ConnectorSession session, ConnectorTableHandle table) {
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
-		return new ConnectorTableProperties(handle.getConstraint(), Optional.empty(), Optional.empty(), List.of());
+		// A TEXT prefilter doesn't guarantee its domain: Redis also returns rows that Trino then filters out
+		TupleDomain<ColumnHandle> predicate = handle.getConstraint()
+				.filter((column, domain) -> RediSearchQueryBuilder.isExact((RediSearchColumnHandle) column));
+		return new ConnectorTableProperties(predicate, Optional.empty(), Optional.empty(), List.of());
 	}
 
 	@Override
@@ -353,11 +356,17 @@ public class RediSearchMetadata implements ConnectorMetadata {
 				.orElseThrow(() -> new IllegalArgumentException("constraint summary is NONE"));
 		for (Map.Entry<ColumnHandle, Domain> entry : domains.entrySet()) {
 			RediSearchColumnHandle column = (RediSearchColumnHandle) entry.getKey();
+			Domain domain = entry.getValue();
 
-			if (column.isSupportsPredicates() && !newWildcards.containsKey(column.getName())) {
-				supported.put(column, entry.getValue());
+			if (column.isSupportsPredicates() && !newWildcards.containsKey(column.getName())
+					&& RediSearchQueryBuilder.isSupported(column, domain) && !hasCustomStopwords(handle, column)) {
+				supported.put(column, domain);
+				if (!RediSearchQueryBuilder.isExact(column)) {
+					// Redis returns a superset of the matching rows, which Trino filters
+					unsupported.put(column, domain);
+				}
 			} else {
-				unsupported.put(column, entry.getValue());
+				unsupported.put(column, domain);
 			}
 		}
 
@@ -374,6 +383,13 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		return Optional.of(new ConstraintApplicationResult<>(handle, TupleDomain.withColumnDomains(unsupported),
 				newExpression, false));
 
+	}
+
+	// TEXT queries drop the default stop words, which would match nothing; with its own list, a value's remaining terms
+	// could all be stop words
+	private boolean hasCustomStopwords(RediSearchTableHandle handle, RediSearchColumnHandle column) {
+		return column.getFieldType() == RediSearchFieldType.TEXT
+				&& rediSearchSession.getTable(handle.getSchemaTableName()).getIndexInfo().hasCustomStopwords();
 	}
 
 	protected static boolean isSupportedLikeCall(Call call) {
