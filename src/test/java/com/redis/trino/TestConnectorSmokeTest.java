@@ -149,6 +149,13 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 	}
 
 	@Test
+	public void testScansReadEveryDocument() {
+		// Joins and aggregates Trino computes itself see all 15,000 orders; scans used to stop at 10,000 documents
+		assertQuery("SELECT count(*) FROM orders o JOIN customer c ON o.custkey = c.custkey", "VALUES 15000");
+		assertQuery("SELECT count(DISTINCT orderkey) FROM orders", "VALUES 15000");
+	}
+
+	@Test
 	public void testPushedDownAggregationOverNoDocuments() {
 		// With GROUP BY terms there are no groups, so no rows
 		assertThat(query("SELECT orderstatus, count(*) FROM orders WHERE totalprice < 0 GROUP BY orderstatus"))

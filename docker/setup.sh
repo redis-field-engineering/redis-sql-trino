@@ -16,7 +16,7 @@ envsubst() {
 REDISEARCH_ENVS=0
 if [ ! -z "${REDISEARCH_URI}" ] || [ ! -z "${REDISEARCH_USERNAME}" ] || [ ! -z "${REDISEARCH_PASSWORD}" ] || [ ! -z "${REDISEARCH_CLUSTER}" ] \
 || [ ! -z "${REDISEARCH_INSECURE}" ] || [ ! -z "${REDISEARCH_CACERT_PATH}" ] || [ ! -z "${REDISEARCH_KEY_PATH}" ] || [ ! -z "${REDISEARCH_KEY_PASSWORD}" ] || [ ! -z "${REDISEARCH_CERT_PATH}" ] \
-|| [ ! -z "${REDISEARCH_CASE_INSENSITIVE_NAMES}" ] || [ ! -z "${REDISEARCH_DEFAULT_LIMIT}" ] || [ ! -z "${REDISEARCH_CURSOR_COUNT}" ] || [ ! -z "${REDISEARCH_RESP2}" ]; then
+|| [ ! -z "${REDISEARCH_CASE_INSENSITIVE_NAMES}" ] || [ ! -z "${REDISEARCH_CURSOR_COUNT}" ] || [ ! -z "${REDISEARCH_RESP2}" ]; then
   REDISEARCH_ENVS=1
 fi
 
@@ -32,7 +32,6 @@ export REDISEARCH_KEY_PASSWORD=${REDISEARCH_KEY_PASSWORD}
 export REDISEARCH_CERT_PATH=${REDISEARCH_CERT_PATH}
 export REDISEARCH_CASE_INSENSITIVE_NAMES=${REDISEARCH_CASE_INSENSITIVE_NAMES:-false}
 export REDISEARCH_CURSOR_COUNT=${REDISEARCH_CURSOR_COUNT:-1000}
-export REDISEARCH_DEFAULT_LIMIT=${REDISEARCH_DEFAULT_LIMIT:-10000}
 
 if [ -f /tmp/redisearch.properties.template ] && [ $REDISEARCH_ENVS -eq 1 ]; then
   envsubst < /tmp/redisearch.properties.template > /etc/trino/catalog/redisearch.properties

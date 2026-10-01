@@ -3,6 +3,7 @@ package com.redis.trino;
 import static io.airlift.configuration.testing.ConfigAssertions.assertRecordedDefaults;
 import static io.airlift.configuration.testing.ConfigAssertions.recordDefaults;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Map;
 
@@ -18,7 +19,7 @@ public class TestConfig {
 	public void testDefaults() {
 		assertRecordedDefaults(recordDefaults(RediSearchConfig.class).setUri(null).setInsecure(false).setUsername(null)
 				.setResp2(false).setPassword(null).setDefaultSchema(RediSearchConfig.DEFAULT_SCHEMA)
-				.setDefaultLimit(RediSearchConfig.DEFAULT_LIMIT).setCaseInsensitiveNames(false)
+				.setCaseInsensitiveNames(false)
 				.setCursorCount(RediSearchConfig.DEFAULT_CURSOR_COUNT)
 				.setTableCacheExpiration(RediSearchConfig.DEFAULT_TABLE_CACHE_EXPIRATION.toSeconds())
 				.setTableCacheRefresh(RediSearchConfig.DEFAULT_TABLE_CACHE_REFRESH.toSeconds()).setCluster(false)
@@ -40,6 +41,14 @@ public class TestConfig {
 		assertThat(config.getDefaultSchema()).isEqualTo(expected.getDefaultSchema());
 		assertThat(config.getUri()).isEqualTo(expected.getUri());
 		assertThat(config.isResp2()).isTrue();
+	}
+
+	@Test
+	public void testDefaultLimitIsDefunct() {
+		ConfigurationFactory configurationFactory = new ConfigurationFactory(
+				ImmutableMap.of("redisearch.default-limit", "10000"));
+		assertThatThrownBy(() -> configurationFactory.build(RediSearchConfig.class))
+				.hasMessageContaining("Defunct property 'redisearch.default-limit'");
 	}
 
 }
