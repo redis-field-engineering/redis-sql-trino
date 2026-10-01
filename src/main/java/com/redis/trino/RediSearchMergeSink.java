@@ -45,6 +45,7 @@ import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.trino.spi.Page;
 import io.trino.spi.block.Block;
 import io.trino.spi.connector.ConnectorMergeSink;
+import io.trino.spi.connector.SchemaTableName;
 
 /**
  * Applies SQL MERGE, UPDATE and DELETE to Redis hashes. The row ID is the document key.
@@ -55,6 +56,7 @@ public class RediSearchMergeSink implements ConnectorMergeSink {
 
 	private final RediSearchSession session;
 	private final RediSearchPageSink insertSink;
+	private final SchemaTableName schemaTableName;
 	private final List<RediSearchColumnHandle> columns;
 	private final Map<Integer, List<Integer>> updateCaseChannels;
 
@@ -62,6 +64,7 @@ public class RediSearchMergeSink implements ConnectorMergeSink {
 			RediSearchMergeTableHandle handle) {
 		this.session = requireNonNull(session, "session is null");
 		this.insertSink = requireNonNull(insertSink, "insertSink is null");
+		this.schemaTableName = handle.getTableHandle().getSchemaTableName();
 		this.columns = handle.getDataColumns();
 		this.updateCaseChannels = handle.getUpdateCaseChannels();
 	}
@@ -111,6 +114,10 @@ public class RediSearchMergeSink implements ConnectorMergeSink {
 			default:
 				throw new IllegalStateException("Unexpected merge operation");
 			}
+		}
+		if (insertCount > 0) {
+			// Before deleting anything: MERGE can insert into a JSON index, where the rows would be lost
+			session.verifyWritable(schemaTableName);
 		}
 		LettuceFutures.awaitAll(connection.getTimeout(), futures.toArray(new RedisFuture[0]));
 		if (!deleteKeys.isEmpty()) {

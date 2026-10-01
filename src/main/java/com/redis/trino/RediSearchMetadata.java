@@ -228,6 +228,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			List<ColumnHandle> insertedColumns, RetryMode retryMode) {
 		checkRetry(retryMode);
 		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
+		rediSearchSession.verifyWritable(table.getSchemaTableName());
 		List<RediSearchColumnHandle> columns = rediSearchSession.getTable(table.getSchemaTableName()).getColumns();
 
 		return new RediSearchInsertTableHandle(table.getSchemaTableName(),
@@ -257,6 +258,11 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			Map<Integer, Collection<ColumnHandle>> updateCaseColumns, RetryMode retryMode) {
 		checkRetry(retryMode);
 		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
+		// DELETE has no update cases and works on any index. Inserts from MERGE are checked by the merge sink, since
+		// the insert cases aren't listed here.
+		if (!updateCaseColumns.isEmpty()) {
+			rediSearchSession.verifyWritable(table.getSchemaTableName());
+		}
 		List<RediSearchColumnHandle> dataColumns = rediSearchSession.getTable(table.getSchemaTableName()).getColumns()
 				.stream().filter(column -> !column.isHidden()).collect(toImmutableList());
 		ImmutableMap.Builder<Integer, List<Integer>> updateCaseChannels = ImmutableMap.builder();

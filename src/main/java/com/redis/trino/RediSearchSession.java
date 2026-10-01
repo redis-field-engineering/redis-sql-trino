@@ -26,6 +26,7 @@ package com.redis.trino;
 import static com.google.common.base.Throwables.throwIfInstanceOf;
 import static com.google.common.base.Verify.verify;
 import static com.redis.trino.RediSearchErrorCode.REDISEARCH_INDEX_NOT_READY;
+import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static java.lang.String.format;
@@ -286,6 +287,19 @@ public class RediSearchSession {
         }
     }
 
+    /**
+     * Fails unless rows written to the table can be read back. The connector writes hashes, which an index on JSON
+     * documents never sees; DELETE works on both.
+     */
+    public void verifyWritable(SchemaTableName tableName) {
+        RediSearchTable table = getTable(tableName);
+        if (table.getIndexInfo().getKeyType().filter(type -> type == RediSearchIndexInfo.KeyType.JSON).isPresent()) {
+            throw new TrinoException(NOT_SUPPORTED, format(
+                    "Index %s is on JSON documents; the connector only writes hashes, so only DELETE is supported",
+                    table.getTableHandle().getIndex()));
+        }
+    }
+
     public void dropTable(SchemaTableName tableName) {
         sync.ftDropindex(toRemoteTableName(tableName.getTableName()), true);
         tableCache.invalidate(tableName);
@@ -327,7 +341,6 @@ public class RediSearchSession {
         ImmutableList.Builder<RediSearchColumnHandle> columns = ImmutableList.builder();
         for (RediSearchBuiltinField builtinfield : RediSearchBuiltinField.values()) {
             fields.add(builtinfield.getName());
-            columns.add(builtinfield.getColumnHandle());
         }
         for (RediSearchIndexInfo.Field indexedField : indexInfo.getFields()) {
             RediSearchColumnHandle column = buildColumnHandle(indexedField);
@@ -344,6 +357,11 @@ public class RediSearchSession {
                         false, Optional.empty()));
                 fields.add(docField);
             }
+        }
+        // Hidden columns go last. Trino's MERGE planning indexes the visible columns by their position among all of
+        // them, so a hidden column first made WHEN NOT MATCHED THEN INSERT fail when it left out the last column.
+        for (RediSearchBuiltinField builtinfield : RediSearchBuiltinField.values()) {
+            columns.add(builtinfield.getColumnHandle());
         }
         RediSearchTableHandle tableHandle = new RediSearchTableHandle(schemaTableName, index);
         return new RediSearchTable(tableHandle, columns.build(), indexInfo);
@@ -489,9 +507,13 @@ public class RediSearchSession {
         throw new IllegalArgumentException(String.format("Field type %s not supported", fieldType));
     }
 
+    /**
+     * The index field type for a column, which must index the values {@link RediSearchPageSink#value} writes for it.
+     */
     public static RediSearchFieldType toFieldType(Type type) {
+        // Written as "true" and "false"
         if (type.equals(BooleanType.BOOLEAN)) {
-            return RediSearchFieldType.NUMERIC;
+            return RediSearchFieldType.TAG;
         }
         if (type.equals(BigintType.BIGINT)) {
             return RediSearchFieldType.NUMERIC;
@@ -520,9 +542,11 @@ public class RediSearchSession {
         if (type instanceof CharType) {
             return RediSearchFieldType.TAG;
         }
+        // Written as ISO dates, e.g. 2024-01-02
         if (type.equals(DateType.DATE)) {
-            return RediSearchFieldType.NUMERIC;
+            return RediSearchFieldType.TAG;
         }
+        // Timestamps are written as epoch milliseconds
         if (type.equals(TimestampType.TIMESTAMP_MILLIS)) {
             return RediSearchFieldType.NUMERIC;
         }
@@ -532,7 +556,7 @@ public class RediSearchSession {
         if (type.equals(UuidType.UUID)) {
             return RediSearchFieldType.TAG;
         }
-        throw new IllegalArgumentException("unsupported type: " + type);
+        throw new TrinoException(NOT_SUPPORTED, "Unsupported column type: " + type);
     }
 
     // A cursor lives on the node that ran FT.AGGREGATE. Lettuce's cluster client would route cursor commands there over

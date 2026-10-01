@@ -173,10 +173,10 @@ Retry once `FT.INFO` reports `indexing` as `0`.
 `IF NOT EXISTS` is supported.
 
 |`CREATE TABLE AS SELECT`
-|BOOLEAN and DATE values are written but not indexed ({project-url}/issues/43[#43]).
+|Columns get the same <<create-table-types,field types>> as in `CREATE TABLE`. A query with a column of another type fails before the table is created.
 
 |`INSERT`, `INSERT \... SELECT`
-|Hash indexes only ({project-url}/issues/44[#44]).
+|Hash indexes only: the connector writes hashes, which an index on JSON documents never sees, so it fails on a JSON index.
 Each row is a new hash with key `<prefix><ULID>`, where `<prefix>` is the index's first key prefix.
 
 |`UPDATE`
@@ -186,7 +186,7 @@ Each row is a new hash with key `<prefix><ULID>`, where `<prefix>` is the index'
 |Deletes the matching keys, on hash and JSON indexes.
 
 |`MERGE`
-|Hash indexes only. A `WHEN NOT MATCHED THEN INSERT` column list must include the table's last column ({project-url}/issues/42[#42]).
+|Hash indexes only, except that `WHEN MATCHED THEN DELETE` also works on JSON indexes.
 
 |`ALTER TABLE \... ADD COLUMN`
 |Adds a field to the index with `FT.ALTER`. Columns are always added at the end.
@@ -218,22 +218,22 @@ Writes also fail when fault-tolerant execution is enabled (`retry-policy` other 
 |NUMERIC
 |DOUBLE
 
-|BOOLEAN, DATE, TIMESTAMP(3), TIMESTAMP(3) WITH TIME ZONE
+|TIMESTAMP(3), TIMESTAMP(3) WITH TIME ZONE
 |NUMERIC
-|DOUBLE. Timestamps are stored as epoch milliseconds.
+|DOUBLE, in epoch milliseconds
 
-|VARCHAR, CHAR
+|VARCHAR, CHAR, UUID
 |TAG
 |VARCHAR
 
-|UUID
+|BOOLEAN, DATE
 |TAG
-|VARCHAR. `CREATE TABLE AS SELECT` with UUID values fails ({project-url}/issues/43[#43]).
+|VARCHAR: `true` or `false`, and ISO dates such as `2024-01-02`
 |===
 
-Other types, such as ARRAY, MAP, ROW, VARBINARY and TIME, are rejected.
-Because columns are read back from the index, a column declared as BIGINT or BOOLEAN becomes DOUBLE, and later `INSERT` statements must supply numbers.
-VARCHAR, CHAR and UUID columns become TAG fields, not full-text TEXT fields.
+Other types, such as ARRAY, MAP, ROW, VARBINARY and TIME, fail with `Unsupported column type`.
+Because columns are read back from the index, a column declared as BIGINT becomes DOUBLE and one declared as BOOLEAN or DATE becomes VARCHAR, so later `INSERT` statements must supply values of those types.
+The TAG fields aren't full-text TEXT fields.
 They're `CASESENSITIVE` and split values into tags on the ASCII unit separator (`\x1f`) instead of `,`, so Redis can prefilter `=` and `IN` on values containing commas, and doesn't return rows that only differ in case.
 
 [[pushdown]]
@@ -261,24 +261,7 @@ Trino evaluates `HAVING` on the groups Redis returns.
 [[known-limitations]]
 === Known limitations
 
-These queries return wrong results or fail.
-
-[cols="2,2,1"]
-|===
-|Problem |Workaround |Issue
-
-|`MERGE \... WHEN NOT MATCHED THEN INSERT` fails when the column list leaves out the table's last column.
-|List every column and pass `NULL` for the ones you don't have.
-|{project-url}/issues/42[#42]
-
-|`CREATE TABLE AS SELECT` with BOOLEAN or DATE values succeeds, but those rows can't be queried.
-|Cast them first, e.g. `CAST(flag AS integer)` or `CAST(day AS varchar)`.
-|{project-url}/issues/43[#43]
-
-|`INSERT` into a JSON index writes a hash the index never sees. `UPDATE` and `MERGE` on a JSON index fail.
-|
-|{project-url}/issues/44[#44]
-|===
+Queries known to return wrong results or fail are tracked as {project-url}/issues?q=is%3Aissue+is%3Aopen+label%3Abug[open issues labeled bug].
 
 
 == Clients
