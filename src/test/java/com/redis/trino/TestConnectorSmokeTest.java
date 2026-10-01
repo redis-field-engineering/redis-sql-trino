@@ -14,8 +14,9 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
+import com.redis.trino.RedisEnterprise.Deployment;
+
 import io.airlift.log.Logger;
-import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.api.sync.RedisCommands;
 import io.lettuce.core.json.JsonPath;
 import io.lettuce.core.search.arguments.CreateArgs;
@@ -33,9 +34,13 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 
 	private RediSearchServer redisearch;
 
+	protected Deployment deployment() {
+		return Deployment.NON_SHARDED;
+	}
+
 	@Override
 	protected QueryRunner createQueryRunner() throws Exception {
-		redisearch = closeAfterClass(new RediSearchServer());
+		redisearch = closeAfterClass(new RediSearchServer(deployment()));
 		redisearch.getConnection().sync().flushall();
 		return RediSearchQueryRunner.createRediSearchQueryRunner(redisearch, CUSTOMER, NATION, ORDERS, REGION);
 	}
@@ -223,7 +228,7 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 	public void testQueryFailsWhileIndexBuilds() {
 		RedisCommands<String, String> redis = redisearch.getConnection().sync();
 		String index = "bulkidx";
-		redis.eval("for i = 1, 50000 do redis.call('HSET', 'bulk:' .. i, 'id', i) end return 1", ScriptOutputType.INTEGER);
+		redisearch.writeHashes("bulk:", 50000);
 		// FT.CREATE over existing documents indexes them in the background, during which queries see only some of them
 		redis.ftCreate(index, CreateArgs.builder().withPrefix("bulk:").build(),
 				List.of(NumericFieldArgs.builder().name("id").build()));
@@ -241,7 +246,7 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 	public void testAddColumnRebuildsIndex() {
 		RedisCommands<String, String> redis = redisearch.getConnection().sync();
 		String index = "alteridx";
-		redis.eval("for i = 1, 50000 do redis.call('HSET', 'alter:' .. i, 'id', i) end return 1", ScriptOutputType.INTEGER);
+		redisearch.writeHashes("alter:", 50000);
 		redis.ftCreate(index, CreateArgs.builder().withPrefix("alter:").build(),
 				List.of(NumericFieldArgs.builder().name("id").build()));
 		redisearch.awaitIndexed(index);

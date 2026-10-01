@@ -7,6 +7,8 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
+import com.redis.trino.RedisEnterprise.Deployment;
+
 import io.lettuce.core.api.sync.RedisCommands;
 import io.lettuce.core.search.arguments.CreateArgs;
 import io.lettuce.core.search.arguments.NumericFieldArgs;
@@ -21,9 +23,13 @@ import io.trino.testing.QueryRunner;
  */
 public class TestFilterPushdown extends AbstractTestQueryFramework {
 
+	protected Deployment deployment() {
+		return Deployment.NON_SHARDED;
+	}
+
 	@Override
 	protected QueryRunner createQueryRunner() throws Exception {
-		RediSearchServer redisearch = closeAfterClass(new RediSearchServer());
+		RediSearchServer redisearch = closeAfterClass(new RediSearchServer(deployment()));
 		RedisCommands<String, String> redis = redisearch.getConnection().sync();
 		redis.ftCreate("beers", CreateArgs.builder().withPrefix("beer:").build(),
 				List.of(TagFieldArgs.builder().name("id").build(), TagFieldArgs.builder().name("style").build(),

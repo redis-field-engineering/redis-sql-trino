@@ -28,9 +28,11 @@ import static com.google.common.base.Verify.verify;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import io.airlift.log.Logger;
+import io.lettuce.core.search.AggregationReply.Cursor;
 import io.trino.spi.Page;
 import io.trino.spi.PageBuilder;
 import io.trino.spi.block.BlockBuilder;
@@ -127,7 +129,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 		private final RediSearchSession session;
 		private final RediSearchTableHandle table;
 		private Iterator<Map<String, String>> iterator;
-		private long cursor;
+		private Optional<Cursor> cursor;
 
 		public CursorIterator(RediSearchSession session, RediSearchTableHandle table, String[] columnNames) {
 			this.session = session;
@@ -143,10 +145,10 @@ public class RediSearchPageSource implements ConnectorPageSource {
 		@Override
 		public boolean hasNext() {
 			while (!iterator.hasNext()) {
-				if (cursor == 0) {
+				if (cursor.isEmpty()) {
 					return false;
 				}
-				read(session.cursorRead(table, cursor));
+				read(session.cursorRead(table, cursor.get()));
 			}
 			return true;
 		}
@@ -158,10 +160,10 @@ public class RediSearchPageSource implements ConnectorPageSource {
 
 		@Override
 		public void close() throws Exception {
-			if (cursor == 0) {
-				return;
+			if (cursor.isPresent()) {
+				session.cursorDelete(table, cursor.get());
+				cursor = Optional.empty();
 			}
-			session.cursorDelete(table, cursor);
 		}
 
 	}

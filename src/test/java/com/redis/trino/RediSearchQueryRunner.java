@@ -84,7 +84,7 @@ public final class RediSearchQueryRunner {
 	private static void installRediSearchPlugin(RediSearchServer server, QueryRunner queryRunner,
 			RediSearchConnectorFactory factory, Map<String, String> extraConnectorProperties) {
 		queryRunner.installPlugin(new RediSearchPlugin(factory));
-		Map<String, String> config = ImmutableMap.<String, String>builder().put("redisearch.uri", server.getRedisURI())
+		Map<String, String> config = ImmutableMap.<String, String>builder().putAll(server.getConnectorProperties())
 				.put("redisearch.default-schema-name", TPCH_SCHEMA)
 				.putAll(extraConnectorProperties).buildOrThrow();
 		queryRunner.createCatalog("redisearch", "redisearch", config);

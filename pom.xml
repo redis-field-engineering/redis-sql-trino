@@ -256,6 +256,13 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- RedisEnterprise adds the SYS_RESOURCE capability the Redis Enterprise container needs -->
+        <dependency>
+            <groupId>com.github.docker-java</groupId>
+            <artifactId>docker-java-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <!-- for testing -->
 
         <dependency>
