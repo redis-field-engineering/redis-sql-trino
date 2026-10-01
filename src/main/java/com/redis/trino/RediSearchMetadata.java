@@ -36,17 +36,20 @@ import static java.util.Objects.requireNonNull;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 
 import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
@@ -74,11 +77,11 @@ import io.trino.spi.connector.Constraint;
 import io.trino.spi.connector.ConstraintApplicationResult;
 import io.trino.spi.connector.LimitApplicationResult;
 import io.trino.spi.connector.NotFoundException;
+import io.trino.spi.connector.RelationColumnsMetadata;
 import io.trino.spi.connector.RetryMode;
 import io.trino.spi.connector.RowChangeParadigm;
 import io.trino.spi.connector.SaveMode;
 import io.trino.spi.connector.SchemaTableName;
-import io.trino.spi.connector.SchemaTablePrefix;
 import io.trino.spi.connector.TableNotFoundException;
 import io.trino.spi.expression.Call;
 import io.trino.spi.expression.ConnectorExpression;
@@ -158,25 +161,19 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	}
 
 	@Override
-	public Map<SchemaTableName, List<ColumnMetadata>> listTableColumns(ConnectorSession session,
-			SchemaTablePrefix prefix) {
-		requireNonNull(prefix, "prefix is null");
-		ImmutableMap.Builder<SchemaTableName, List<ColumnMetadata>> columns = ImmutableMap.builder();
-		for (SchemaTableName tableName : listTables(session, prefix)) {
+	public Iterator<RelationColumnsMetadata> streamRelationColumns(ConnectorSession session,
+			Optional<String> schemaName, UnaryOperator<Set<SchemaTableName>> relationFilter) {
+		ImmutableList.Builder<RelationColumnsMetadata> relationColumns = ImmutableList.builder();
+		// Filter before fetching metadata so only visible indexes are inspected
+		for (SchemaTableName tableName : relationFilter.apply(ImmutableSet.copyOf(listTables(session, schemaName)))) {
 			try {
-				columns.put(tableName, getTableMetadata(session, tableName).getColumns());
+				relationColumns.add(RelationColumnsMetadata.forTable(tableName,
+						getTableMetadata(session, tableName).getColumns()));
 			} catch (NotFoundException e) {
 				// table disappeared during listing operation
 			}
 		}
-		return columns.buildOrThrow();
-	}
-
-	private List<SchemaTableName> listTables(ConnectorSession session, SchemaTablePrefix prefix) {
-		if (prefix.getTable().isEmpty()) {
-			return listTables(session, prefix.getSchema());
-		}
-		return List.of(prefix.toSchemaTableName());
+		return relationColumns.build().iterator();
 	}
 
 	@Override
