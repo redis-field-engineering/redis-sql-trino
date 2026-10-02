@@ -1,0 +1,5 @@
+{
+  "enabledPlugins": {
+    "redis-development@claude-plugins-official": true
+  }
+}
