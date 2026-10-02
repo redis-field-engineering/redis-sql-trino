@@ -96,25 +96,25 @@ public class TestWrites extends AbstractTestQueryFramework {
 							+ "('v', 'varchar(10)'), ('c', 'char(3)'), ('flag', 'boolean'), ('day', 'date'), "
 							+ "('ts', 'timestamp(3)'), ('tstz', 'timestamp(3) with time zone'), ('u', 'uuid')");
 			// Literals of the declared types, which INSERT rejected when the columns read back as DOUBLE and VARCHAR
-			// Redis returns NUMERIC values as doubles, rounded to 12 significant digits unless they're integers, so
-			// these are values it returns exactly: 2^53 + 4 is a double, and 2^53 + 3 isn't
-			assertUpdate("INSERT INTO typed VALUES (BIGINT '9007199254740996', 2147483647, SMALLINT '-32768', "
-					+ "TINYINT '127', 1.5E0, REAL '2.5', DECIMAL '12345678.91', DECIMAL '1234567.12345', "
+			// More digits than a double holds, or than Redis returns for NUMERIC fields loaded by name
+			assertUpdate("INSERT INTO typed VALUES (BIGINT '9007199254740993', 2147483647, SMALLINT '-32768', "
+					+ "TINYINT '127', 0.1234567890123456E0, REAL '2.5', DECIMAL '12345678.91', "
+					+ "DECIMAL '1234567890123456789012345.12345', "
 					+ "'abc', 'ab', true, DATE '2024-01-02', TIMESTAMP '2024-01-02 03:04:05.006', "
 					+ "TIMESTAMP '2024-01-02 03:04:05.006 UTC', UUID '12151fd2-7586-11e9-8f9e-2a86e4085a59')", 1);
 			assertUpdate("INSERT INTO typed (b, i, s, t, r, dec) VALUES (1, 1, 1, 1, REAL '0.5', DECIMAL '0.10')", 1);
-			assertThat(query("SELECT * FROM typed WHERE flag")).matches("VALUES (BIGINT '9007199254740996', "
-					+ "2147483647, SMALLINT '-32768', TINYINT '127', DOUBLE '1.5', REAL '2.5', "
-					+ "CAST(DECIMAL '12345678.91' AS decimal(10, 2)), CAST(DECIMAL '1234567.12345' AS decimal(30, 5)), "
+			assertThat(query("SELECT * FROM typed WHERE flag")).matches("VALUES (BIGINT '9007199254740993', "
+					+ "2147483647, SMALLINT '-32768', TINYINT '127', DOUBLE '0.1234567890123456', REAL '2.5', "
+					+ "CAST(DECIMAL '12345678.91' AS decimal(10, 2)), DECIMAL '1234567890123456789012345.12345', "
 					+ "CAST('abc' AS varchar(10)), CAST('ab' AS char(3)), true, DATE '2024-01-02', "
 					+ "TIMESTAMP '2024-01-02 03:04:05.006', TIMESTAMP '2024-01-02 03:04:05.006 UTC', "
 					+ "UUID '12151fd2-7586-11e9-8f9e-2a86e4085a59')");
-			// As a double, the bound 2^53 + 3 would be 2^53 + 4, so Trino compares bounds that large
-			assertThat(query("SELECT i FROM typed WHERE b > 9007199254740995")).isNotFullyPushedDown(FilterNode.class)
+			// NUMERIC fields hold doubles, which can't tell 2^53 + 1 from 2^53, so Trino compares bounds that large
+			assertThat(query("SELECT i FROM typed WHERE b > 9007199254740992")).isNotFullyPushedDown(FilterNode.class)
 					.matches("VALUES 2147483647");
 			assertThat(query("SELECT i FROM typed WHERE b < 10")).isFullyPushedDown().matches("VALUES 1");
-			assertThat(query("SELECT max(b), min(s), max(t), sum(r) FROM typed")).isFullyPushedDown()
-					.matches("VALUES (BIGINT '9007199254740996', SMALLINT '-32768', TINYINT '127', REAL '3.0')");
+			assertThat(query("SELECT max(i), min(s), max(t), sum(r) FROM typed")).isFullyPushedDown()
+					.matches("VALUES (2147483647, SMALLINT '-32768', TINYINT '127', REAL '3.0')");
 			assertThat(query("SELECT t, count(*) FROM typed GROUP BY t")).isFullyPushedDown()
 					.matches("VALUES (TINYINT '127', BIGINT '1'), (TINYINT '1', BIGINT '1')");
 			// Redis would group decimals by their double values, so Trino groups them
@@ -128,6 +128,47 @@ public class TestWrites extends AbstractTestQueryFramework {
 			assertUpdate("DROP TABLE typed");
 		}
 		assertThat(redisearch.getConnection().sync().exists(RediSearchColumnTypes.key("typed"))).isZero();
+	}
+
+	@Test
+	public void testNumericValuesAsStored() {
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		redis.ftCreate("exact", CreateArgs.builder().withPrefix("exact:").build(),
+				List.of(NumericFieldArgs.builder().name("d").build(), NumericFieldArgs.builder().name("sorted").sortable().build(),
+						NumericFieldArgs.builder().name("raw_abv").as("abv").build(), TagFieldArgs.builder().name("style").build()));
+		redisearch.awaitIndexed("exact");
+		redis.hset("exact:1", Map.of("d", "0.1234567890123456", "sorted", "229577310901.21", "raw_abv",
+				"4.123456789012345", "style", "Wheat", "note", "n1"));
+		redis.hset("exact:2", Map.of("d", "1.0E-7", "sorted", "2", "raw_abv", "5", "style", "Ale"));
+		// Redis rounds NUMERIC values loaded by name to 12 significant digits, so the hash's fields are loaded as stored
+		assertThat(query("SELECT d, sorted, abv, note FROM exact WHERE style = 'Wheat'")).isFullyPushedDown()
+				.matches("VALUES (DOUBLE '0.1234567890123456', DOUBLE '229577310901.21', DOUBLE '4.123456789012345', "
+						+ "VARCHAR 'n1')");
+		assertThat(query("SELECT __key, d FROM exact WHERE d < 0.1 LIMIT 5")).isFullyPushedDown()
+				.matches("VALUES (VARCHAR 'exact:2', DOUBLE '1.0E-7')");
+		assertThat(query("SELECT style FROM exact WHERE sorted = 229577310901.21")).matches("VALUES VARCHAR 'Wheat'");
+	}
+
+	@Test
+	public void testJsonValuesAsStored() {
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		redis.ftCreate("jsonexact", CreateArgs.builder().on(TargetType.JSON).withPrefix("jsonexact:").build(),
+				List.of(NumericFieldArgs.builder().name("$.score").as("score").build(),
+						NumericFieldArgs.builder().name("$.n.x").as("x").build(),
+						TagFieldArgs.builder().name("$.flag").as("flag").build(),
+						TagFieldArgs.builder().name("$.tags[*]").as("tags").build(),
+						TextFieldArgs.builder().name("$.name").as("name").build(),
+						TagFieldArgs.builder().name("$.missing").as("missing").build()));
+		redisearch.awaitIndexed("jsonexact");
+		String document = "{\"score\":0.1234567890123456,\"n\":{\"x\":229577310901.21},\"flag\":true,"
+				+ "\"tags\":[\"a\",\"b,c\"],\"name\":\"He said \\\"hi\\\"\"}";
+		redis.jsonSet("jsonexact:1", JsonPath.ROOT_PATH, document);
+		// DIALECT 3 returns numbers as stored. The other values are what DIALECT 2 returned: a boolean as 1, and the
+		// first value of a path that matches several.
+		assertThat(query("SELECT score, x, flag, tags, name, missing FROM jsonexact")).matches("VALUES "
+				+ "(DOUBLE '0.1234567890123456', DOUBLE '229577310901.21', VARCHAR '1', VARCHAR 'a', "
+				+ "VARCHAR 'He said \"hi\"', CAST(NULL AS varchar))");
+		assertThat(query("SELECT \"$\" FROM jsonexact")).matches("VALUES VARCHAR '" + document + "'");
 	}
 
 	@Test

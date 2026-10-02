@@ -247,8 +247,10 @@ The types in the key don't apply to:
 * A field whose index type isn't the one the connector creates for the saved type, as after an index is dropped and created again outside Trino. It reads back as DOUBLE or VARCHAR.
 * Any column, if the connector can't read the key: without read access to it in an ACL, or after Redis evicts it under an `allkeys-*` eviction policy. Creating a table needs write access to the key, such as `~__trino:*` in an ACL rule.
 
-NUMERIC fields hold doubles, and `FT.AGGREGATE` returns their values formatted as doubles, rounded to 12 significant digits unless they're integers.
-So BIGINT values above 2^53, and DECIMAL and DOUBLE values with more than 12 significant digits, read back rounded.
+[[numeric-values]]
+Redis returns a NUMERIC field loaded by name formatted as a double, rounded to 12 significant digits unless it's an integer.
+So when a query reads DOUBLE, BIGINT or DECIMAL columns, the connector loads hashes with `LOAD *`, which returns every field of each hash, and JSON documents with `DIALECT 3`, and reads the values as they're stored.
+NUMERIC fields still hold doubles for queries and aggregations in Redis: see <<pushdown,Pushdown>>.
 
 A value its column's type can't hold, such as `4.5` written by another client to a BIGINT column, fails the query with `Value '4.5' is not a valid bigint`.
 To read the table with the default types instead, delete the key (`DEL __trino:columns:<table>`); the connector reads it again within `redisearch.table-cache-refresh` seconds.
@@ -279,7 +281,9 @@ Trino also evaluates `LIKE`. A Redis wildcard query matches single words of a TE
 * `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`, as `FT.AGGREGATE` with `GROUPBY` and `REDUCE`.
 If any aggregate in a query can't be pushed down, such as `count(DISTINCT \...)` or `count(column)`, or Trino filters the rows itself, as it does for filters on TAG and TEXT fields of JSON indexes, Trino computes all of them.
 `count(column)` skips nulls, but Redis's `COUNT` counts documents, so only `count(*)` is pushed down.
-Redis computes on the double values of NUMERIC fields, so `sum`, `min`, `max` and `GROUP BY` on a BIGINT column are exact only for values and sums below 2^53. Trino groups DECIMAL columns itself.
+Redis computes on the double values of NUMERIC fields and returns the results, and the `GROUP BY` keys of NUMERIC fields, rounded to 12 significant digits unless they're integers.
+So `sum`, `min`, `max` and `avg`, and `GROUP BY` on a DOUBLE column, are exact only to 12 significant digits, and on a BIGINT column only for values and sums below 2^53; two DOUBLE keys that differ only beyond 12 digits come back as two groups with the same key.
+Trino groups DECIMAL columns itself.
 Trino evaluates `HAVING` on the groups Redis returns.
 * `LIMIT`, unless Trino filters the rows itself. Trino sorts `ORDER BY \... LIMIT` itself.
 

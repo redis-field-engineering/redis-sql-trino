@@ -10,6 +10,7 @@ import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -22,12 +23,14 @@ import com.google.common.collect.ImmutableMap;
 
 import io.lettuce.core.codec.StringCodec;
 import io.lettuce.core.protocol.CommandArgs;
+import io.lettuce.core.search.FieldValue;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.predicate.ValueSet;
 import io.trino.spi.type.DoubleType;
+import io.trino.spi.type.IntegerType;
 
 public class TestQueryBuilder {
 
@@ -165,14 +168,99 @@ public class TestQueryBuilder {
 		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers",
 				TupleDomain.withColumnDomains(ImmutableMap.of(style, varchars("Wheat"))), OptionalLong.of(10), List.of(),
 				List.of(new RediSearchAggregation(RediSearchAggregation.COUNT, BIGINT, Optional.empty(), "c")));
+		RediSearchColumnHandle count = new RediSearchColumnHandle("c", BIGINT, RediSearchFieldType.NUMERIC, false, false,
+				Optional.empty());
 		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
-				new String[] { "c", "style" });
+				List.of(count, style), Optional.of(hashIndex()));
 		assertThat(aggregation.getQuery()).isEqualTo("@style:{Wheat}");
+		// The field is loaded once, and FILTER runs before GROUPBY and LIMIT
+		assertThat(commandString(aggregation)).isEqualTo("LOAD 3 __key style c FILTER exists(@style) && @style == \"Wheat\" "
+				+ "GROUPBY 0 REDUCE COUNT 0 AS c LIMIT 0 10 WITHCURSOR COUNT 1000 DIALECT 2");
+	}
+
+	@Test
+	public void testScanLoadsNumericValuesAsStored() {
+		RediSearchColumnHandle style = filterable("style", RediSearchFieldType.TAG);
+		RediSearchColumnHandle abv = numeric("abv", DoubleType.DOUBLE);
+		RediSearchColumnHandle ibu = numeric("ibu", IntegerType.INTEGER);
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers",
+				TupleDomain.withColumnDomains(ImmutableMap.of(style, varchars("Wheat"))), OptionalLong.empty(), List.of(),
+				List.of());
+		RediSearchTranslator translator = new RediSearchTranslator(new RediSearchConfig());
+		// A DOUBLE loaded by name comes back rounded to 12 significant digits, so the hash's fields are loaded as
+		// stored, and the DOUBLE isn't loaded by name, which would round it again
+		RediSearchTranslator.Aggregation aggregation = translator.aggregate(table, List.of(style, abv, ibu),
+				Optional.of(hashIndex()));
+		assertThat(commandString(aggregation)).isEqualTo("LOAD * LOAD 3 __key style ibu "
+				+ "FILTER exists(@style) && @style == \"Wheat\" WITHCURSOR COUNT 1000 DIALECT 2");
+		// LOAD * names a field indexed AS another name by its hash field
+		assertThat(aggregation.getReader().read(Map.of("raw_abv", value("4.123456789012345"), "style", value("Wheat"))))
+				.containsExactlyInAnyOrderEntriesOf(
+						Map.of("abv", "4.123456789012345", "raw_abv", "4.123456789012345", "style", "Wheat"));
+		// INTEGER values are exact as doubles
+		assertThat(commandString(translator.aggregate(table, List.of(style, ibu), Optional.of(hashIndex()))))
+				.startsWith("LOAD 3 __key style ibu ");
+		// Without FT.INFO, columns are loaded by name
+		assertThat(commandString(translator.aggregate(table, List.of(style, abv), Optional.empty())))
+				.startsWith("LOAD 3 __key style abv ");
+	}
+
+	@Test
+	public void testJsonScanUsesDialect3() {
+		RediSearchColumnHandle score = numeric("score", DoubleType.DOUBLE);
+		RediSearchColumnHandle id = tag("id", Optional.empty());
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "docs"), "docs");
+		RediSearchIndexInfo json = new RediSearchIndexInfo(Optional.of(RediSearchIndexInfo.KeyType.JSON), List.of(),
+				List.of(new RediSearchIndexInfo.Field("score", "$.score", RediSearchFieldType.NUMERIC, Optional.empty()),
+						new RediSearchIndexInfo.Field("id", "$.id", RediSearchFieldType.TAG, Optional.empty())),
+				false, 1, false);
+		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
+				List.of(RediSearchBuiltinField.KEY.getColumnHandle(), score, id), Optional.of(json));
+		assertThat(commandString(aggregation)).isEqualTo("LOAD 3 __key score id WITHCURSOR COUNT 1000 DIALECT 3");
+		// DIALECT 3 returns the values at each JSON path as an array, with numbers as stored
+		assertThat(aggregation.getReader().read(Map.of("__key", value("doc:1"), "score", value("[9007199254740993]"),
+				"id", value("[\"1\"]")))).containsExactlyInAnyOrderEntriesOf(
+						Map.of("__key", "doc:1", "score", "9007199254740993", "id", "1"));
+	}
+
+	@Test
+	public void testJsonFirstValue() {
+		// As DIALECT 2 returns them, but with numbers as written
+		assertThat(RediSearchRowReader.firstValue("[0.1234567890123456]")).contains("0.1234567890123456");
+		assertThat(RediSearchRowReader.firstValue("[1234567890123456789012345.12345]"))
+				.contains("1234567890123456789012345.12345");
+		assertThat(RediSearchRowReader.firstValue("[\"He said \\\"hi\\\"\\\\n\", \"x\"]")).contains("He said \"hi\"\\n");
+		assertThat(RediSearchRowReader.firstValue("[\"a\",\"b,c\"]")).contains("a");
+		assertThat(RediSearchRowReader.firstValue("[true]")).contains("1");
+		assertThat(RediSearchRowReader.firstValue("[false]")).contains("0");
+		assertThat(RediSearchRowReader.firstValue("[null]")).isEmpty();
+		assertThat(RediSearchRowReader.firstValue("[]")).isEmpty();
+		assertThat(RediSearchRowReader.firstValue("[{\"id\": \"1\", \"n\": {\"x\": 0.1234567890123456}}, 2]"))
+				.contains("{\"id\": \"1\", \"n\": {\"x\": 0.1234567890123456}}");
+		assertThat(RediSearchRowReader.firstValue("[[1, 2], 3]")).contains("[1, 2]");
+	}
+
+	private static RediSearchColumnHandle numeric(String name, io.trino.spi.type.Type type) {
+		return new RediSearchColumnHandle(name, type, RediSearchFieldType.NUMERIC, false, true, Optional.empty());
+	}
+
+	// A hash index whose abv field is the hash field raw_abv
+	private static RediSearchIndexInfo hashIndex() {
+		return new RediSearchIndexInfo(Optional.of(RediSearchIndexInfo.KeyType.HASH), List.of("beer:"),
+				List.of(new RediSearchIndexInfo.Field("style", "style", RediSearchFieldType.TAG, Optional.of(',')),
+						new RediSearchIndexInfo.Field("abv", "raw_abv", RediSearchFieldType.NUMERIC, Optional.empty()),
+						new RediSearchIndexInfo.Field("ibu", "ibu", RediSearchFieldType.NUMERIC, Optional.empty())),
+				false, 1, false);
+	}
+
+	private static FieldValue value(String value) {
+		return FieldValue.of(value.getBytes(StandardCharsets.UTF_8));
+	}
+
+	private static String commandString(RediSearchTranslator.Aggregation aggregation) {
 		CommandArgs<String, String> args = new CommandArgs<>(StringCodec.UTF8);
 		aggregation.getArgs().build(args);
-		// The field is loaded once, and FILTER runs before GROUPBY and LIMIT
-		assertThat(args.toCommandString()).isEqualTo("LOAD 3 __key style c FILTER exists(@style) && @style == \"Wheat\" "
-				+ "GROUPBY 0 REDUCE COUNT 0 AS c LIMIT 0 10 WITHCURSOR COUNT 1000 DIALECT 2");
+		return args.toCommandString();
 	}
 
 	@Test
