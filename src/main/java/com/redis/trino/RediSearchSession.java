@@ -40,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -104,6 +105,7 @@ import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.TimestampWithTimeZoneType;
 import io.trino.spi.type.TinyintType;
 import io.trino.spi.type.Type;
+import io.trino.spi.type.TypeId;
 import io.trino.spi.type.TypeManager;
 import io.trino.spi.type.UuidType;
 import io.trino.spi.type.VarcharType;
@@ -279,11 +281,22 @@ public class RediSearchSession {
     public void createTable(SchemaTableName schemaTableName, List<RediSearchColumnHandle> columns) {
         String index = schemaTableName.getTableName();
         if (!sync.ftList().contains(index)) {
-            List<FieldArgs> fields = columns.stream().filter(c -> !RediSearchBuiltinField.isKeyColumn(c.getName()))
-                    .map(c -> buildField(c.getName(), c.getType())).collect(Collectors.toList());
-            // A new table starts empty and its rows are indexed as they're written. Without SKIPINITIALSCAN, FT.CREATE
-            // scans the whole keyspace in the background, and queries on the table fail until that finishes.
-            sync.ftCreate(index, CreateArgs.builder().withPrefix(index + ":").skipInitialScan().build(), fields);
+            Map<String, Type> types = new LinkedHashMap<>();
+            columns.stream().filter(c -> !RediSearchBuiltinField.isKeyColumn(c.getName()))
+                    .forEach(c -> types.put(c.getName(), c.getType()));
+            List<FieldArgs> fields = types.entrySet().stream().map(c -> buildField(c.getKey(), c.getValue()))
+                    .collect(Collectors.toList());
+            // Before the index, so its columns never read back without their types
+            RediSearchColumnTypes.write(sync, index, types);
+            try {
+                // A new table starts empty and its rows are indexed as they're written. Without SKIPINITIALSCAN,
+                // FT.CREATE scans the whole keyspace in the background, and queries on the table fail until that
+                // finishes.
+                sync.ftCreate(index, CreateArgs.builder().withPrefix(index + ":").skipInitialScan().build(), fields);
+            } catch (RuntimeException e) {
+                RediSearchColumnTypes.delete(sync, index);
+                throw e;
+            }
         }
     }
 
@@ -301,13 +314,18 @@ public class RediSearchSession {
     }
 
     public void dropTable(SchemaTableName tableName) {
-        sync.ftDropindex(toRemoteTableName(tableName.getTableName()), true);
+        String index = toRemoteTableName(tableName.getTableName());
+        sync.ftDropindex(index, true);
+        RediSearchColumnTypes.delete(sync, index);
         tableCache.invalidate(tableName);
     }
 
     public void addColumn(SchemaTableName schemaTableName, ColumnMetadata columnMetadata) {
         String tableName = toRemoteTableName(schemaTableName.getTableName());
-        sync.ftAlter(tableName, List.of(buildField(columnMetadata.getName(), columnMetadata.getType())));
+        FieldArgs field = buildField(columnMetadata.getName(), columnMetadata.getType());
+        // Also for an index created outside Trino, whose other columns keep the types read from FT.INFO
+        RediSearchColumnTypes.add(sync, tableName, columnMetadata.getName(), columnMetadata.getType());
+        sync.ftAlter(tableName, List.of(field));
         tableCache.invalidate(schemaTableName);
     }
 
@@ -342,8 +360,10 @@ public class RediSearchSession {
         for (RediSearchBuiltinField builtinfield : RediSearchBuiltinField.values()) {
             fields.add(builtinfield.getName());
         }
+        Map<String, String> declaredTypes = RediSearchColumnTypes.read(sync, index);
         for (RediSearchIndexInfo.Field indexedField : indexInfo.getFields()) {
-            RediSearchColumnHandle column = buildColumnHandle(indexedField, indexInfo.getKeyType());
+            RediSearchColumnHandle column = buildColumnHandle(indexedField, indexInfo.getKeyType(),
+                    Optional.ofNullable(declaredTypes.get(indexedField.getAttribute())));
             fields.add(column.getName());
             columns.add(column);
         }
@@ -381,18 +401,33 @@ public class RediSearchSession {
     }
 
     private RediSearchColumnHandle buildColumnHandle(RediSearchIndexInfo.Field field,
-            Optional<RediSearchIndexInfo.KeyType> keyType) {
+            Optional<RediSearchIndexInfo.KeyType> keyType, Optional<String> declaredType) {
         RediSearchFieldType type = field.getType();
         // On hashes, FILTER compares the TAG or TEXT value as stored, which is what the connector reads. How it
         // compares loaded JSON values, such as arrays, hasn't been checked, so Trino filters those.
         boolean filterable = keyType.filter(RediSearchIndexInfo.KeyType.HASH::equals).isPresent()
                 && (type == RediSearchFieldType.TAG || type == RediSearchFieldType.TEXT);
-        return new RediSearchColumnHandle(field.getAttribute(), columnType(type), type, false, true,
+        return new RediSearchColumnHandle(field.getAttribute(), columnType(field, declaredType), type, false, true,
                 field.getSeparator(), filterable);
     }
 
-    private Type columnType(RediSearchFieldType type) {
-        if (type == RediSearchFieldType.NUMERIC) {
+    /**
+     * The type the column was created with, if the connector saved it and its field still has the type the connector
+     * creates for it: an index dropped and created again outside Trino may have other fields by the same names.
+     * Otherwise DOUBLE for NUMERIC fields and VARCHAR for the others.
+     */
+    private Type columnType(RediSearchIndexInfo.Field field, Optional<String> declaredType) {
+        if (declaredType.isPresent()) {
+            try {
+                Type type = typeManager.getType(TypeId.of(declaredType.get()));
+                if (toFieldType(type) == field.getType()) {
+                    return type;
+                }
+            } catch (RuntimeException e) {
+                log.warn(e, "Ignoring type %s saved for column %s", declaredType.get(), field.getAttribute());
+            }
+        }
+        if (field.getType() == RediSearchFieldType.NUMERIC) {
             return DOUBLE;
         }
         return createUnboundedVarcharType();

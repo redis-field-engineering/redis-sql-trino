@@ -40,19 +40,22 @@ import static io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
 import static io.trino.spi.type.TimestampWithTimeZoneType.TIMESTAMP_TZ_MILLIS;
 import static io.trino.spi.type.Timestamps.MICROSECONDS_PER_MILLISECOND;
 import static io.trino.spi.type.TinyintType.TINYINT;
+import static io.trino.spi.type.UuidType.UUID;
+import static io.trino.spi.type.UuidType.javaUuidToTrinoUuid;
 import static java.lang.Float.floatToIntBits;
+import static java.lang.Math.multiplyExact;
+import static java.lang.String.format;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-
-import com.google.common.primitives.SignedBytes;
 
 import io.airlift.slice.Slice;
 import io.trino.spi.TrinoException;
 import io.trino.spi.block.BlockBuilder;
 import io.trino.spi.type.CharType;
 import io.trino.spi.type.DecimalType;
+import io.trino.spi.type.Int128;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
 
@@ -68,6 +71,9 @@ public class RediSearchPageSourceResultWriter {
 			type.writeDouble(output, Double.parseDouble(value));
 		} else if (javaType == Slice.class) {
 			writeSlice(output, type, value);
+		} else if (javaType == Int128.class) {
+			// Long decimals
+			type.writeObject(output, encodeScaledValue(new BigDecimal(value), ((DecimalType) type).getScale()));
 		} else {
 			throw new TrinoException(GENERIC_INTERNAL_ERROR,
 					"Unhandled type for " + javaType.getSimpleName() + ":" + type.getDisplayName());
@@ -76,16 +82,16 @@ public class RediSearchPageSourceResultWriter {
 
 	private long getLong(Type type, String value) {
 		if (type.equals(BIGINT)) {
-			return Long.parseLong(value);
+			return parseInteger(type, value);
 		}
 		if (type.equals(INTEGER)) {
-			return Integer.parseInt(value);
+			return checkRange(type, value, Integer.MIN_VALUE, Integer.MAX_VALUE);
 		}
 		if (type.equals(SMALLINT)) {
-			return Short.parseShort(value);
+			return checkRange(type, value, Short.MIN_VALUE, Short.MAX_VALUE);
 		}
 		if (type.equals(TINYINT)) {
-			return SignedBytes.checkedCast(Long.parseLong(value));
+			return checkRange(type, value, Byte.MIN_VALUE, Byte.MAX_VALUE);
 		}
 		if (type.equals(REAL)) {
 			return floatToIntBits((Float.parseFloat(value)));
@@ -97,13 +103,39 @@ public class RediSearchPageSourceResultWriter {
 			return LocalDate.from(DateTimeFormatter.ISO_DATE.parse(value)).toEpochDay();
 		}
 		if (type.equals(TIMESTAMP_MILLIS)) {
-			return Long.parseLong(value) * MICROSECONDS_PER_MILLISECOND;
+			return multiplyExact(parseInteger(type, value), MICROSECONDS_PER_MILLISECOND);
 		}
 		if (type.equals(TIMESTAMP_TZ_MILLIS)) {
-			return packDateTimeWithZone(Long.parseLong(value), UTC_KEY);
+			return packDateTimeWithZone(parseInteger(type, value), UTC_KEY);
 		}
 		throw new TrinoException(GENERIC_INTERNAL_ERROR,
 				"Unhandled type for " + type.getJavaType().getSimpleName() + ":" + type.getDisplayName());
+	}
+
+	// Redis returns the results of reducers, and other clients may write integers, in other forms, e.g. 42.0 or 4.2e1
+	private static long parseInteger(Type type, String value) {
+		try {
+			return Long.parseLong(value);
+		} catch (NumberFormatException e) {
+			try {
+				return new BigDecimal(value).longValueExact();
+			} catch (ArithmeticException | NumberFormatException notAnInteger) {
+				throw invalidValue(type, value);
+			}
+		}
+	}
+
+	private static long checkRange(Type type, String value, long min, long max) {
+		long result = parseInteger(type, value);
+		if (result < min || result > max) {
+			throw invalidValue(type, value);
+		}
+		return result;
+	}
+
+	private static TrinoException invalidValue(Type type, String value) {
+		return new TrinoException(GENERIC_INTERNAL_ERROR, format("Value '%s' is not a valid %s", value,
+				type.getDisplayName()));
 	}
 
 	private void writeSlice(BlockBuilder output, Type type, String value) {
@@ -111,8 +143,8 @@ public class RediSearchPageSourceResultWriter {
 			type.writeSlice(output, utf8Slice(value));
 		} else if (type instanceof CharType) {
 			type.writeSlice(output, truncateToLengthAndTrimSpaces(utf8Slice(value), (CharType) type));
-		} else if (type instanceof DecimalType) {
-			type.writeObject(output, encodeScaledValue(new BigDecimal(value), ((DecimalType) type).getScale()));
+		} else if (type.equals(UUID)) {
+			type.writeSlice(output, javaUuidToTrinoUuid(java.util.UUID.fromString(value)));
 		} else if (type.getBaseName().equals(JSON)) {
 			type.writeSlice(output, io.trino.plugin.base.util.JsonTypeUtil.jsonParse(utf8Slice(value)));
 		} else {

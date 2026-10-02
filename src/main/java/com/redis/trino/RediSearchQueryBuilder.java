@@ -74,6 +74,9 @@ public class RediSearchQueryBuilder {
 
 	private static final Set<Type> NUMERIC_TYPES = Set.of(DOUBLE, TINYINT, SMALLINT, IntegerType.INTEGER, BIGINT);
 
+	// 2^53: integers of smaller magnitude are doubles exactly
+	private static final long MAX_EXACT_LONG = 1L << 53;
+
 	// Redis splits TEXT values into terms on space, tab and this ASCII punctuation. It keeps other characters, such as
 	// '_' and non-ASCII letters, inside terms.
 	private static final Pattern TEXT_SEPARATORS = Pattern.compile("[ \\t!\"#$%&'()*+,\\-./:;<=>?@\\[\\]^`{|}~]+");
@@ -114,7 +117,9 @@ public class RediSearchQueryBuilder {
 		}
 		switch (column.getFieldType()) {
 		case NUMERIC:
-			return NUMERIC_TYPES.contains(column.getType());
+			return NUMERIC_TYPES.contains(column.getType())
+					&& (column.getType() != BIGINT || values.getRanges().getOrderedRanges().stream()
+							.allMatch(RediSearchQueryBuilder::isExactAsDouble));
 		case TAG:
 			return column.getType() instanceof VarcharType && values.isDiscreteSet() && values.getDiscreteSet().stream()
 					.allMatch(value -> isTagQueryable(((Slice) value).toStringUtf8(), column.getTagSeparator()));
@@ -124,6 +129,17 @@ public class RediSearchQueryBuilder {
 		default:
 			return false;
 		}
+	}
+
+	// NUMERIC fields hold doubles, so Redis compares a BIGINT value with a bound of 2^53 or more after rounding both:
+	// the query could leave out rows in the range, as well as return others
+	private static boolean isExactAsDouble(Range range) {
+		return (range.isLowUnbounded() || isExactAsDouble((Long) range.getLowBoundedValue()))
+				&& (range.isHighUnbounded() || isExactAsDouble((Long) range.getHighBoundedValue()));
+	}
+
+	private static boolean isExactAsDouble(long value) {
+		return -MAX_EXACT_LONG < value && value < MAX_EXACT_LONG;
 	}
 
 	/**

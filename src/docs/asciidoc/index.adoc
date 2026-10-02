@@ -145,6 +145,8 @@ A table has these columns:
 |VARCHAR
 |===
 
+Columns created with `CREATE TABLE` or `ALTER TABLE \... ADD COLUMN` read back as the types they were created with instead; see <<create-table-types,column types>>.
+
 [[index-not-ready]]
 After `FT.CREATE` over existing keys, or `ALTER TABLE \... ADD COLUMN` (which runs `FT.ALTER`), Redis indexes the documents in the background.
 Until it finishes, queries on that index fail with `REDISEARCH_INDEX_NOT_READY` (`Index beers is still being built (42% indexed) \...`) instead of returning incomplete results.
@@ -212,27 +214,44 @@ Writes also fail when fault-tolerant execution is enabled (`retry-policy` other 
 [cols="2,1,2"]
 .Column types in CREATE TABLE
 |===
-|Trino type |Index field |Read back as
+|Trino type |Index field |Stored in the hash as
 
 |BIGINT, INTEGER, SMALLINT, TINYINT, DOUBLE, REAL, DECIMAL
 |NUMERIC
-|DOUBLE
+|The number, such as `42`, `4.5` or `1.25`
 
 |TIMESTAMP(3), TIMESTAMP(3) WITH TIME ZONE
 |NUMERIC
-|DOUBLE, in epoch milliseconds
+|Epoch milliseconds
 
 |VARCHAR, CHAR, UUID
 |TAG
-|VARCHAR
+|The string, with CHAR padded with spaces
 
 |BOOLEAN, DATE
 |TAG
-|VARCHAR: `true` or `false`, and ISO dates such as `2024-01-02`
+|`true` or `false`, and ISO dates such as `2024-01-02`
 |===
 
 Other types, such as ARRAY, MAP, ROW, VARBINARY and TIME, fail with `Unsupported column type`.
-Because columns are read back from the index, a column declared as BIGINT becomes DOUBLE and one declared as BOOLEAN or DATE becomes VARCHAR, so later `INSERT` statements must supply values of those types.
+
+[[column-types-key]]
+Redis keeps only each field's index type, which columns of several Trino types share.
+So `CREATE TABLE`, `CREATE TABLE AS SELECT` and `ALTER TABLE \... ADD COLUMN` also save the columns' Trino types, as JSON in the string key `__trino:columns:<table>`, such as `{"regionkey":"bigint","name":"varchar(25)"}`, and `DROP TABLE` deletes the key.
+Columns read back as those types in `DESCRIBE`, `SHOW CREATE TABLE`, `information_schema` and queries, and `INSERT` takes values of those types.
+`CREATE TABLE AS SELECT` keeps bounded types, so `SELECT 'a' AS id` makes a `varchar(1)` column.
+
+The types in the key don't apply to:
+
+* Indexes created outside Trino, and tables created by earlier versions of the connector, which didn't save types. Their columns read back as DOUBLE and VARCHAR.
+* A field whose index type isn't the one the connector creates for the saved type, as after an index is dropped and created again outside Trino. It reads back as DOUBLE or VARCHAR.
+* Any column, if the connector can't read the key: without read access to it in an ACL, or after Redis evicts it under an `allkeys-*` eviction policy. Creating a table needs write access to the key, such as `~__trino:*` in an ACL rule.
+
+NUMERIC fields hold doubles, and `FT.AGGREGATE` returns their values formatted as doubles, rounded to 12 significant digits unless they're integers.
+So BIGINT values above 2^53, and DECIMAL and DOUBLE values with more than 12 significant digits, read back rounded.
+
+A value its column's type can't hold, such as `4.5` written by another client to a BIGINT column, fails the query with `Value '4.5' is not a valid bigint`.
+To read the table with the default types instead, delete the key (`DEL __trino:columns:<table>`); the connector reads it again within `redisearch.table-cache-refresh` seconds.
 The TAG fields aren't full-text TEXT fields.
 They're `CASESENSITIVE` and split values into tags on the ASCII unit separator (`\x1f`) instead of `,`, so Redis can prefilter `=` and `IN` on values containing commas, and doesn't return rows that only differ in case.
 
@@ -242,7 +261,9 @@ They're `CASESENSITIVE` and split values into tags on the ASCII unit separator (
 Redis evaluates these parts of a query. Trino evaluates everything else on the rows Redis returns.
 
 * Filters on indexed fields, combined with `AND`:
-** `=`, `IN`, `<`, `\<=`, `>`, `>=` and `BETWEEN` on NUMERIC fields.
+** `=`, `IN`, `<`, `\<=`, `>`, `>=` and `BETWEEN` on NUMERIC fields of BIGINT, INTEGER, SMALLINT, TINYINT and DOUBLE columns.
+NUMERIC fields hold doubles, so Trino evaluates filters with BIGINT values of 2^53 or more, which they can't compare exactly.
+Trino also evaluates filters on columns of the other types `CREATE TABLE` creates, such as DECIMAL, TIMESTAMP, DATE and BOOLEAN.
 ** `=` and `IN` on TAG fields, as a tag query. Redis splits stored values into tags on the field's `SEPARATOR` (by default `,` on hashes and none on JSON), trims whitespace around each tag, and ignores case unless the field is `CASESENSITIVE`.
 It returns the documents with a tag that matches the value.
 On hash indexes, a `FILTER` step then compares the field's value as a string and keeps the documents equal to it, for example `+FILTER 'exists(@style) && @style == "Wheat"'+`.
@@ -258,6 +279,7 @@ Trino also evaluates `LIKE`. A Redis wildcard query matches single words of a TE
 * `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`, as `FT.AGGREGATE` with `GROUPBY` and `REDUCE`.
 If any aggregate in a query can't be pushed down, such as `count(DISTINCT \...)` or `count(column)`, or Trino filters the rows itself, as it does for filters on TAG and TEXT fields of JSON indexes, Trino computes all of them.
 `count(column)` skips nulls, but Redis's `COUNT` counts documents, so only `count(*)` is pushed down.
+Redis computes on the double values of NUMERIC fields, so `sum`, `min`, `max` and `GROUP BY` on a BIGINT column are exact only for values and sums below 2^53. Trino groups DECIMAL columns itself.
 Trino evaluates `HAVING` on the groups Redis returns.
 * `LIMIT`, unless Trino filters the rows itself. Trino sorts `ORDER BY \... LIMIT` itself.
 
