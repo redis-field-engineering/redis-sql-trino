@@ -11,14 +11,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.ImmutableMap;
 
+import io.lettuce.core.codec.StringCodec;
+import io.lettuce.core.protocol.CommandArgs;
 import io.trino.spi.connector.ColumnHandle;
+import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.predicate.ValueSet;
@@ -35,6 +40,12 @@ public class TestQueryBuilder {
 	private static RediSearchColumnHandle tag(String name, Optional<Character> separator) {
 		return new RediSearchColumnHandle(name, createUnboundedVarcharType(), RediSearchFieldType.TAG, false, true,
 				separator);
+	}
+
+	// A field of a hash index, whose values a FILTER compares as they're stored
+	private static RediSearchColumnHandle filterable(String name, RediSearchFieldType fieldType) {
+		return new RediSearchColumnHandle(name, createUnboundedVarcharType(), fieldType, false, true,
+				fieldType == RediSearchFieldType.TAG ? Optional.of(',') : Optional.empty(), true);
 	}
 
 	private static Domain varchars(String... values) {
@@ -77,7 +88,7 @@ public class TestQueryBuilder {
 				varchars("Grimm's Witbier", "The Pocus")));
 		assertThat(new RediSearchQueryBuilder().buildQuery(tupleDomain))
 				.isEqualTo("(@name:(Grimm s Witbier)|@name:(Pocus))");
-		assertThat(RediSearchQueryBuilder.isExact(TEXT_COL)).isFalse();
+		assertThat(RediSearchQueryBuilder.isExact(TEXT_COL, varchars("Pocus"))).isFalse();
 	}
 
 	@Test
@@ -96,8 +107,8 @@ public class TestQueryBuilder {
 	@Test
 	public void testTagValues() {
 		// Redis splits stored values into tags, trims them and folds their case, so Trino filters the rows
-		assertThat(RediSearchQueryBuilder.isExact(COL2)).isFalse();
-		assertThat(RediSearchQueryBuilder.isExact(COL1)).isTrue();
+		assertThat(RediSearchQueryBuilder.isExact(COL2, varchars("Wheat"))).isFalse();
+		assertThat(RediSearchQueryBuilder.isExact(COL1, Domain.singleValue(BIGINT, 1L))).isTrue();
 		assertThat(RediSearchQueryBuilder.isSupported(COL2, varchars("Wheat", "brown ale", "a\tb", "Café"))).isTrue();
 		// A tag query can't match a value containing the separator, surrounded by whitespace or with control characters
 		assertThat(RediSearchQueryBuilder.isSupported(COL2, varchars("Wheat", "a,b"))).isFalse();
@@ -110,6 +121,58 @@ public class TestQueryBuilder {
 		assertThat(RediSearchQueryBuilder.isSupported(semicolon, varchars("a,b"))).isTrue();
 		assertThat(RediSearchQueryBuilder.isSupported(semicolon, varchars("a;b"))).isFalse();
 		assertThat(RediSearchQueryBuilder.isSupported(tag("col2", Optional.empty()), varchars("a,b;c"))).isTrue();
+	}
+
+	@Test
+	public void testFilters() {
+		RediSearchColumnHandle style = filterable("style", RediSearchFieldType.TAG);
+		RediSearchColumnHandle name = filterable("name", RediSearchFieldType.TEXT);
+		Map<String, String> filters = new RediSearchQueryBuilder().filters(TupleDomain.withColumnDomains(
+				ImmutableMap.of(COL1, Domain.singleValue(BIGINT, 1L), style, varchars("Wheat"), name,
+						varchars("Hocus Pocus", "Big"), COL2, varchars("Wheat"))));
+		// NUMERIC queries are exact, and COL2 isn't filterable, so Trino filters it
+		assertThat(filters).containsOnlyKeys("style", "name");
+		assertThat(filters).containsEntry("style", "exists(@style) && @style == \"Wheat\"");
+		assertThat(filters).containsEntry("name", "exists(@name) && (@name == \"Big\" || @name == \"Hocus Pocus\")");
+		assertThat(RediSearchQueryBuilder.isExact(style, varchars("Wheat"))).isTrue();
+		assertThat(RediSearchQueryBuilder.isExact(name, varchars("Hocus Pocus"))).isTrue();
+	}
+
+	@Test
+	public void testFilterValues() {
+		RediSearchColumnHandle style = filterable("style", RediSearchFieldType.TAG);
+		// Quotes and backslashes are escaped; FILTER takes the other characters as they are
+		assertThat(new RediSearchQueryBuilder().filters(TupleDomain.withColumnDomains(ImmutableMap.of(style,
+				varchars("say \"hi\"", "back\\slash", "a$b@c'd|e", "Café")))))
+				.containsEntry("style", "exists(@style) && ((@style == \"Café\" || @style == \"a$b@c'd|e\") "
+						+ "|| (@style == \"back\\\\slash\" || @style == \"say \\\"hi\\\"\"))");
+		// IN nests its comparisons in halves
+		assertThat(new RediSearchQueryBuilder().filters(TupleDomain.withColumnDomains(ImmutableMap.of(style,
+				varchars("a", "b", "c", "d", "e"))))).containsEntry("style", "exists(@style) && "
+						+ "((@style == \"a\" || @style == \"b\") || (@style == \"c\" || (@style == \"d\" || @style == \"e\")))");
+		// A control character, which a string literal may not hold, leaves the filter to Trino
+		assertThat(RediSearchQueryBuilder.isExact(style, varchars("Wheat", "a\tb"))).isFalse();
+		assertThat(new RediSearchQueryBuilder().filters(TupleDomain.withColumnDomains(ImmutableMap.of(style,
+				varchars("Wheat", "a\tb"))))).isEmpty();
+		// and so does a field name an expression can't refer to
+		assertThat(RediSearchQueryBuilder.isExact(filterable("brewery-id", RediSearchFieldType.TAG), varchars("1")))
+				.isFalse();
+	}
+
+	@Test
+	public void testFilterBeforeGroupByAndLimit() {
+		RediSearchColumnHandle style = filterable("style", RediSearchFieldType.TAG);
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers",
+				TupleDomain.withColumnDomains(ImmutableMap.of(style, varchars("Wheat"))), OptionalLong.of(10), List.of(),
+				List.of(new RediSearchAggregation(RediSearchAggregation.COUNT, BIGINT, Optional.empty(), "c")));
+		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
+				new String[] { "c", "style" });
+		assertThat(aggregation.getQuery()).isEqualTo("@style:{Wheat}");
+		CommandArgs<String, String> args = new CommandArgs<>(StringCodec.UTF8);
+		aggregation.getArgs().build(args);
+		// The field is loaded once, and FILTER runs before GROUPBY and LIMIT
+		assertThat(args.toCommandString()).isEqualTo("LOAD 3 __key style c FILTER exists(@style) && @style == \"Wheat\" "
+				+ "GROUPBY 0 REDUCE COUNT 0 AS c LIMIT 0 10 WITHCURSOR COUNT 1000 DIALECT 2");
 	}
 
 	@Test

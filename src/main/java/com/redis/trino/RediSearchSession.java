@@ -343,7 +343,7 @@ public class RediSearchSession {
             fields.add(builtinfield.getName());
         }
         for (RediSearchIndexInfo.Field indexedField : indexInfo.getFields()) {
-            RediSearchColumnHandle column = buildColumnHandle(indexedField);
+            RediSearchColumnHandle column = buildColumnHandle(indexedField, indexInfo.getKeyType());
             fields.add(column.getName());
             columns.add(column);
         }
@@ -380,10 +380,15 @@ public class RediSearchSession {
         return Optional.empty();
     }
 
-    private RediSearchColumnHandle buildColumnHandle(RediSearchIndexInfo.Field field) {
+    private RediSearchColumnHandle buildColumnHandle(RediSearchIndexInfo.Field field,
+            Optional<RediSearchIndexInfo.KeyType> keyType) {
         RediSearchFieldType type = field.getType();
+        // On hashes, FILTER compares the TAG or TEXT value as stored, which is what the connector reads. How it
+        // compares loaded JSON values, such as arrays, hasn't been checked, so Trino filters those.
+        boolean filterable = keyType.filter(RediSearchIndexInfo.KeyType.HASH::equals).isPresent()
+                && (type == RediSearchFieldType.TAG || type == RediSearchFieldType.TEXT);
         return new RediSearchColumnHandle(field.getAttribute(), columnType(type), type, false, true,
-                field.getSeparator());
+                field.getSeparator(), filterable);
     }
 
     private Type columnType(RediSearchFieldType type) {

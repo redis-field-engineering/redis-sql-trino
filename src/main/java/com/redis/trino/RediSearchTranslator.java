@@ -25,8 +25,13 @@ package com.redis.trino;
 
 import static java.util.Objects.requireNonNull;
 
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import io.lettuce.core.search.arguments.AggregateArgs;
 import io.lettuce.core.search.arguments.AggregateArgs.GroupBy;
@@ -48,12 +53,15 @@ public class RediSearchTranslator {
 	public static class Aggregation {
 		private final String index;
 		private final String query;
+		private final Collection<String> filters;
 		private final AggregateArgs args;
 		private final boolean global;
 
-		public Aggregation(String index, String query, AggregateArgs args, boolean global) {
+		public Aggregation(String index, String query, Collection<String> filters, AggregateArgs args,
+				boolean global) {
 			this.index = index;
 			this.query = query;
+			this.filters = filters;
 			this.args = args;
 			this.global = global;
 		}
@@ -80,17 +88,23 @@ public class RediSearchTranslator {
 
 		@Override
 		public String toString() {
-			return "Aggregation [index=" + index + ", query=" + query + ", global=" + global + "]";
+			return "Aggregation [index=" + index + ", query=" + query + ", filters=" + filters + ", global=" + global
+					+ "]";
 		}
 	}
 
 	public Aggregation aggregate(RediSearchTableHandle table, String[] columnNames) {
 		String query = queryBuilder.buildQuery(table.getConstraint());
+		Map<String, String> filters = queryBuilder.filters(table.getConstraint());
 		AggregateArgs.Builder args = AggregateArgs.builder().dialect(DIALECT);
-		args.load(RediSearchBuiltinField.KEY.getName());
-		for (String columnName : columnNames) {
-			args.load(columnName);
-		}
+		// Lettuce writes LOAD before the other steps, so FILTER compares the loaded values
+		Set<String> loads = new LinkedHashSet<>();
+		loads.add(RediSearchBuiltinField.KEY.getName());
+		loads.addAll(filters.keySet());
+		loads.addAll(Arrays.asList(columnNames));
+		loads.forEach(args::load);
+		// Steps run in the order they're added: GROUPBY leaves only the groups, and LIMIT counts the filtered rows
+		filters.values().forEach(args::filter);
 		Optional<GroupBy> groupBy = queryBuilder.group(table);
 		groupBy.ifPresent(args::groupBy);
 		// Only a pushed-down SQL LIMIT caps the results; otherwise the cursor streams every matching document
@@ -98,7 +112,7 @@ public class RediSearchTranslator {
 		args.withCursor(WithCursor.of(config.getCursorCount() > 0 ? config.getCursorCount() : null));
 		List<RediSearchAggregationTerm> terms = table.getTermAggregations();
 		boolean global = groupBy.isPresent() && (terms == null || terms.isEmpty());
-		return new Aggregation(table.getIndex(), query, args.build(), global);
+		return new Aggregation(table.getIndex(), query, filters.values(), args.build(), global);
 	}
 
 }

@@ -4,13 +4,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
 
 import com.redis.trino.RedisEnterprise.Deployment;
 
 import io.lettuce.core.api.sync.RedisCommands;
+import io.lettuce.core.json.JsonPath;
 import io.lettuce.core.search.arguments.CreateArgs;
+import io.lettuce.core.search.arguments.CreateArgs.TargetType;
 import io.lettuce.core.search.arguments.NumericFieldArgs;
 import io.lettuce.core.search.arguments.TagFieldArgs;
 import io.lettuce.core.search.arguments.TextFieldArgs;
@@ -40,6 +44,27 @@ public class TestFilterPushdown extends AbstractTestQueryFramework {
 		redis.hset("beer:3", Map.of("id", "3", "style", "Brown Ale", "name", "Beer Town Brown", "abv", "6.0"));
 		redis.hset("beer:4", Map.of("id", "4", "name", "Pocus", "abv", "7.2"));
 		redis.hset("beer:5", Map.of("id", "5", "style", "Wheat", "name", "The Pocus Hocus"));
+		// SORTABLE fields, whose sort values are lowercased, and a field indexed under another name
+		redis.ftCreate("styles", CreateArgs.builder().withPrefix("style:").build(),
+				List.of(TagFieldArgs.builder().name("id").build(), TagFieldArgs.builder().name("style").sortable().build(),
+						TextFieldArgs.builder().name("name").sortable().build(), TagFieldArgs.builder().name("q").build(),
+						TagFieldArgs.builder().name("brewery_name").as("brewery").build(),
+						NumericFieldArgs.builder().name("abv").build()));
+		redisearch.awaitIndexed("styles");
+		redis.hset("style:1", Map.of("id", "1", "style", "Wheat", "name", "Hocus Pocus", "q", "say \"hi\"",
+				"brewery_name", "Big Brew", "abv", "4.5"));
+		redis.hset("style:2", Map.of("id", "2", "style", "wheat", "name", "hocus pocus", "q", "back\\slash",
+				"brewery_name", "big brew", "abv", "5.0"));
+		redis.hset("style:3", Map.of("id", "3", "style", "Wheat", "name", "Hocus Pocus Big", "q", "a\tb",
+				"brewery_name", "Big Brew", "abv", "6.0"));
+		redis.hset("style:4", Map.of("id", "4", "abv", "7.0"));
+		redis.ftCreate("jsonstyles", CreateArgs.builder().on(TargetType.JSON).withPrefix("jsonstyle:").build(),
+				List.of(TagFieldArgs.builder().name("$.id").as("id").build(),
+						TagFieldArgs.builder().name("$.style").as("style").build(),
+						TextFieldArgs.builder().name("$.name").as("name").build()));
+		redisearch.awaitIndexed("jsonstyles");
+		redis.jsonSet("jsonstyle:1", JsonPath.ROOT_PATH, "{\"id\": \"1\", \"style\": \"Wheat\", \"name\": \"Hocus Pocus\"}");
+		redis.jsonSet("jsonstyle:2", JsonPath.ROOT_PATH, "{\"id\": \"2\", \"style\": \"wheat\", \"name\": \"hocus pocus\"}");
 		return RediSearchQueryRunner.createRediSearchQueryRunner(redisearch);
 	}
 
@@ -67,8 +92,8 @@ public class TestFilterPushdown extends AbstractTestQueryFramework {
 
 	@Test
 	public void testTextEquality() {
-		// Redis returns the documents containing the words, and Trino keeps the equal ones
-		assertThat(query("SELECT id FROM beers WHERE name = 'Pocus'")).isNotFullyPushedDown(FilterNode.class)
+		// Redis returns the documents containing the words, and a FILTER keeps the equal ones
+		assertThat(query("SELECT id FROM beers WHERE name = 'Pocus'")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '4'");
 		assertThat(query("SELECT id FROM beers WHERE name = 'pocus hocus'")).returnsEmptyResult();
 		assertThat(query("SELECT id FROM beers WHERE name IN ('Pocus', 'Town')")).matches("VALUES VARCHAR '4'");
@@ -86,6 +111,58 @@ public class TestFilterPushdown extends AbstractTestQueryFramework {
 		assertThat(query("SELECT id FROM beers WHERE abv > 5")).isFullyPushedDown().matches("VALUES VARCHAR '3', '4'");
 		assertThat(query("SELECT id FROM beers WHERE abv BETWEEN 4 AND 5")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '1', '2'");
+	}
+
+	@Test
+	public void testEqualityPushedDownWithAggregationsAndLimit() {
+		// A FILTER checks TAG and TEXT equality in Redis, so it computes aggregations and LIMIT too
+		assertThat(query("SELECT count(*), sum(abv) FROM styles WHERE style = 'Wheat'")).isFullyPushedDown()
+				.matches("VALUES (BIGINT '2', DOUBLE '10.5')");
+		assertThat(query("SELECT style, count(*) FROM styles WHERE style IN ('Wheat', 'wheat') GROUP BY style"))
+				.isFullyPushedDown().matches("VALUES (VARCHAR 'Wheat', BIGINT '2'), (VARCHAR 'wheat', BIGINT '1')");
+		assertThat(query("SELECT count(*) FROM styles WHERE name = 'Hocus Pocus'")).isFullyPushedDown()
+				.matches("VALUES BIGINT '1'");
+		assertThat(query("SELECT id FROM styles WHERE name IN ('Hocus Pocus', 'hocus pocus')")).isFullyPushedDown()
+				.matches("VALUES VARCHAR '1', '2'");
+		// @style:{Wheat} matches documents 1, 2 and 3 in that order: LIMIT counts the rows FILTER keeps
+		assertThat(query("SELECT id FROM styles WHERE style = 'Wheat' LIMIT 2")).isFullyPushedDown()
+				.matches("VALUES VARCHAR '1', '3'");
+		assertThat(query("SELECT count(*) FROM styles WHERE brewery = 'Big Brew'")).isFullyPushedDown()
+				.matches("VALUES BIGINT '2'");
+	}
+
+	@Test
+	public void testFilterRejectsEveryMatch() {
+		// @style:{WHEAT} ignores case, and the FILTER keeps none of the documents it matches
+		assertThat(query("SELECT count(*), sum(abv) FROM styles WHERE style = 'WHEAT'")).isFullyPushedDown()
+				.matches("VALUES (BIGINT '0', CAST(NULL AS double))");
+		assertThat(query("SELECT style, count(*) FROM styles WHERE style = 'WHEAT' GROUP BY style")).isFullyPushedDown()
+				.returnsEmptyResult();
+	}
+
+	@Test
+	public void testFilterValues() {
+		assertThat(query("SELECT id FROM styles WHERE q = 'say \"hi\"'")).isFullyPushedDown().matches("VALUES VARCHAR '1'");
+		assertThat(query("SELECT id FROM styles WHERE q = 'back\\slash'")).isFullyPushedDown()
+				.matches("VALUES VARCHAR '2'");
+		// A string literal can't hold a control character, so Trino filters the rows
+		assertThat(query("SELECT id FROM styles WHERE q = U&'a\\0009b'")).isNotFullyPushedDown(FilterNode.class)
+				.matches("VALUES VARCHAR '3'");
+		assertThat(explain("SELECT id FROM styles WHERE q = U&'a\\0009b'")).doesNotContain("constraint=ALL");
+		// IN nests its comparisons, so a long list doesn't nest deeply in Redis
+		String values = IntStream.range(0, 2000).mapToObj(i -> "'v" + i + "'").collect(Collectors.joining(", "));
+		assertThat(query("SELECT count(*) FROM styles WHERE style IN ('Wheat', " + values + ")")).isFullyPushedDown()
+				.matches("VALUES BIGINT '2'");
+	}
+
+	@Test
+	public void testJsonEquality() {
+		// FILTER isn't used on JSON indexes, so Trino keeps the equal rows Redis returns
+		assertThat(query("SELECT id FROM jsonstyles WHERE style = 'Wheat'")).isNotFullyPushedDown(FilterNode.class)
+				.matches("VALUES VARCHAR '1'");
+		assertThat(query("SELECT id FROM jsonstyles WHERE name = 'Hocus Pocus'")).isNotFullyPushedDown(FilterNode.class)
+				.matches("VALUES VARCHAR '1'");
+		assertThat(query("SELECT count(*) FROM jsonstyles WHERE style = 'wheat'")).matches("VALUES BIGINT '1'");
 	}
 
 	private String explain(String sql) {

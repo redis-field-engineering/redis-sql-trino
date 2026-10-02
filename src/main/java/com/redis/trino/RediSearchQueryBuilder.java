@@ -33,6 +33,7 @@ import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -91,6 +92,12 @@ public class RediSearchQueryBuilder {
 	// ASCII control characters that a tag query can't express, even escaped
 	private static final Pattern TAG_UNSUPPORTED_CHARACTERS = Pattern.compile("[\\x00-\\x08\\x0E-\\x1F\\x7F]");
 
+	// Control characters, which a FILTER string literal may not take as they are
+	private static final Pattern FILTER_UNSUPPORTED_CHARACTERS = Pattern.compile("[\\x00-\\x1F\\x7F]");
+
+	// Field names a FILTER expression can refer to as @name
+	private static final Pattern PROPERTY_NAME = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
+
 	private static String property(String field) {
 		return "@" + field;
 	}
@@ -120,13 +127,60 @@ public class RediSearchQueryBuilder {
 	}
 
 	/**
-	 * Whether the query for a supported domain matches exactly the rows in it. A TEXT query matches the documents
-	 * containing the value's terms, with stemming. A TAG query matches the documents with that value among the tags
-	 * Redis splits a stored value into and trims, ignoring case unless the field is CASESENSITIVE. Trino still has to
-	 * filter the rows Redis returns for both.
+	 * Whether the scan returns exactly the rows in a supported domain, so Trino doesn't have to filter them. A NUMERIC
+	 * query matches exactly. A TEXT query matches the documents containing the value's terms, with stemming. A TAG
+	 * query matches the documents with that value among the tags Redis splits a stored value into and trims, ignoring
+	 * case unless the field is CASESENSITIVE. For these, {@link #filters} keeps the equal rows, when the field is
+	 * {@link RediSearchColumnHandle#isFilterable filterable}, its name can be referred to in an expression, and no
+	 * value has a control character.
 	 */
-	public static boolean isExact(RediSearchColumnHandle column) {
-		return column.getFieldType() == RediSearchFieldType.NUMERIC;
+	public static boolean isExact(RediSearchColumnHandle column, Domain domain) {
+		switch (column.getFieldType()) {
+		case NUMERIC:
+			return true;
+		case TAG:
+		case TEXT:
+			return column.isFilterable() && PROPERTY_NAME.matcher(column.getName()).matches()
+					&& domain.getValues().isDiscreteSet() && domain.getValues().getDiscreteSet().stream()
+							.noneMatch(value -> FILTER_UNSUPPORTED_CHARACTERS.matcher(((Slice) value).toStringUtf8()).find());
+		default:
+			return false;
+		}
+	}
+
+	/**
+	 * FT.AGGREGATE FILTER expressions, by field name, that keep the rows equal to the TAG and TEXT domains that
+	 * {@link #isExact} accepts. Each compares the field's value as a string, e.g.
+	 * {@code exists(@style) && @style == "Wheat"}, so it must come after the field is loaded: on a SORTABLE field,
+	 * FILTER would otherwise compare the normalized sort value. Without {@code exists}, Redis fails the query on a
+	 * document without the field instead of leaving it out.
+	 */
+	public Map<String, String> filters(TupleDomain<ColumnHandle> tupleDomain) {
+		Map<String, String> filters = new LinkedHashMap<>();
+		tupleDomain.getDomains().ifPresent(domains -> domains.forEach((columnHandle, domain) -> {
+			RediSearchColumnHandle column = (RediSearchColumnHandle) columnHandle;
+			if (column.getFieldType() != RediSearchFieldType.NUMERIC && !domain.isAll() && isExact(column, domain)) {
+				String property = property(column.getName());
+				filters.put(column.getName(), "exists(" + property + ") && " + anyOf(domain.getValues().getDiscreteSet()
+						.stream().map(value -> property + " == " + stringLiteral(((Slice) value).toStringUtf8())).toList()));
+			}
+		}));
+		return filters;
+	}
+
+	// Nested in halves, so that Redis parses and evaluates a long IN list only log2(n) levels deep
+	private static String anyOf(List<String> conditions) {
+		if (conditions.size() == 1) {
+			return conditions.get(0);
+		}
+		int middle = conditions.size() / 2;
+		return "(" + anyOf(conditions.subList(0, middle)) + " || " + anyOf(conditions.subList(middle, conditions.size()))
+				+ ")";
+	}
+
+	// FILTER doesn't take PARAMS, so values are inlined
+	private static String stringLiteral(String value) {
+		return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
 	}
 
 	/**

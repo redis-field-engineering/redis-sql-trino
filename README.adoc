@@ -338,7 +338,7 @@ Applications read these rows like any other hash, for example with `HGETALL`.
 |`FT.INFO beers`, then `+FT.SEARCH beers *+` for fields that aren't indexed
 
 |`+SELECT * FROM beers WHERE id = '190'+`
-|`+FT.AGGREGATE beers "@id:{190}" LOAD ... WITHCURSOR COUNT 1000 DIALECT 2+`, then `FT.CURSOR READ` until the cursor is exhausted
+|`+FT.AGGREGATE beers "@id:{190}" LOAD ... FILTER 'exists(@id) && @id == "190"' WITHCURSOR COUNT 1000 DIALECT 2+`, then `FT.CURSOR READ` until the cursor is exhausted
 
 |`+SELECT style_name, count(*) FROM beers GROUP BY style_name+`
 |`+FT.AGGREGATE beers * ... GROUPBY 1 @style_name REDUCE COUNT 0 ...+`
@@ -402,9 +402,10 @@ These aren't supported:
 Redis evaluates these parts of a query. Trino evaluates everything else on the rows Redis returns.
 
 * `WHERE` on indexed fields, combined with `AND`: `=` and `IN`; and `<`, `+<=+`, `>`, `>=` and `BETWEEN` on NUMERIC fields.
-On TAG and TEXT fields, Redis can also return rows that aren't equal, which Trino filters out.
+On TAG and TEXT fields, the query also matches rows that aren't equal.
 A TEXT query finds the documents containing the value's words.
 A TAG query matches any of the tags Redis splits a value into on the field's `SEPARATOR`, ignoring surrounding whitespace and, unless the field is `CASESENSITIVE`, case.
+On hash indexes, a `FILTER` step then keeps the rows equal to the value. On JSON indexes, and for values with control characters, Trino filters them instead.
 Trino evaluates `LIKE`, `IS NULL`, `IS NOT NULL`, and comparisons other than `=` and `IN` on VARCHAR columns.
 * `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`, when Redis evaluates the whole `WHERE` clause
 * `LIMIT`, when Redis evaluates the whole `WHERE` clause

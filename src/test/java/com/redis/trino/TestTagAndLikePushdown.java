@@ -16,8 +16,8 @@ import io.trino.testing.AbstractTestQueryFramework;
 import io.trino.testing.QueryRunner;
 
 /**
- * TAG and wildcard queries match differently from SQL's {@code =} and {@code LIKE}, so Trino filters the rows Redis
- * returns for them, or evaluates the filter alone.
+ * TAG and wildcard queries match differently from SQL's {@code =} and {@code LIKE}. Redis keeps the equal rows with a
+ * FILTER on TAG equality, and Trino evaluates {@code LIKE} and the values a tag query can't match.
  */
 public class TestTagAndLikePushdown extends AbstractTestQueryFramework {
 
@@ -53,25 +53,26 @@ public class TestTagAndLikePushdown extends AbstractTestQueryFramework {
 
 	@Test
 	public void testTagCase() {
-		// Without CASESENSITIVE, @style:{wheat} also matches Wheat
-		assertThat(query("SELECT id FROM beers WHERE style = 'wheat'")).isNotFullyPushedDown(FilterNode.class)
+		// Without CASESENSITIVE, @style:{wheat} also matches Wheat, which the FILTER drops
+		assertThat(query("SELECT id FROM beers WHERE style = 'wheat'")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '2'");
 		assertThat(explain("SELECT id FROM beers WHERE style = 'wheat'")).doesNotContain("constraint=ALL");
 		assertThat(query("SELECT id FROM beers WHERE style = 'Wheat'")).matches("VALUES VARCHAR '1'");
 		assertThat(query("SELECT id FROM beers WHERE style IN ('WHEAT', 'wheat')")).matches("VALUES VARCHAR '2'");
 		assertThat(query("SELECT id FROM beers WHERE code = 'wheat'")).matches("VALUES VARCHAR '2'");
 		// Aggregations over a TAG filter count the equal rows only
-		assertThat(query("SELECT count(*) FROM beers WHERE style = 'wheat'")).matches("VALUES BIGINT '1'");
+		assertThat(query("SELECT count(*) FROM beers WHERE style = 'wheat'")).isFullyPushedDown()
+				.matches("VALUES BIGINT '1'");
 	}
 
 	@Test
 	public void testTagSeparator() {
 		// Redis splits a, b and a,b into tags on the separator, so @style:{a} matches all of them
-		assertThat(query("SELECT id FROM beers WHERE style = 'a'")).isNotFullyPushedDown(FilterNode.class)
-				.matches("VALUES VARCHAR '4'");
+		assertThat(query("SELECT id FROM beers WHERE style = 'a'")).isFullyPushedDown().matches("VALUES VARCHAR '4'");
 		assertThat(query("SELECT id FROM beers WHERE code = 'a'")).matches("VALUES VARCHAR '4'");
 		// and a query for a value containing it matches nothing, so Trino evaluates the filter alone
-		assertThat(query("SELECT id FROM beers WHERE style = 'a,b'")).matches("VALUES VARCHAR '3'");
+		assertThat(query("SELECT id FROM beers WHERE style = 'a,b'")).isNotFullyPushedDown(FilterNode.class)
+				.matches("VALUES VARCHAR '3'");
 		assertThat(explain("SELECT id FROM beers WHERE style = 'a,b'")).contains("constraint=ALL");
 		assertThat(query("SELECT id FROM beers WHERE style IN ('a', 'a,b')")).matches("VALUES VARCHAR '3', '4'");
 		// The separator is the field's own
