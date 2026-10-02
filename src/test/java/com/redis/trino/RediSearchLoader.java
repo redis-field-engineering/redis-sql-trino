@@ -9,6 +9,7 @@ import static java.util.Objects.requireNonNull;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -47,9 +48,13 @@ public class RediSearchLoader implements AutoCloseable {
 		List<Type> types = result.getTypes();
 		if (!connection.sync().ftList().contains(tableName)) {
 			List<FieldArgs> schema = new ArrayList<>();
+			Map<String, Type> columnTypes = new LinkedHashMap<>();
 			for (int i = 0; i < columns.size(); i++) {
 				schema.add(field(columns.get(i), types.get(i)));
+				columnTypes.put(columns.get(i), types.get(i));
 			}
+			// Saved like CREATE TABLE saves them, so the columns read back as TPC-H types, e.g. bigint and date
+			RediSearchColumnTypes.write(connection.sync(), tableName, columnTypes);
 			connection.sync().ftCreate(tableName, CreateArgs.builder().withPrefix(tableName + ":").build(), schema);
 			// FT.CREATE scans the existing keyspace in the background; rows written after it finishes are indexed
 			// synchronously, so they're queryable as soon as load() returns

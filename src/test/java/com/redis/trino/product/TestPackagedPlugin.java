@@ -69,9 +69,9 @@ class TestPackagedPlugin {
 					"CREATE TABLE " + table + " AS SELECT nationkey, name, regionkey FROM tpch.tiny.nation"))
 					.isEqualTo(25);
 			assertThat(env.executeTrino("SELECT count(*) FROM " + table)).containsOnly(row(25L));
-			// NUMERIC fields read back as double
+			// The column reads back as the bigint it was created as, not as its NUMERIC field's double
 			assertThat(env.executeTrino("SELECT regionkey FROM " + table + " WHERE name = 'CANADA'"))
-					.containsOnly(row(1.0));
+					.containsOnly(row(1L));
 		} finally {
 			env.executeTrinoUpdate("DROP TABLE IF EXISTS " + table);
 		}

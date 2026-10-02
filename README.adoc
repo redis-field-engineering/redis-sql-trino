@@ -273,7 +273,9 @@ SELECT name, abv FROM beers WHERE abv > 5 LIMIT 10
  │
  ▼
 1. Resolve the table             FT.INFO beers          indexed fields and their types
-   (cached)                      FT.SEARCH beers *      other fields, from the first 10 documents
+   (cached)                      GET __trino:columns:beers
+                                                        column types CREATE TABLE saved, if any
+                                 FT.SEARCH beers *      other fields, from the first 10 documents
  │
  ▼
 2. Push down what Redis can do   WHERE abv > 5    →     @abv:[(5.0 inf]
@@ -317,7 +319,7 @@ INSERT INTO beers (id, name, abv) VALUES ('9999', 'Test Ale', 5.5)
 * Each row becomes a new hash. Its key is the index's first key prefix followed by a generated https://github.com/ulid/spec[ULID], with a `:` added if the prefix doesn't end in one. Tables made with `CREATE TABLE` use the prefix `<table>:`.
 * The key doesn't come from any column, and `INSERT` never overwrites. Inserting a row whose `id` is `'190'` adds a second hash next to `beer:190` rather than replacing it. Use `UPDATE` or `MERGE` to change existing documents.
 * Each non-null value becomes a hash field named after its column. NULLs, and columns the `INSERT` leaves out, aren't written.
-* Values are stored as strings: VARCHAR as is, and DOUBLE as Java formats it, so `6` is stored as `6.0`.
+* Values are stored as strings: VARCHAR as is, BIGINT and other integers as digits, and DOUBLE as Java formats it, so `6` is stored as `6` in a BIGINT column and as `6.0` in a DOUBLE column.
 * Rows are sent as pipelined `HSET` commands, one batch per page of rows, outside any transaction. If an `INSERT` fails partway, the rows it already wrote stay in Redis.
 * The connector only writes hashes. `INSERT` into a JSON index writes a hash under `<table>:` that the index never sees (https://github.com/{project-owner}/{project-name}/issues/44[#44]).
 
@@ -335,7 +337,7 @@ Applications read these rows like any other hash, for example with `HGETALL`.
 |`FT._LIST`
 
 |`DESCRIBE beers`
-|`FT.INFO beers`, then `+FT.SEARCH beers *+` for fields that aren't indexed
+|`FT.INFO beers` and `+GET __trino:columns:beers+` for the column types, then `+FT.SEARCH beers *+` for fields that aren't indexed
 
 |`+SELECT * FROM beers WHERE id = '190'+`
 |`+FT.AGGREGATE beers "@id:{190}" LOAD ... WITHCURSOR COUNT 1000 DIALECT 2+`, then `FT.CURSOR READ` until the cursor is exhausted
@@ -359,13 +361,13 @@ Applications read these rows like any other hash, for example with `HGETALL`.
 |The `UPDATE`, `DELETE` and `INSERT` commands above, for each row. Inserted rows get new ULID keys.
 
 |`+CREATE TABLE drinks (id varchar, abv double)+`
-|`+FT.CREATE drinks ON HASH PREFIX 1 drinks: SKIPINITIALSCAN SCHEMA id TAG SEPARATOR "\x1f" CASESENSITIVE abv NUMERIC+`
+|`+SET __trino:columns:drinks '{"id":"varchar","abv":"double"}'+`, then `+FT.CREATE drinks ON HASH PREFIX 1 drinks: SKIPINITIALSCAN SCHEMA id TAG SEPARATOR "\x1f" CASESENSITIVE abv NUMERIC+`
 
 |`+ALTER TABLE drinks ADD COLUMN style varchar+`
-|`+FT.ALTER drinks SCHEMA ADD style TAG SEPARATOR "\x1f" CASESENSITIVE+`
+|`+SET __trino:columns:drinks+` with the new column's type added, then `+FT.ALTER drinks SCHEMA ADD style TAG SEPARATOR "\x1f" CASESENSITIVE+`
 
 |`DROP TABLE drinks`
-|`+FT.DROPINDEX drinks DD+`, which also deletes every document the index covers
+|`+FT.DROPINDEX drinks DD+`, which also deletes every document the index covers, then `+DEL __trino:columns:drinks+`
 |===
 
 == SQL support
@@ -386,7 +388,7 @@ Applications read these rows like any other hash, for example with `HGETALL`.
 |`INSERT`, `INSERT \... SELECT`, `UPDATE`, `DELETE` and `MERGE`. All of them work on hash indexes. On JSON indexes only `DELETE` works.
 
 |Table changes
-|`CREATE TABLE` (creates a hash index with key prefix `<table>:`), `CREATE TABLE IF NOT EXISTS`, `CREATE TABLE AS SELECT`, `ALTER TABLE \... ADD COLUMN`, and `DROP TABLE`, which also *deletes the index's documents*.
+|`CREATE TABLE` (creates a hash index with key prefix `<table>:`, and saves the column types in the string key `__trino:columns:<table>`), `CREATE TABLE IF NOT EXISTS`, `CREATE TABLE AS SELECT`, `ALTER TABLE \... ADD COLUMN`, and `DROP TABLE`, which also *deletes the index's documents*.
 |===
 
 These aren't supported:
@@ -402,6 +404,7 @@ These aren't supported:
 Redis evaluates these parts of a query. Trino evaluates everything else on the rows Redis returns.
 
 * `WHERE` on indexed fields, combined with `AND`: `=` and `IN`; and `<`, `+<=+`, `>`, `>=` and `BETWEEN` on NUMERIC fields.
+Trino evaluates filters on columns created as other types than VARCHAR, BIGINT, INTEGER, SMALLINT, TINYINT and DOUBLE, such as DATE or DECIMAL.
 On TAG and TEXT fields, Redis can also return rows that aren't equal, which Trino filters out.
 A TEXT query finds the documents containing the value's words.
 A TAG query matches any of the tags Redis splits a value into on the field's `SEPARATOR`, ignoring surrounding whitespace and, unless the field is `CASESENSITIVE`, case.

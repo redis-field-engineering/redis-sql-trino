@@ -30,6 +30,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import io.trino.spi.connector.ColumnHandle;
+import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.Type;
 
 public class RediSearchAggregationTerm {
@@ -55,6 +56,11 @@ public class RediSearchAggregationTerm {
 
 	public static Optional<RediSearchAggregationTerm> fromColumnHandle(ColumnHandle columnHandle) {
 		RediSearchColumnHandle column = (RediSearchColumnHandle) columnHandle;
+		// Redis groups a NUMERIC field by its double value and returns it formatted as one, which a DECIMAL column
+		// may not be able to hold exactly
+		if (column.getType() instanceof DecimalType) {
+			return Optional.empty();
+		}
 		return Optional.of(new RediSearchAggregationTerm(column.getName(), column.getType()));
 	}
 

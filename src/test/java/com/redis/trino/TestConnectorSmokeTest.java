@@ -179,19 +179,6 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 	}
 
 	@Test
-	@Override
-	public void testShowCreateTable() {
-		// regionkey is bigint in TPC-H, but NUMERIC fields read back as double
-		assertThat((String) computeScalar("SHOW CREATE TABLE region")).isEqualTo(format(
-				"CREATE TABLE %s.%s.region (\n" +
-						"   regionkey double,\n" +
-						"   name varchar,\n" +
-						"   comment varchar\n" +
-						")",
-				getSession().getCatalog().orElseThrow(), getSession().getSchema().orElseThrow()));
-	}
-
-	@Test
 	public void testInsertIndex() {
 		String index = "insertidx";
 		String prefix = index + ":";
@@ -212,7 +199,11 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 		assertQueryFails(format("CREATE TABLE %s AS SELECT name, 1 / (nationkey - nationkey) AS x FROM tpch.tiny.nation",
 				table), "Division by zero");
 		// Trino rolls back the failed query's transaction asynchronously, which drops the index beginCreateTable created
-		assertEventually(() -> assertThat(redisearch.getConnection().sync().ftList()).doesNotContain(table));
+		// and the column types it saved
+		assertEventually(() -> {
+			assertThat(redisearch.getConnection().sync().ftList()).doesNotContain(table);
+			assertThat(redisearch.getConnection().sync().exists(RediSearchColumnTypes.key(table))).isZero();
+		});
 	}
 
 	@Test

@@ -4,8 +4,6 @@ import static io.trino.tpch.TpchTable.CUSTOMER;
 import static io.trino.tpch.TpchTable.NATION;
 import static io.trino.tpch.TpchTable.ORDERS;
 import static io.trino.tpch.TpchTable.REGION;
-import static java.lang.String.format;
-import static org.assertj.core.api.Assertions.assertThat;
 
 import java.text.MessageFormat;
 import java.util.Arrays;
@@ -92,19 +90,6 @@ public class TestCaseInsensitiveConnectorSmokeTest extends BaseConnectorSmokeTes
 		default:
 			return super.hasBehavior(connectorBehavior);
 		}
-	}
-
-	@Test
-	@Override
-	public void testShowCreateTable() {
-		// regionkey is bigint in TPC-H, but NUMERIC fields read back as double
-		assertThat((String) computeScalar("SHOW CREATE TABLE region")).isEqualTo(format(
-				"CREATE TABLE %s.%s.region (\n" +
-						"   regionkey double,\n" +
-						"   name varchar,\n" +
-						"   comment varchar\n" +
-						")",
-				getSession().getCatalog().orElseThrow(), getSession().getSchema().orElseThrow()));
 	}
 
 	@Test

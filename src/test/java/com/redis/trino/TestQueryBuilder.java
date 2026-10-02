@@ -133,6 +133,13 @@ public class TestQueryBuilder {
 		assertThat(RediSearchQueryBuilder.isSupported(COL1, Domain.notNull(BIGINT))).isFalse();
 		assertThat(RediSearchQueryBuilder.isSupported(COL1,
 				Domain.create(ValueSet.ofRanges(greaterThan(BIGINT, 200L)), true))).isFalse();
+		// BIGINT bounds that NUMERIC fields, which hold doubles, can't compare exactly
+		assertThat(RediSearchQueryBuilder.isSupported(COL1, Domain.singleValue(BIGINT, (1L << 53) - 1))).isTrue();
+		assertThat(RediSearchQueryBuilder.isSupported(COL1, Domain.singleValue(BIGINT, 1L << 53))).isFalse();
+		assertThat(RediSearchQueryBuilder.isSupported(COL1,
+				Domain.create(ValueSet.ofRanges(greaterThan(BIGINT, -(1L << 53))), false))).isFalse();
+		assertThat(RediSearchQueryBuilder.isSupported(COL1,
+				Domain.create(ValueSet.ofRanges(lessThan(BIGINT, Long.MIN_VALUE + 1)), false))).isFalse();
 		// VARCHAR ranges, such as <>
 		assertThat(RediSearchQueryBuilder.isSupported(COL2, Domain.create(
 				ValueSet.ofRanges(lessThan(createUnboundedVarcharType(), utf8Slice("1")),
