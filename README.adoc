@@ -283,7 +283,7 @@ SELECT name, abv FROM beers WHERE abv > 5 LIMIT 10
  │
  ▼
 3. Scan the index                FT.INFO beers          fails if the index is still being built
-   (one worker, one split)       FT.AGGREGATE beers "@abv:[(5.0 inf]" LOAD 3 __key name abv
+   (one worker, one split)       FT.AGGREGATE beers "@abv:[(5.0 inf]" LOAD * LOAD 2 __key name
                                      LIMIT 0 10 WITHCURSOR COUNT 1000 DIALECT 2
                                  FT.CURSOR READ beers <cursor> COUNT 1000, until the cursor is exhausted
  │
@@ -296,6 +296,8 @@ Rows to the client
 
 Redis returns the matching documents in batches of `redisearch.cursor-count` rows (default 1000), and Trino processes each batch as it arrives.
 Each table scan is a single split, so one Trino worker reads the whole index.
+Redis rounds NUMERIC fields loaded by name to 12 significant digits, so a scan that reads DOUBLE, BIGINT or DECIMAL columns loads hashes with `LOAD *` and JSON documents with `DIALECT 3`, which return the values as stored.
+The results of `GROUPBY` and `REDUCE` are rounded that way.
 With `GROUP BY` and `count(*)`, `min`, `max`, `sum` or `avg`, Redis computes the groups too (`GROUPBY` and `REDUCE`) when it evaluates the whole `WHERE` clause, and only the aggregated rows come back.
 A query with nothing to push down reads every document in the index.
 
@@ -340,7 +342,7 @@ Applications read these rows like any other hash, for example with `HGETALL`.
 |`FT.INFO beers` and `+GET __trino:columns:beers+` for the column types, then `+FT.SEARCH beers *+` for fields that aren't indexed
 
 |`+SELECT * FROM beers WHERE id = '190'+`
-|`+FT.AGGREGATE beers "@id:{190}" LOAD ... FILTER 'exists(@id) && @id == "190"' WITHCURSOR COUNT 1000 DIALECT 2+`, then `FT.CURSOR READ` until the cursor is exhausted
+|`+FT.AGGREGATE beers "@id:{190}" LOAD * LOAD ... FILTER 'exists(@id) && @id == "190"' WITHCURSOR COUNT 1000 DIALECT 2+`, then `FT.CURSOR READ` until the cursor is exhausted
 
 |`+SELECT style_name, count(*) FROM beers GROUP BY style_name+`
 |`+FT.AGGREGATE beers * ... GROUPBY 1 @style_name REDUCE COUNT 0 ...+`

@@ -59,7 +59,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	public RediSearchPageSource(RediSearchSession session, RediSearchTableHandle table,
 			List<RediSearchColumnHandle> columns) {
 		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).toArray(String[]::new);
-		this.iterator = new CursorIterator(session, table, columnNames);
+		this.iterator = new CursorIterator(session, table, columns);
 		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType).collect(Collectors.toList());
 		this.currentDoc = null;
 		this.pageBuilder = new PageBuilder(columnTypes);
@@ -130,16 +130,19 @@ public class RediSearchPageSource implements ConnectorPageSource {
 		private final RediSearchTableHandle table;
 		private Iterator<Map<String, String>> iterator;
 		private Optional<Cursor> cursor;
+		private RediSearchRowReader reader;
 
-		public CursorIterator(RediSearchSession session, RediSearchTableHandle table, String[] columnNames) {
+		public CursorIterator(RediSearchSession session, RediSearchTableHandle table,
+				List<RediSearchColumnHandle> columns) {
 			this.session = session;
 			this.table = table;
-			read(session.aggregate(table, columnNames));
+			read(session.aggregate(table, columns));
 		}
 
 		private void read(RediSearchSession.AggregateResult results) {
 			this.iterator = results.getRows().iterator();
 			this.cursor = results.getCursor();
+			this.reader = results.getReader();
 		}
 
 		@Override
@@ -148,7 +151,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 				if (cursor.isEmpty()) {
 					return false;
 				}
-				read(session.cursorRead(table, cursor.get()));
+				read(session.cursorRead(table, reader, cursor.get()));
 			}
 			return true;
 		}

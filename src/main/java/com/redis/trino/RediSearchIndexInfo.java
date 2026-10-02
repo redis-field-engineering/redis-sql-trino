@@ -50,11 +50,13 @@ public class RediSearchIndexInfo {
 
 	public static class Field {
 		private final String attribute;
+		private final String identifier;
 		private final RediSearchFieldType type;
 		private final Optional<Character> separator;
 
-		public Field(String attribute, RediSearchFieldType type, Optional<Character> separator) {
+		public Field(String attribute, String identifier, RediSearchFieldType type, Optional<Character> separator) {
 			this.attribute = requireNonNull(attribute, "attribute is null");
+			this.identifier = requireNonNull(identifier, "identifier is null");
 			this.type = requireNonNull(type, "type is null");
 			this.separator = requireNonNull(separator, "separator is null");
 		}
@@ -64,6 +66,13 @@ public class RediSearchIndexInfo {
 		 */
 		public String getAttribute() {
 			return attribute;
+		}
+
+		/**
+		 * @return the hash field name or JSON path the field indexes
+		 */
+		public String getIdentifier() {
+			return identifier;
 		}
 
 		public RediSearchFieldType getType() {
@@ -153,7 +162,8 @@ public class RediSearchIndexInfo {
 				String identifier = string(attributeMap.get("identifier"));
 				String alias = string(attributeMap.get("attribute"));
 				RediSearchFieldType type = RediSearchFieldType.of(string(attributeMap.get("type")));
-				fields.add(new Field(alias == null ? identifier : alias, type, separator(type, attributeMap)));
+				String name = alias == null ? identifier : alias;
+				fields.add(new Field(name, identifier == null ? name : identifier, type, separator(type, attributeMap)));
 			}
 		}
 		boolean indexing = number(info.get("indexing"), 0) != 0;

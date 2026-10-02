@@ -77,7 +77,6 @@ import io.lettuce.core.protocol.ProtocolKeyword;
 import io.lettuce.core.protocol.ProtocolVersion;
 import io.lettuce.core.search.AggregationReply;
 import io.lettuce.core.search.AggregationReply.Cursor;
-import io.lettuce.core.search.FieldValue;
 import io.lettuce.core.search.SearchReply;
 import io.lettuce.core.search.arguments.CreateArgs;
 import io.lettuce.core.search.arguments.FieldArgs;
@@ -440,10 +439,12 @@ public class RediSearchSession {
     public static class AggregateResult {
         private final List<Map<String, String>> rows;
         private final Optional<Cursor> cursor;
+        private final RediSearchRowReader reader;
 
-        public AggregateResult(List<Map<String, String>> rows, Optional<Cursor> cursor) {
+        public AggregateResult(List<Map<String, String>> rows, Optional<Cursor> cursor, RediSearchRowReader reader) {
             this.rows = rows;
             this.cursor = cursor;
+            this.reader = reader;
         }
 
         public List<Map<String, String>> getRows() {
@@ -453,18 +454,26 @@ public class RediSearchSession {
         public Optional<Cursor> getCursor() {
             return cursor;
         }
+
+        /**
+         * @return how to read the rows of the cursor's next batches
+         */
+        public RediSearchRowReader getReader() {
+            return reader;
+        }
     }
 
-    public AggregateResult aggregate(RediSearchTableHandle table, String[] columnNames) {
-        verifyIndexed(table.getIndex());
-        Aggregation aggregation = translator.aggregate(table, columnNames);
+    public AggregateResult aggregate(RediSearchTableHandle table, List<RediSearchColumnHandle> columns) {
+        Optional<RediSearchIndexInfo> indexInfo = indexInfo(table.getIndex());
+        indexInfo.ifPresent(info -> verifyIndexed(table.getIndex(), info));
+        Aggregation aggregation = translator.aggregate(table, columns, indexInfo);
         log.info("Running %s", aggregation);
-        AggregateResult result = result(table, sync.ftAggregate(aggregation.getIndex(), aggregation.getQuery(),
-                aggregation.getArgs()));
+        AggregateResult result = result(table, aggregation.getReader(),
+                sync.ftAggregate(aggregation.getIndex(), aggregation.getQuery(), aggregation.getArgs()));
         // A batch can come back empty while the cursor still has rows, so the aggregation is only empty once the
         // cursor is exhausted
         while (result.getRows().isEmpty() && result.getCursor().isPresent()) {
-            result = cursorRead(table, result.getCursor().get());
+            result = cursorRead(table, result.getReader(), result.getCursor().get());
         }
         if (result.getRows().isEmpty() && aggregation.isGlobal()) {
             // A global aggregation over no documents still returns one row: count is 0 and the other metrics are null.
@@ -475,29 +484,30 @@ public class RediSearchSession {
                     row.put(metric.getAlias(), "0");
                 }
             }
-            return new AggregateResult(List.of(row), Optional.empty());
+            return new AggregateResult(List.of(row), Optional.empty(), result.getReader());
         }
         return result;
     }
 
     // While Redis indexes existing documents in the background (e.g. after FT.CREATE on a populated keyspace), queries
     // return only the documents indexed so far, with no warning in the reply
-    private void verifyIndexed(String index) {
-        indexInfo(index).filter(RediSearchIndexInfo::isIndexing).ifPresent(info -> {
+    private static void verifyIndexed(String index, RediSearchIndexInfo info) {
+        if (info.isIndexing()) {
             throw new TrinoException(REDISEARCH_INDEX_NOT_READY, format(ENGLISH,
                     "Index %s is still being built (%.0f%% indexed), so its results would be incomplete; retry once indexing finishes",
                     index, info.getPercentIndexed() * 100));
-        });
+        }
     }
 
-    public AggregateResult cursorRead(RediSearchTableHandle tableHandle, Cursor cursor) {
+    public AggregateResult cursorRead(RediSearchTableHandle tableHandle, RediSearchRowReader reader, Cursor cursor) {
         String index = tableHandle.getIndex();
         RediSearchCommands<String> commands = cursorCommands(cursor);
         AggregateResult result;
         if (config.getCursorCount() > 0) {
-            result = result(tableHandle, commands.ftCursorread(index, cursor, Math.toIntExact(config.getCursorCount())));
+            result = result(tableHandle, reader,
+                    commands.ftCursorread(index, cursor, Math.toIntExact(config.getCursorCount())));
         } else {
-            result = result(tableHandle, commands.ftCursorread(index, cursor));
+            result = result(tableHandle, reader, commands.ftCursorread(index, cursor));
         }
         // The cursor stays on the node that created it
         result.getCursor().filter(next -> next.getNodeId().isEmpty())
@@ -505,17 +515,12 @@ public class RediSearchSession {
         return result;
     }
 
-    private static AggregateResult result(RediSearchTableHandle table, AggregationReply<String> reply) {
+    private static AggregateResult result(RediSearchTableHandle table, RediSearchRowReader reader,
+            AggregationReply<String> reply) {
         List<Map<String, String>> rows = new ArrayList<>();
         for (SearchReply<String> searchReply : reply.getReplies()) {
             for (SearchReply.SearchResult<String> result : searchReply.getResults()) {
-                Map<String, String> row = new HashMap<>();
-                for (Map.Entry<String, FieldValue> field : result.getFields().entrySet()) {
-                    FieldValue value = field.getValue();
-                    if (value != null && !value.isNull()) {
-                        row.put(field.getKey(), value.asString());
-                    }
-                }
+                Map<String, String> row = reader.read(result.getFields());
                 for (RediSearchAggregation metric : table.getMetricAggregations()) {
                     if (metric.isEmptyResult(row.get(metric.getAlias()))) {
                         row.remove(metric.getAlias());
@@ -525,7 +530,7 @@ public class RediSearchSession {
             }
         }
         // Cursor ID 0 means there are no more rows
-        return new AggregateResult(rows, reply.getCursor().filter(cursor -> cursor.getCursorId() != 0));
+        return new AggregateResult(rows, reply.getCursor().filter(cursor -> cursor.getCursorId() != 0), reader);
     }
 
     private FieldArgs buildField(String columnName, Type columnType) {

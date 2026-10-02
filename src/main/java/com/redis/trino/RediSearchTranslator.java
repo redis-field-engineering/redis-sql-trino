@@ -23,24 +23,33 @@
  */
 package com.redis.trino;
 
+import static io.trino.spi.type.BigintType.BIGINT;
+import static io.trino.spi.type.DoubleType.DOUBLE;
 import static java.util.Objects.requireNonNull;
+import static java.util.function.Function.identity;
+import static java.util.stream.Collectors.toMap;
 
-import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.search.arguments.AggregateArgs;
 import io.lettuce.core.search.arguments.AggregateArgs.GroupBy;
 import io.lettuce.core.search.arguments.AggregateArgs.WithCursor;
 import io.lettuce.core.search.arguments.QueryDialects;
+import io.trino.spi.type.DecimalType;
 
 public class RediSearchTranslator {
 
 	private static final QueryDialects DIALECT = QueryDialects.DIALECT2;
+
+	// Has the query syntax of DIALECT 2, and returns the values at JSON paths as JSON arrays, with numbers as stored
+	private static final QueryDialects JSON_DIALECT = QueryDialects.DIALECT3;
 
 	private final RediSearchQueryBuilder queryBuilder = new RediSearchQueryBuilder();
 
@@ -56,14 +65,16 @@ public class RediSearchTranslator {
 		private final Collection<String> filters;
 		private final AggregateArgs args;
 		private final boolean global;
+		private final RediSearchRowReader reader;
 
 		public Aggregation(String index, String query, Collection<String> filters, AggregateArgs args,
-				boolean global) {
+				boolean global, RediSearchRowReader reader) {
 			this.index = index;
 			this.query = query;
 			this.filters = filters;
 			this.args = args;
 			this.global = global;
+			this.reader = reader;
 		}
 
 		public String getIndex() {
@@ -86,6 +97,13 @@ public class RediSearchTranslator {
 			return global;
 		}
 
+		/**
+		 * @return how to read the columns from the rows of this aggregation, and of its cursor's later batches
+		 */
+		public RediSearchRowReader getReader() {
+			return reader;
+		}
+
 		@Override
 		public String toString() {
 			return "Aggregation [index=" + index + ", query=" + query + ", filters=" + filters + ", global=" + global
@@ -93,26 +111,88 @@ public class RediSearchTranslator {
 		}
 	}
 
-	public Aggregation aggregate(RediSearchTableHandle table, String[] columnNames) {
+	/**
+	 * @param columns   the columns to read
+	 * @param indexInfo the index's FT.INFO, which tells how to read the values exactly; without it, they're loaded
+	 *                  by name
+	 */
+	public Aggregation aggregate(RediSearchTableHandle table, List<RediSearchColumnHandle> columns,
+			Optional<RediSearchIndexInfo> indexInfo) {
 		String query = queryBuilder.buildQuery(table.getConstraint());
 		Map<String, String> filters = queryBuilder.filters(table.getConstraint());
-		AggregateArgs.Builder args = AggregateArgs.builder().dialect(DIALECT);
+		Optional<GroupBy> groupBy = queryBuilder.group(table);
+		// A scan reads the documents' values. Redis returns a NUMERIC field loaded by name formatted as a double, and
+		// rounded to 12 significant digits unless it's an integer; LOAD * on a hash and DIALECT 3 on JSON return the
+		// values as stored. GROUPBY and REDUCE results have no such format.
+		Optional<RediSearchIndexInfo.KeyType> keyType = indexInfo.flatMap(RediSearchIndexInfo::getKeyType);
+		boolean scan = groupBy.isEmpty();
+		boolean json = scan && keyType.filter(RediSearchIndexInfo.KeyType.JSON::equals).isPresent();
+		boolean loadAll = scan && keyType.filter(RediSearchIndexInfo.KeyType.HASH::equals).isPresent()
+				&& columns.stream().anyMatch(RediSearchTranslator::isRoundedByRedis);
+		AggregateArgs.Builder args = AggregateArgs.builder().dialect(json ? JSON_DIALECT : DIALECT);
 		// Lettuce writes LOAD before the other steps, so FILTER compares the loaded values
 		Set<String> loads = new LinkedHashSet<>();
 		loads.add(RediSearchBuiltinField.KEY.getName());
 		loads.addAll(filters.keySet());
-		loads.addAll(Arrays.asList(columnNames));
+		Map<String, String> sources = new HashMap<>();
+		Map<String, RediSearchIndexInfo.Field> fields = indexInfo.map(RediSearchIndexInfo::getFields).orElse(List.of())
+				.stream().collect(toMap(RediSearchIndexInfo.Field::getAttribute, identity(), (first, second) -> first));
+		for (RediSearchColumnHandle column : columns) {
+			if (loadAll && isRoundedByRedis(column)) {
+				// Loaded by name, it would replace the value LOAD * returns under the hash field's name
+				Optional.ofNullable(fields.get(column.getName())).map(RediSearchIndexInfo.Field::getIdentifier)
+						.filter(field -> !field.equals(column.getName()))
+						.ifPresent(field -> sources.put(column.getName(), field));
+			} else {
+				loads.add(column.getName());
+			}
+		}
 		loads.forEach(args::load);
 		// Steps run in the order they're added: GROUPBY leaves only the groups, and LIMIT counts the filtered rows
 		filters.values().forEach(args::filter);
-		Optional<GroupBy> groupBy = queryBuilder.group(table);
 		groupBy.ifPresent(args::groupBy);
 		// Only a pushed-down SQL LIMIT caps the results; otherwise the cursor streams every matching document
 		table.getLimit().ifPresent(limit -> args.limit(0, limit));
 		args.withCursor(WithCursor.of(config.getCursorCount() > 0 ? config.getCursorCount() : null));
 		List<RediSearchAggregationTerm> terms = table.getTermAggregations();
 		boolean global = groupBy.isPresent() && (terms == null || terms.isEmpty());
-		return new Aggregation(table.getIndex(), query, filters.values(), args.build(), global);
+		Set<String> jsonArrays = new LinkedHashSet<>();
+		if (json) {
+			loads.stream().filter(load -> !RediSearchBuiltinField.isKeyColumn(load)).forEach(jsonArrays::add);
+		}
+		AggregateArgs aggregateArgs = loadAll ? new LoadAllArgs(args.build()) : args.build();
+		return new Aggregation(table.getIndex(), query, filters.values(), aggregateArgs, global,
+				new RediSearchRowReader(sources, jsonArrays));
+	}
+
+	// Values of these types can lose digits formatted as doubles. Integers of the other types are exact as doubles,
+	// and REAL values have fewer than 12 significant digits.
+	private static boolean isRoundedByRedis(RediSearchColumnHandle column) {
+		return column.getFieldType() == RediSearchFieldType.NUMERIC && column.isSupportsPredicates()
+				&& (column.getType() == DOUBLE || column.getType() == BIGINT || column.getType() instanceof DecimalType);
+	}
+
+	/**
+	 * Writes {@code LOAD *} before the arguments Lettuce writes, including the fields they load by name: Lettuce's
+	 * {@code loadAll()} can't be combined with those.
+	 */
+	private static class LoadAllArgs extends AggregateArgs {
+		private final AggregateArgs args;
+
+		LoadAllArgs(AggregateArgs args) {
+			this.args = args;
+		}
+
+		@Override
+		public void build(CommandArgs<?, ?> commandArgs) {
+			commandArgs.add("LOAD").add("*");
+			args.build(commandArgs);
+		}
+
+		@Override
+		public Optional<WithCursor> getWithCursor() {
+			return args.getWithCursor();
+		}
 	}
 
 }
