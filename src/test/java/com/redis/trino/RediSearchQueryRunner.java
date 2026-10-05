@@ -5,8 +5,10 @@ import static io.trino.testing.TestingSession.testSessionBuilder;
 import static java.lang.String.format;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 
 import com.google.common.collect.ImmutableList;
@@ -18,6 +20,7 @@ import io.trino.Session;
 import io.trino.metadata.QualifiedObjectName;
 import io.trino.plugin.tpch.TpchPlugin;
 import io.trino.testing.DistributedQueryRunner;
+import io.trino.testing.MaterializedRow;
 import io.trino.testing.QueryRunner;
 import io.trino.tpch.TpchTable;
 
@@ -99,6 +102,18 @@ public final class RediSearchQueryRunner {
 					format("SELECT * from %s", new QualifiedObjectName(TPCH_SCHEMA, TINY_SCHEMA_NAME, tableName))));
 		}
 		LOG.info("Imported %s in %s s", table.getTableName(), Duration.ofNanos(System.nanoTime() - start).toSeconds());
+	}
+
+	/**
+	 * Asserts that a query returns the rows another one does, in any order, with the same values. QueryAssert's
+	 * {@code matches} compares doubles only to 5 significant digits.
+	 */
+	public static void assertExactRows(QueryRunner queryRunner, String sql, String expectedSql) {
+		assertThat(rows(queryRunner, sql)).containsExactlyInAnyOrderElementsOf(rows(queryRunner, expectedSql));
+	}
+
+	private static List<List<Object>> rows(QueryRunner queryRunner, String sql) {
+		return queryRunner.execute(sql).getMaterializedRows().stream().map(MaterializedRow::getFields).toList();
 	}
 
 	public static Session createSession() {

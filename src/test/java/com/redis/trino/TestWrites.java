@@ -104,12 +104,16 @@ public class TestWrites extends AbstractTestQueryFramework {
 					+ "'abc', 'ab', true, DATE '2024-01-02', TIMESTAMP '2024-01-02 03:04:05.006', "
 					+ "TIMESTAMP '2024-01-02 03:04:05.006 UTC', UUID '12151fd2-7586-11e9-8f9e-2a86e4085a59')", 1);
 			assertUpdate("INSERT INTO typed (b, i, s, t, r, dec) VALUES (1, 1, 1, 1, REAL '0.5', DECIMAL '0.10')", 1);
-			assertThat(query("SELECT * FROM typed WHERE flag")).matches("VALUES (BIGINT '9007199254740993', "
+			String flagged = "SELECT * FROM typed WHERE flag";
+			String flaggedValues = "VALUES (BIGINT '9007199254740993', "
 					+ "2147483647, SMALLINT '-32768', TINYINT '127', DOUBLE '0.1234567890123456', REAL '2.5', "
 					+ "CAST(DECIMAL '12345678.91' AS decimal(10, 2)), DECIMAL '1234567890123456789012345.12345', "
 					+ "CAST('abc' AS varchar(10)), CAST('ab' AS char(3)), true, DATE '2024-01-02', "
 					+ "TIMESTAMP '2024-01-02 03:04:05.006', TIMESTAMP '2024-01-02 03:04:05.006 UTC', "
-					+ "UUID '12151fd2-7586-11e9-8f9e-2a86e4085a59')");
+					+ "UUID '12151fd2-7586-11e9-8f9e-2a86e4085a59')";
+			// matches checks the types the columns read back as, but compares doubles only to 5 significant digits
+			assertThat(query(flagged)).matches(flaggedValues);
+			RediSearchQueryRunner.assertExactRows(getQueryRunner(), flagged, flaggedValues);
 			// NUMERIC fields hold doubles, which can't tell 2^53 + 1 from 2^53, so Trino compares bounds that large
 			assertThat(query("SELECT i FROM typed WHERE b > 9007199254740992")).isNotFullyPushedDown(FilterNode.class)
 					.matches("VALUES 2147483647");
@@ -142,11 +146,13 @@ public class TestWrites extends AbstractTestQueryFramework {
 				"4.123456789012345", "style", "Wheat", "note", "n1"));
 		redis.hset("exact:2", Map.of("d", "1.0E-7", "sorted", "2", "raw_abv", "5", "style", "Ale"));
 		// Redis rounds NUMERIC values loaded by name to 12 significant digits, so the hash's fields are loaded as stored
-		assertThat(query("SELECT d, sorted, abv, note FROM exact WHERE style = 'Wheat'")).isFullyPushedDown()
-				.matches("VALUES (DOUBLE '0.1234567890123456', DOUBLE '229577310901.21', DOUBLE '4.123456789012345', "
-						+ "VARCHAR 'n1')");
-		assertThat(query("SELECT __key, d FROM exact WHERE d < 0.1 LIMIT 5")).isFullyPushedDown()
-				.matches("VALUES (VARCHAR 'exact:2', DOUBLE '1.0E-7')");
+		String wheat = "SELECT d, sorted, abv, note FROM exact WHERE style = 'Wheat'";
+		assertThat(query(wheat)).isFullyPushedDown();
+		RediSearchQueryRunner.assertExactRows(getQueryRunner(), wheat, "VALUES (DOUBLE '0.1234567890123456', "
+				+ "DOUBLE '229577310901.21', DOUBLE '4.123456789012345', VARCHAR 'n1')");
+		String small = "SELECT __key, d FROM exact WHERE d < 0.1 LIMIT 5";
+		assertThat(query(small)).isFullyPushedDown();
+		RediSearchQueryRunner.assertExactRows(getQueryRunner(), small, "VALUES (VARCHAR 'exact:2', DOUBLE '1.0E-7')");
 		assertThat(query("SELECT style FROM exact WHERE sorted = 229577310901.21")).matches("VALUES VARCHAR 'Wheat'");
 	}
 
@@ -191,9 +197,9 @@ public class TestWrites extends AbstractTestQueryFramework {
 		redis.jsonSet("jsonexact:1", JsonPath.ROOT_PATH, document);
 		// DIALECT 3 returns numbers as stored. The other values are what DIALECT 2 returned: a boolean as 1, and the
 		// first value of a path that matches several.
-		assertThat(query("SELECT score, x, flag, tags, name, missing FROM jsonexact")).matches("VALUES "
-				+ "(DOUBLE '0.1234567890123456', DOUBLE '229577310901.21', VARCHAR '1', VARCHAR 'a', "
-				+ "VARCHAR 'He said \"hi\"', CAST(NULL AS varchar))");
+		RediSearchQueryRunner.assertExactRows(getQueryRunner(), "SELECT score, x, flag, tags, name, missing FROM jsonexact",
+				"VALUES (DOUBLE '0.1234567890123456', DOUBLE '229577310901.21', VARCHAR '1', VARCHAR 'a', "
+						+ "VARCHAR 'He said \"hi\"', CAST(NULL AS varchar))");
 		assertThat(query("SELECT \"$\" FROM jsonexact")).matches("VALUES VARCHAR '" + document + "'");
 	}
 
