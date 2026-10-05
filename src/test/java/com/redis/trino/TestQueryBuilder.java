@@ -168,7 +168,7 @@ public class TestQueryBuilder {
 		RediSearchColumnHandle style = filterable("style", RediSearchFieldType.TAG);
 		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers",
 				TupleDomain.withColumnDomains(ImmutableMap.of(style, varchars("Wheat"))), OptionalLong.of(10), List.of(),
-				List.of(new RediSearchAggregation(RediSearchAggregation.COUNT, BIGINT, Optional.empty(), "c")));
+				List.of(new RediSearchAggregation(RediSearchAggregation.COUNT, BIGINT, Optional.empty(), "c")), List.of());
 		RediSearchColumnHandle count = new RediSearchColumnHandle("c", BIGINT, RediSearchFieldType.NUMERIC, false, false,
 				Optional.empty());
 		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
@@ -186,7 +186,7 @@ public class TestQueryBuilder {
 		RediSearchColumnHandle ibu = numeric("ibu", IntegerType.INTEGER);
 		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers",
 				TupleDomain.withColumnDomains(ImmutableMap.of(style, varchars("Wheat"))), OptionalLong.empty(), List.of(),
-				List.of());
+				List.of(), List.of());
 		RediSearchTranslator translator = new RediSearchTranslator(new RediSearchConfig());
 		// A DOUBLE loaded by name comes back rounded to 12 significant digits, so the hash's fields are loaded as
 		// stored, and the DOUBLE isn't loaded by name, which would round it again
@@ -239,6 +239,23 @@ public class TestQueryBuilder {
 				index.getFields(), false, 1, false);
 		assertThat(new RediSearchTranslator(new RediSearchConfig()).aggregate(table, List.of(ibu, id), Optional.of(json))
 				.getReader().getExactPositions()).isEmpty();
+	}
+
+	@Test
+	public void testTopN() {
+		RediSearchColumnHandle style = filterable("style", RediSearchFieldType.TAG);
+		RediSearchColumnHandle abv = numeric("abv", DoubleType.DOUBLE);
+		RediSearchColumnHandle ibu = numeric("ibu", IntegerType.INTEGER);
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers",
+				TupleDomain.withColumnDomains(ImmutableMap.of(style, varchars("Wheat"))), OptionalLong.empty(), List.of(),
+				List.of(), List.of()).withTopN(List.of(new RediSearchSortItem("abv", false),
+						new RediSearchSortItem("ibu", true)), 10);
+		RediSearchTranslator translator = new RediSearchTranslator(new RediSearchConfig());
+		// SORTBY runs after FILTER, on copies loaded AS other names: next to LOAD *, abv would sort as text
+		assertThat(commandString(translator.aggregate(table, List.of(style, abv, ibu), Optional.of(hashIndex()))))
+				.isEqualTo("LOAD * LOAD 9 __key style ibu abv AS __sort_0 ibu AS __sort_1 "
+						+ "FILTER exists(@style) && @style == \"Wheat\" SORTBY 4 @__sort_0 DESC @__sort_1 ASC MAX 10 "
+						+ "LIMIT 0 10 WITHCURSOR COUNT 1000 DIALECT 2");
 	}
 
 	@Test

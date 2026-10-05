@@ -101,6 +101,13 @@ public class RediSearchQueryBuilder {
 	// Field names a FILTER expression can refer to as @name
 	private static final Pattern PROPERTY_NAME = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
 
+	/**
+	 * Whether a field's name can be referred to as {@code @name} in an expression or SORTBY.
+	 */
+	static boolean isProperty(String field) {
+		return PROPERTY_NAME.matcher(field).matches();
+	}
+
 	private static String property(String field) {
 		return "@" + field;
 	}
