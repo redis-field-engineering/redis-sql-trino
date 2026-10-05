@@ -57,6 +57,10 @@ redisearch.uri=redis://localhost:6379
 |Number of rows read during each https://redis.io/docs/stack/search/reference/aggregations/#cursor-api[aggregation cursor] fetch.
 |`1000`
 
+|`redisearch.scan-connections`
+|Number of Redis connections each Trino node's scans take turns on, so that one scan's batches don't hold up other queries' commands.
+|`4`
+
 |`redisearch.table-cache-refresh`
 |Seconds an index's schema is cached. Indexes and fields created outside Trino can take this long to appear.
 |`60`

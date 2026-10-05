@@ -44,6 +44,7 @@ public class RediSearchConfig {
     public static final String DEFAULT_SCHEMA = "default";
 
     public static final long DEFAULT_CURSOR_COUNT = 1000;
+    public static final long DEFAULT_SCAN_CONNECTIONS = 4;
 
     public static final Duration DEFAULT_TABLE_CACHE_REFRESH = Duration.ofMinutes(1);
 
@@ -78,6 +79,7 @@ public class RediSearchConfig {
     private long cursorCount = DEFAULT_CURSOR_COUNT;
 
     private long tableCacheRefresh = DEFAULT_TABLE_CACHE_REFRESH.toSeconds();
+    private long scanConnections = DEFAULT_SCAN_CONNECTIONS;
     private boolean dynamicFilteringEnabled = true;
     private io.airlift.units.Duration dynamicFilteringWaitTimeout = DEFAULT_DYNAMIC_FILTERING_WAIT_TIMEOUT;
 
@@ -89,6 +91,18 @@ public class RediSearchConfig {
     @Config("redisearch.cursor-count")
     public RediSearchConfig setCursorCount(long cursorCount) {
         this.cursorCount = cursorCount;
+        return this;
+    }
+
+    @Min(1)
+    public long getScanConnections() {
+        return scanConnections;
+    }
+
+    @Config("redisearch.scan-connections")
+    @ConfigDescription("Number of connections each node's scans take turns on")
+    public RediSearchConfig setScanConnections(long scanConnections) {
+        this.scanConnections = scanConnections;
         return this;
     }
 
