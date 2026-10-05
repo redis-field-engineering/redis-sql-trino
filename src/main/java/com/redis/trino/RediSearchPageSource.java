@@ -52,6 +52,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	private static final int ROWS_PER_PAGE = 1024;
 
 	private final RediSearchSession session;
+	private final RediSearchSession.Connection connection;
 	private final RediSearchTableHandle table;
 	private final ValueWriter[] writers;
 	private final PageBuilder pageBuilder;
@@ -67,11 +68,12 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	public RediSearchPageSource(RediSearchSession session, RediSearchTableHandle table,
 			List<RediSearchColumnHandle> columns) {
 		this.session = session;
+		this.connection = session.scanConnection();
 		this.table = table;
 		List<Type> columnTypes = columns.stream().map(RediSearchColumnHandle::getType).toList();
 		this.writers = columnTypes.stream().map(RediSearchPageSourceResultWriter::writer).toArray(ValueWriter[]::new);
 		this.pageBuilder = new PageBuilder(columnTypes);
-		RediSearchSession.AggregateResult first = session.aggregate(table, columns);
+		RediSearchSession.AggregateResult first = session.aggregate(connection, table, columns);
 		this.reader = first.getReader();
 		start(first);
 	}
@@ -79,7 +81,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	private void start(RediSearchSession.AggregateResult batch) {
 		rows = batch.getRows().iterator();
 		cursor = batch.getCursor();
-		nextBatch = cursor.map(next -> session.cursorReadAsync(table, next)).orElse(null);
+		nextBatch = cursor.map(next -> session.cursorReadAsync(connection, table, next)).orElse(null);
 	}
 
 	@Override
@@ -118,7 +120,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 				if (!nextBatch.isDone()) {
 					break;
 				}
-				start(session.result(reader, cursor, join(nextBatch)));
+				start(session.result(connection, reader, cursor, join(nextBatch)));
 				continue;
 			}
 			String[] row = rows.next();
@@ -159,7 +161,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 			Cursor current = cursor.orElseThrow();
 			nextBatch.whenComplete((reply, failure) -> {
 				if (reply == null || reply.getCursor().filter(next -> next.getCursorId() != 0).isPresent()) {
-					session.cursorDeleteAsync(table, current);
+					session.cursorDeleteAsync(connection, table, current);
 				}
 			});
 			nextBatch = null;

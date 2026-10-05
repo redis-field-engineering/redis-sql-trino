@@ -18,6 +18,11 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
 
@@ -47,6 +52,7 @@ public class RediSearchQueryBenchmark {
 	private static final int WARMUP = Integer.getInteger("benchmark.warmup", 5);
 	private static final int ITERATIONS = Integer.getInteger("benchmark.iterations", 20);
 	private static final String LABEL = System.getProperty("benchmark.label", "results");
+	private static final int BACKGROUND_SCANS = 2;
 
 	private static final Map<String, String> QUERIES = ImmutableMap.<String, String>builder()
 			.put("full_scan", "SELECT sum(quantity * extendedprice) FROM lineitem")
@@ -77,17 +83,28 @@ public class RediSearchQueryBenchmark {
 						.setSystemProperty("join_distribution_type", "AUTOMATIC").build();
 				Map<String, Result> results = new LinkedHashMap<>();
 				for (Map.Entry<String, String> query : QUERIES.entrySet()) {
-					results.put(query.getKey(), run(queryRunner, session, query.getValue()));
+					results.put(query.getKey(), run(queryRunner, session, query.getValue(), Optional.empty()));
 				}
+				// Writes 15,000 hashes, which DROP TABLE deletes before the next run
+				results.put("insert", run(queryRunner, session,
+						"CREATE TABLE bench_orders AS SELECT * FROM tpch.tiny.orders",
+						Optional.of("DROP TABLE bench_orders")));
+				results.put("point_lookup_during_scans", runDuringScans(queryRunner, session, QUERIES.get("point_lookup"),
+						QUERIES.get("full_scan")));
 				write(results);
 			}
 		}
 	}
 
-	private static Result run(DistributedQueryRunner queryRunner, Session session, String sql) {
+	/**
+	 * @param cleanup run after each run of the query, untimed
+	 */
+	private static Result run(DistributedQueryRunner queryRunner, Session session, String sql,
+			Optional<String> cleanup) {
 		long rows = 0;
 		for (int i = 0; i < WARMUP; i++) {
 			rows = queryRunner.execute(session, sql).getRowCount();
+			cleanup.ifPresent(statement -> queryRunner.execute(session, statement));
 		}
 		double[] millis = new double[ITERATIONS];
 		for (int i = 0; i < ITERATIONS; i++) {
@@ -95,8 +112,33 @@ public class RediSearchQueryBenchmark {
 			MaterializedResult result = queryRunner.execute(session, sql);
 			millis[i] = (System.nanoTime() - start) / 1_000_000.0;
 			assertThat(result.getRowCount()).as("row count of %s", sql).isEqualTo(rows);
+			cleanup.ifPresent(statement -> queryRunner.execute(session, statement));
 		}
 		return new Result(rows, millis);
+	}
+
+	// Times a query while BACKGROUND_SCANS threads run another one over and over
+	private static Result runDuringScans(DistributedQueryRunner queryRunner, Session session, String sql,
+			String background) throws Exception {
+		ExecutorService executor = Executors.newFixedThreadPool(BACKGROUND_SCANS);
+		AtomicBoolean done = new AtomicBoolean();
+		List<Future<?>> scans = new ArrayList<>();
+		for (int i = 0; i < BACKGROUND_SCANS; i++) {
+			scans.add(executor.submit(() -> {
+				while (!done.get()) {
+					queryRunner.execute(session, background);
+				}
+			}));
+		}
+		try {
+			return run(queryRunner, session, sql, Optional.empty());
+		} finally {
+			done.set(true);
+			for (Future<?> scan : scans) {
+				scan.get();
+			}
+			executor.shutdown();
+		}
 	}
 
 	private static void write(Map<String, Result> results) throws IOException {

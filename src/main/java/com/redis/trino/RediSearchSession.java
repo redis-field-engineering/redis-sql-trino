@@ -49,6 +49,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import com.google.common.cache.Cache;
@@ -60,7 +61,10 @@ import com.redis.trino.RediSearchTranslator.Aggregation;
 import io.airlift.log.Logger;
 import io.lettuce.core.AbstractRedisClient;
 import io.lettuce.core.ClientOptions;
+import io.lettuce.core.LettuceFutures;
 import io.lettuce.core.RedisClient;
+import io.lettuce.core.RedisCommandTimeoutException;
+import io.lettuce.core.RedisFuture;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.SslOptions;
 import io.lettuce.core.SslOptions.Builder;
@@ -153,22 +157,21 @@ public class RediSearchSession {
 
     private final Cache<SchemaTableName, RediSearchTable> tableCache;
 
+    // Opened by the first scans to use them
+    private final Connection[] scanConnections;
+
+    private final AtomicInteger nextScanConnection = new AtomicInteger();
+
     public RediSearchSession(TypeManager typeManager, RediSearchConfig config) {
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
         this.config = requireNonNull(config, "config is null");
         this.translator = new RediSearchTranslator(config);
         this.client = client(config);
-        if (client instanceof RedisClusterClient) {
-            StatefulRedisClusterConnection<String, String> clusterConnection = ((RedisClusterClient) client).connect();
-            this.connection = clusterConnection;
-            this.sync = clusterConnection.sync();
-            this.async = clusterConnection.async();
-        } else {
-            StatefulRedisConnection<String, String> redisConnection = ((RedisClient) client).connect();
-            this.connection = redisConnection;
-            this.sync = redisConnection.sync();
-            this.async = redisConnection.async();
-        }
+        Connection primary = connect();
+        this.connection = primary.connection;
+        this.sync = primary.sync;
+        this.async = primary.async;
+        this.scanConnections = new Connection[Math.toIntExact(config.getScanConnections())];
         this.tableCache = EvictableCacheBuilder.newBuilder().expireAfterWrite(config.getTableCacheRefresh(), TimeUnit.SECONDS)
                 .build();
     }
@@ -232,6 +235,46 @@ public class RediSearchSession {
         return uri.build();
     }
 
+    /**
+     * A connection, and its commands.
+     */
+    public static final class Connection {
+        private final StatefulConnection<String, String> connection;
+        private final RedisClusterCommands<String, String> sync;
+        private final RedisClusterAsyncCommands<String, String> async;
+
+        private Connection(StatefulConnection<String, String> connection, RedisClusterCommands<String, String> sync,
+                RedisClusterAsyncCommands<String, String> async) {
+            this.connection = connection;
+            this.sync = sync;
+            this.async = async;
+        }
+    }
+
+    private Connection connect() {
+        if (client instanceof RedisClusterClient) {
+            StatefulRedisClusterConnection<String, String> clusterConnection = ((RedisClusterClient) client).connect();
+            return new Connection(clusterConnection, clusterConnection.sync(), clusterConnection.async());
+        }
+        StatefulRedisConnection<String, String> redisConnection = ((RedisClient) client).connect();
+        return new Connection(redisConnection, redisConnection.sync(), redisConnection.async());
+    }
+
+    /**
+     * The connection for a scan, which reads all of its batches over it. Scans take turns on
+     * {@code redisearch.scan-connections} connections, so that one scan's batches don't hold up the others' commands,
+     * and more than one of the client's I/O threads reads the replies.
+     */
+    public Connection scanConnection() {
+        int index = Math.floorMod(nextScanConnection.getAndIncrement(), scanConnections.length);
+        synchronized (scanConnections) {
+            if (scanConnections[index] == null) {
+                scanConnections[index] = connect();
+            }
+            return scanConnections[index];
+        }
+    }
+
     public StatefulConnection<String, String> getConnection() {
         return connection;
     }
@@ -249,6 +292,13 @@ public class RediSearchSession {
     }
 
     public void shutdown() {
+        synchronized (scanConnections) {
+            for (Connection scanConnection : scanConnections) {
+                if (scanConnection != null) {
+                    scanConnection.connection.close();
+                }
+            }
+        }
         connection.close();
         client.shutdown();
         client.getResources().shutdown();
@@ -410,6 +460,10 @@ public class RediSearchSession {
     }
 
     private Optional<RediSearchIndexInfo> indexInfo(String index) {
+        return indexInfo(sync, index);
+    }
+
+    private static Optional<RediSearchIndexInfo> indexInfo(RedisClusterCommands<String, String> sync, String index) {
         try {
             List<Object> indexInfoList = sync.dispatch(FT_INFO, new NestedMultiOutput<>(StringCodec.UTF8),
                     new CommandArgs<>(StringCodec.UTF8).add(index));
@@ -487,18 +541,18 @@ public class RediSearchSession {
         }
     }
 
-    public AggregateResult aggregate(RediSearchTableHandle table, List<RediSearchColumnHandle> columns) {
-        Optional<RediSearchIndexInfo> indexInfo = indexInfo(table.getIndex());
+    public AggregateResult aggregate(Connection scan, RediSearchTableHandle table, List<RediSearchColumnHandle> columns) {
+        Optional<RediSearchIndexInfo> indexInfo = indexInfo(scan.sync, table.getIndex());
         indexInfo.ifPresent(info -> verifyIndexed(table.getIndex(), info));
         Aggregation aggregation = translator.aggregate(table, columns, indexInfo);
         log.debug("Running %s", aggregation);
-        AggregateResult result = result(aggregation.getReader(), Optional.empty(),
-                sync.ftAggregate(aggregation.getIndex(), aggregation.getQuery(), aggregation.getArgs()));
+        AggregateResult result = result(scan, aggregation.getReader(), Optional.empty(),
+                scan.sync.ftAggregate(aggregation.getIndex(), aggregation.getQuery(), aggregation.getArgs()));
         // A batch can come back empty while the cursor still has rows, so the aggregation is only empty once the
         // cursor is exhausted
         while (result.getRows().isEmpty() && result.getCursor().isPresent()) {
             Cursor cursor = result.getCursor().get();
-            result = result(result.getReader(), Optional.of(cursor), cursorCommands(cursor).read(table, cursor));
+            result = result(scan, result.getReader(), Optional.of(cursor), cursorCommands(scan, cursor).read(table, cursor));
         }
         if (result.getRows().isEmpty() && aggregation.isGlobal()) {
             // A global aggregation over no documents still returns one row. With GROUP BY terms there are no groups,
@@ -523,14 +577,16 @@ public class RediSearchSession {
      * Starts reading the cursor's next batch. Pass the reply to {@link #result} to read its rows, on the caller's
      * thread rather than the connection's, which {@link #result} may wait on.
      */
-    public CompletableFuture<AggregationReply<String>> cursorReadAsync(RediSearchTableHandle table, Cursor cursor) {
-        return cursorCommands(cursor).readAsync(table, cursor);
+    public CompletableFuture<AggregationReply<String>> cursorReadAsync(Connection scan, RediSearchTableHandle table,
+            Cursor cursor) {
+        return cursorCommands(scan, cursor).readAsync(table, cursor);
     }
 
     /**
      * @param cursor the cursor the reply was read from, if any
      */
-    public AggregateResult result(RediSearchRowReader reader, Optional<Cursor> cursor, AggregationReply<String> reply) {
+    public AggregateResult result(Connection scan, RediSearchRowReader reader, Optional<Cursor> cursor,
+            AggregationReply<String> reply) {
         List<String[]> rows = new ArrayList<>();
         List<CompletableFuture<?>> exactReads = new ArrayList<>();
         for (SearchReply<String> searchReply : reply.getReplies()) {
@@ -540,7 +596,7 @@ public class RediSearchSession {
                     if (row[position] != null && RediSearchRowReader.isPossiblyRounded(row[position])) {
                         // Pipelined, and rare: only values of 2^53 or more
                         String key = result.getFields().get(RediSearchBuiltinField.KEY.getName()).asString();
-                        exactReads.add(async.hget(key, reader.getExactField(position)).toCompletableFuture()
+                        exactReads.add(scan.async.hget(key, reader.getExactField(position)).toCompletableFuture()
                                 .thenAccept(value -> row[position] = value));
                     }
                 }
@@ -666,28 +722,69 @@ public class RediSearchSession {
     // a read connection, which it opens with READONLY, a command Redis Enterprise doesn't support; so they go over the
     // node's primary connection instead.
     @SuppressWarnings("unchecked")
-    private CursorCommands cursorCommands(Cursor cursor) {
-        if (connection instanceof StatefulRedisClusterConnection && cursor.getNodeId().isPresent()) {
-            StatefulRedisConnection<String, String> node = ((StatefulRedisClusterConnection<String, String>) connection)
+    private CursorCommands cursorCommands(Connection scan, Cursor cursor) {
+        if (scan.connection instanceof StatefulRedisClusterConnection && cursor.getNodeId().isPresent()) {
+            StatefulRedisConnection<String, String> node = ((StatefulRedisClusterConnection<String, String>) scan.connection)
                     .getConnection(cursor.getNodeId().get());
             return new CursorCommands(node.sync(), node.async());
         }
-        return new CursorCommands(sync, async);
+        return new CursorCommands(scan.sync, scan.async);
     }
 
     /**
      * Deletes the cursor without waiting for Redis, e.g. from a callback on the connection's thread, where waiting
      * would block the connection.
      */
-    public void cursorDeleteAsync(RediSearchTableHandle tableHandle, Cursor cursor) {
-        cursorCommands(cursor).async.ftCursordel(tableHandle.getIndex(), cursor).exceptionally(e -> {
+    public void cursorDeleteAsync(Connection scan, RediSearchTableHandle tableHandle, Cursor cursor) {
+        cursorCommands(scan, cursor).async.ftCursordel(tableHandle.getIndex(), cursor).exceptionally(e -> {
             log.warn(e, "Could not delete cursor %s of index %s", cursor.getCursorId(), tableHandle.getIndex());
             return null;
         });
     }
 
-    public Long deleteDocs(List<String> docIds) {
-        return sync.del(docIds.toArray(String[]::new));
+    /**
+     * Opens a connection of the caller's own to write on. Its commands wait in the connection's buffer until
+     * {@link Writer#flush}, which the connection other queries share can't do.
+     */
+    public Writer openWriter() {
+        Connection writer = connect();
+        writer.connection.setAutoFlushCommands(false);
+        return new Writer(writer.connection, writer.async);
+    }
+
+    /**
+     * Pipelines writes on a connection of its own.
+     */
+    public static final class Writer implements AutoCloseable {
+        private final StatefulConnection<String, String> connection;
+        private final RedisClusterAsyncCommands<String, String> commands;
+
+        private Writer(StatefulConnection<String, String> connection, RedisClusterAsyncCommands<String, String> commands) {
+            this.connection = connection;
+            this.commands = commands;
+        }
+
+        /**
+         * @return commands that wait in the connection's buffer until {@link #flush}
+         */
+        public RedisClusterAsyncCommands<String, String> commands() {
+            return commands;
+        }
+
+        /**
+         * Sends the buffered commands, then waits for their replies. Fails if any command does.
+         */
+        public void flush(List<RedisFuture<?>> futures) {
+            connection.flushCommands();
+            if (!LettuceFutures.awaitAll(connection.getTimeout(), futures.toArray(new RedisFuture[0]))) {
+                throw new RedisCommandTimeoutException("Writes didn't complete within " + connection.getTimeout());
+            }
+        }
+
+        @Override
+        public void close() {
+            connection.close();
+        }
     }
 
 }

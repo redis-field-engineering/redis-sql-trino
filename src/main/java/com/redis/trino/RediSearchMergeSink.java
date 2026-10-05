@@ -38,9 +38,7 @@ import java.util.stream.IntStream;
 
 
 import io.airlift.slice.Slice;
-import io.lettuce.core.LettuceFutures;
 import io.lettuce.core.RedisFuture;
-import io.lettuce.core.api.StatefulConnection;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.trino.spi.Page;
 import io.trino.spi.block.Block;
@@ -59,6 +57,8 @@ public class RediSearchMergeSink implements ConnectorMergeSink {
 	private final SchemaTableName schemaTableName;
 	private final List<RediSearchColumnHandle> columns;
 	private final Map<Integer, List<Integer>> updateCaseChannels;
+	// Opened by the first page
+	private RediSearchSession.Writer writer;
 
 	public RediSearchMergeSink(RediSearchSession session, RediSearchPageSink insertSink,
 			RediSearchMergeTableHandle handle) {
@@ -79,8 +79,10 @@ public class RediSearchMergeSink implements ConnectorMergeSink {
 		int[] insertPositions = new int[page.getPositionCount()];
 		int insertCount = 0;
 		List<String> deleteKeys = new ArrayList<>();
-		StatefulConnection<String, String> connection = session.getConnection();
-		RedisClusterAsyncCommands<String, String> commands = session.async();
+		if (writer == null) {
+			writer = session.openWriter();
+		}
+		RedisClusterAsyncCommands<String, String> commands = writer.commands();
 		List<RedisFuture<?>> futures = new ArrayList<>();
 		for (int position = 0; position < page.getPositionCount(); position++) {
 			switch (TINYINT.getByte(operationBlock, position)) {
@@ -115,14 +117,15 @@ public class RediSearchMergeSink implements ConnectorMergeSink {
 				throw new IllegalStateException("Unexpected merge operation");
 			}
 		}
+		if (!deleteKeys.isEmpty()) {
+			futures.add(commands.del(deleteKeys.toArray(String[]::new)));
+		}
 		if (insertCount > 0) {
-			// Before deleting anything: MERGE can insert into a JSON index, where the rows would be lost
+			// Before changing anything: MERGE can insert into a JSON index, where the rows would be lost. The commands
+			// so far are still in the writer's buffer.
 			session.verifyWritable(schemaTableName);
 		}
-		LettuceFutures.awaitAll(connection.getTimeout(), futures.toArray(new RedisFuture[0]));
-		if (!deleteKeys.isEmpty()) {
-			session.deleteDocs(deleteKeys);
-		}
+		writer.flush(futures);
 		if (insertCount > 0) {
 			Page dataPage = page.getColumns(IntStream.range(0, columnCount).toArray());
 			insertSink.appendPage(dataPage.getPositions(insertPositions, 0, insertCount));
@@ -135,11 +138,20 @@ public class RediSearchMergeSink implements ConnectorMergeSink {
 
 	@Override
 	public CompletableFuture<Collection<Slice>> finish() {
+		closeWriter();
 		return insertSink.finish();
 	}
 
 	@Override
 	public void abort() {
+		closeWriter();
 		insertSink.abort();
+	}
+
+	private void closeWriter() {
+		if (writer != null) {
+			writer.close();
+			writer = null;
+		}
 	}
 }

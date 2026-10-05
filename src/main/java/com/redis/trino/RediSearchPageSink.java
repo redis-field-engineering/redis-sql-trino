@@ -54,9 +54,7 @@ import com.google.common.primitives.Shorts;
 import com.google.common.primitives.SignedBytes;
 
 import io.airlift.slice.Slice;
-import io.lettuce.core.LettuceFutures;
 import io.lettuce.core.RedisFuture;
-import io.lettuce.core.api.StatefulConnection;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.trino.spi.Page;
 import io.trino.spi.TrinoException;
@@ -87,6 +85,8 @@ public class RediSearchPageSink implements ConnectorPageSink {
 	private final SchemaTableName schemaTableName;
 	private final List<RediSearchColumnHandle> columns;
 	private final UlidFactory factory = UlidFactory.newInstance(new Random());
+	// Opened by the first page
+	private RediSearchSession.Writer writer;
 
 	public RediSearchPageSink(RediSearchSession rediSearchSession, SchemaTableName schemaTableName,
 			List<RediSearchColumnHandle> columns) {
@@ -98,8 +98,10 @@ public class RediSearchPageSink implements ConnectorPageSink {
 	@Override
 	public CompletableFuture<?> appendPage(Page page) {
 		String prefix = prefix().orElse(schemaTableName.getTableName() + KEY_SEPARATOR);
-		StatefulConnection<String, String> connection = session.getConnection();
-		RedisClusterAsyncCommands<String, String> commands = session.async();
+		if (writer == null) {
+			writer = session.openWriter();
+		}
+		RedisClusterAsyncCommands<String, String> commands = writer.commands();
 		List<RedisFuture<?>> futures = new ArrayList<>();
 		for (int position = 0; position < page.getPositionCount(); position++) {
 			String key = prefix + factory.create().toString();
@@ -116,7 +118,8 @@ public class RediSearchPageSink implements ConnectorPageSink {
 			RedisFuture<Long> future = commands.hset(key, map);
 			futures.add(future);
 		}
-		LettuceFutures.awaitAll(connection.getTimeout(), futures.toArray(new RedisFuture[0]));
+		// One write for the page's HSETs, rather than one for each
+		writer.flush(futures);
 		return NOT_BLOCKED;
 	}
 
@@ -202,11 +205,19 @@ public class RediSearchPageSink implements ConnectorPageSink {
 
 	@Override
 	public CompletableFuture<Collection<Slice>> finish() {
+		closeWriter();
 		return completedFuture(List.of());
 	}
 
 	@Override
 	public void abort() {
-		// Do nothing
+		closeWriter();
+	}
+
+	private void closeWriter() {
+		if (writer != null) {
+			writer.close();
+			writer = null;
+		}
 	}
 }
