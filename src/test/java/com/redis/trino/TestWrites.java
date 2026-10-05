@@ -136,6 +136,60 @@ public class TestWrites extends AbstractTestQueryFramework {
 	}
 
 	@Test
+	public void testFiltersOnDeclaredTypes() {
+		assertUpdate("CREATE TABLE typed_filters (id varchar, flag boolean, day date, u uuid, c char(3), r real, "
+				+ "dec decimal(10, 2), longdec decimal(20, 2), ts timestamp(3), tstz timestamp(3) with time zone)");
+		try {
+			assertUpdate("INSERT INTO typed_filters VALUES "
+					+ "('1', true, DATE '2024-01-02', UUID '12151fd2-7586-11e9-8f9e-2a86e4085a59', 'ab', REAL '1.1', "
+					+ "DECIMAL '1.10', DECIMAL '1.10', TIMESTAMP '2024-01-02 03:04:05.006', "
+					+ "TIMESTAMP '2024-01-02 03:04:05.006 UTC'), "
+					+ "('2', false, DATE '2024-01-03', UUID 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'cd', REAL '2.5', "
+					+ "DECIMAL '2.50', DECIMAL '2.50', TIMESTAMP '2024-01-03 00:00:00.000', "
+					+ "TIMESTAMP '2024-01-02 17:00:00.000 America/Denver'), "
+					+ "('3', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)", 3);
+			assertPushedDown("SELECT id FROM typed_filters WHERE flag", "VALUES VARCHAR '1'");
+			// Trino keeps NOT flag as an expression rather than a domain
+			assertPushedDown("SELECT id FROM typed_filters WHERE flag = false", "VALUES VARCHAR '2'");
+			assertPushedDown("SELECT id FROM typed_filters WHERE day = DATE '2024-01-03'", "VALUES VARCHAR '2'");
+			// Trino merges consecutive dates into a range, whose dates the tag query lists
+			assertPushedDown("SELECT id FROM typed_filters WHERE day IN (DATE '2024-01-02', DATE '2024-01-03')",
+					"VALUES VARCHAR '1', '2'");
+			assertPushedDown("SELECT id FROM typed_filters WHERE day BETWEEN DATE '2024-01-01' AND DATE '2024-01-02'",
+					"VALUES VARCHAR '1'");
+			assertPushedDown("SELECT id FROM typed_filters WHERE u = UUID '12151fd2-7586-11e9-8f9e-2a86e4085a59'",
+					"VALUES VARCHAR '1'");
+			// Redis compares the double it parses from the text written for the float, 1.1
+			assertPushedDown("SELECT id FROM typed_filters WHERE r = REAL '1.1'", "VALUES VARCHAR '1'");
+			assertPushedDown("SELECT id FROM typed_filters WHERE r > REAL '1.1'", "VALUES VARCHAR '2'");
+			assertPushedDown("SELECT id FROM typed_filters WHERE dec BETWEEN 1.1 AND 2", "VALUES VARCHAR '1'");
+			assertPushedDown("SELECT id FROM typed_filters WHERE ts >= TIMESTAMP '2024-01-03 00:00:00.000'",
+					"VALUES VARCHAR '2'");
+			assertPushedDown("SELECT id FROM typed_filters WHERE tstz < TIMESTAMP '2024-01-03 00:00:00.000 UTC'",
+					"VALUES VARCHAR '1'");
+			// A FILTER keeps the equal rows, so Redis aggregates them too
+			assertPushedDown("SELECT count(*) FROM typed_filters WHERE flag AND day = DATE '2024-01-02'",
+					"VALUES BIGINT '1'");
+			assertPushedDown("SELECT min(ts), max(tstz) FROM typed_filters", "VALUES (TIMESTAMP '2024-01-02 03:04:05.006', "
+					+ "TIMESTAMP '2024-01-03 00:00:00.000 UTC')");
+			// Redis prefilters CHAR values, whose padding it trims, and Trino compares them
+			assertThat(query("SELECT id FROM typed_filters WHERE c = 'ab'")).isNotFullyPushedDown(FilterNode.class)
+					.matches("VALUES VARCHAR '1'");
+			assertThat((String) computeActual("EXPLAIN SELECT id FROM typed_filters WHERE c = 'ab'").getOnlyValue())
+					.doesNotContain("constraint=ALL");
+			// More digits than a double holds
+			assertThat(query("SELECT id FROM typed_filters WHERE longdec = 1.10")).isNotFullyPushedDown(FilterNode.class)
+					.matches("VALUES VARCHAR '1'");
+		} finally {
+			assertUpdate("DROP TABLE typed_filters");
+		}
+	}
+
+	private void assertPushedDown(String sql, String expected) {
+		assertThat(query(sql)).isFullyPushedDown().matches(expected);
+	}
+
+	@Test
 	public void testExactAggregatesOfDeclaredTypes() {
 		assertUpdate("CREATE TABLE exact_aggregates (g varchar, b bigint, r real)");
 		try {

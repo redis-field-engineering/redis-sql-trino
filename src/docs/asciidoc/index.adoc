@@ -275,22 +275,23 @@ They're `CASESENSITIVE` and split values into tags on the ASCII unit separator (
 Redis evaluates these parts of a query. Trino evaluates everything else on the rows Redis returns.
 
 * Filters on indexed fields, combined with `AND`:
-** `=`, `IN`, `<`, `\<=`, `>`, `>=` and `BETWEEN` on NUMERIC fields of BIGINT, INTEGER, SMALLINT, TINYINT and DOUBLE columns.
-NUMERIC fields hold doubles, so Trino evaluates filters with BIGINT values of 2^53 or more, which they can't compare exactly.
-Trino also evaluates filters on columns of the other types `CREATE TABLE` creates, such as DECIMAL, TIMESTAMP, DATE and BOOLEAN.
-** `=` and `IN` on TAG fields, as a tag query. Redis splits stored values into tags on the field's `SEPARATOR` (by default `,` on hashes and none on JSON), trims whitespace around each tag, and ignores case unless the field is `CASESENSITIVE`.
+** `=`, `IN`, `<`, `\<=`, `>`, `>=` and `BETWEEN` on NUMERIC fields of BIGINT, INTEGER, SMALLINT, TINYINT, DOUBLE, REAL, DECIMAL, TIMESTAMP(3) and TIMESTAMP(3) WITH TIME ZONE columns.
+NUMERIC fields hold doubles, so Trino evaluates filters with BIGINT and timestamp values of 2^53 or more (timestamps as epoch milliseconds), and on DECIMAL columns of more than 15 digits, which they can't compare exactly.
+Redis compares a REAL value as the double it parses from the text the connector writes, so `REAL '1.1'` as 1.1 rather than 1.100000023841858.
+** `=` and `IN` on TAG fields, as a tag query, for VARCHAR, CHAR, BOOLEAN, DATE and UUID columns, whose values are compared as the connector writes them (`true`, `2024-01-02`, a lowercase UUID).
+On DATE columns, a range of up to 1,000 days, such as `BETWEEN`, is queried as the list of its dates. Redis splits stored values into tags on the field's `SEPARATOR` (by default `,` on hashes and none on JSON), trims whitespace around each tag, and ignores case unless the field is `CASESENSITIVE`.
 It returns the documents with a tag that matches the value.
 On hash indexes, a `FILTER` step then compares the field's value as a string and keeps the documents equal to it, for example `+FILTER 'exists(@style) && @style == "Wheat"'+`.
 Trino evaluates the filter alone when a value contains the separator, starts or ends with whitespace, or has a control character other than whitespace, since a tag query can't match it.
 ** `=` and `IN` on TEXT fields, as a full-text query for the value's words. Redis returns the documents containing all of them, and on hash indexes the `FILTER` step keeps those equal to the value.
 Trino evaluates the filter alone when a value has only stop words, and for every TEXT field of an index created with its own `STOPWORDS`.
 +
-Trino keeps the equal rows itself, instead of a `FILTER`, on JSON indexes, when a value has a control character, and for fields whose names aren't made of letters, digits and `_`.
+Trino keeps the equal rows itself, instead of a `FILTER`, on JSON indexes, when a value has a control character, for fields whose names aren't made of letters, digits and `_`, and for CHAR columns, whose values the connector pads with spaces.
 +
 Redis can't match a missing field or compare strings, so Trino evaluates `IS NULL`, `IS NOT NULL`, a condition combined with `OR \... IS NULL`, and `<>`, `<`, `>` and `BETWEEN` on VARCHAR columns.
 +
 Trino also evaluates `LIKE`. A Redis wildcard query matches single words of a TEXT field, ignores case on a TAG field without `CASESENSITIVE`, and leaves out documents once it has matched `MAXEXPANSIONS` (200 by default) distinct values.
-* `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`, as `FT.AGGREGATE` with `GROUPBY` and `REDUCE`.
+* `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, and `min` and `max` on TIMESTAMP(3) and TIMESTAMP(3) WITH TIME ZONE columns, with or without `GROUP BY`, as `FT.AGGREGATE` with `GROUPBY` and `REDUCE`.
 If any aggregate in a query can't be pushed down, such as `count(DISTINCT \...)` or `count(column)`, or Trino filters the rows itself, as it does for filters on TAG and TEXT fields of JSON indexes, Trino computes all of them.
 `count(column)` skips nulls, but Redis's `COUNT` counts documents, so only `count(*)` is pushed down.
 Redis computes on the double values of NUMERIC fields, and formats the results and the `GROUP BY` keys rounded to 12 significant digits unless they're integers.

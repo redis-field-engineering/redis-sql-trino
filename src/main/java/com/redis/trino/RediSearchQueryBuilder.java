@@ -25,13 +25,27 @@ package com.redis.trino;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static io.trino.spi.type.BigintType.BIGINT;
+import static io.trino.spi.type.BooleanType.BOOLEAN;
+import static io.trino.spi.type.DateTimeEncoding.unpackMillisUtc;
+import static io.trino.spi.type.DateType.DATE;
 import static io.trino.spi.type.DoubleType.DOUBLE;
+import static io.trino.spi.type.RealType.REAL;
 import static io.trino.spi.type.SmallintType.SMALLINT;
+import static io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
+import static io.trino.spi.type.TimestampWithTimeZoneType.TIMESTAMP_TZ_MILLIS;
+import static io.trino.spi.type.Timestamps.MICROSECONDS_PER_MILLISECOND;
 import static io.trino.spi.type.TinyintType.TINYINT;
+import static io.trino.spi.type.UuidType.UUID;
+import static io.trino.spi.type.UuidType.trinoUuidToJavaUuid;
+import static java.lang.Float.intBitsToFloat;
+import static java.lang.Math.floorDiv;
 import static java.lang.Math.toIntExact;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -45,8 +59,6 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
 import com.google.common.primitives.Primitives;
-import com.google.common.primitives.Shorts;
-import com.google.common.primitives.SignedBytes;
 
 import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
@@ -57,6 +69,8 @@ import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.Range;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.predicate.ValueSet;
+import io.trino.spi.type.CharType;
+import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.IntegerType;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
@@ -72,7 +86,15 @@ public class RediSearchQueryBuilder {
 			(alias, field) -> Reducer.avg(property(field)).as(alias), RediSearchAggregation.COUNT,
 			(alias, field) -> Reducer.count().as(alias));
 
-	private static final Set<Type> NUMERIC_TYPES = Set.of(DOUBLE, TINYINT, SMALLINT, IntegerType.INTEGER, BIGINT);
+	// Written as the numbers Redis parses: integers, doubles and floats as Java formats them, epoch milliseconds
+	private static final Set<Type> NUMERIC_TYPES = Set.of(DOUBLE, REAL, TINYINT, SMALLINT, IntegerType.INTEGER, BIGINT,
+			TIMESTAMP_MILLIS, TIMESTAMP_TZ_MILLIS);
+
+	// Decimals of up to 15 digits are distinct doubles, in the same order, so Redis compares them exactly
+	private static final int MAX_EXACT_DECIMAL_PRECISION = 15;
+
+	// The most values of a range of dates a tag query lists
+	private static final int MAX_TAG_VALUES = 1000;
 
 	// 2^53: integers of smaller magnitude are doubles exactly
 	private static final long MAX_EXACT_LONG = 1L << 53;
@@ -115,34 +137,113 @@ public class RediSearchQueryBuilder {
 	/**
 	 * Whether {@link #buildQuery} can translate a column's domain into a query that matches every row in it. Redis
 	 * can't match a missing field, so domains that allow nulls are left to Trino, and so is {@code IS NOT NULL}. On
-	 * VARCHAR columns only {@code =} and {@code IN} are supported, for values a TAG or TEXT query can match.
+	 * TAG and TEXT columns only {@code =} and {@code IN} are supported, for values a TAG or TEXT query can match.
+	 * <p>
+	 * Values are compared as {@link RediSearchPageSink#value} writes them: other types than VARCHAR and DOUBLE are
+	 * only declared by tables created through Trino.
 	 */
 	public static boolean isSupported(RediSearchColumnHandle column, Domain domain) {
 		ValueSet values = domain.getValues();
 		if (domain.isNullAllowed() || values.isAll() || values.isNone()) {
 			return false;
 		}
+		Type type = column.getType();
 		switch (column.getFieldType()) {
 		case NUMERIC:
-			return NUMERIC_TYPES.contains(column.getType())
-					&& (column.getType() != BIGINT || values.getRanges().getOrderedRanges().stream()
-							.allMatch(RediSearchQueryBuilder::isExactAsDouble));
+			return isNumericType(type) && values.getRanges().getOrderedRanges().stream().allMatch(
+					range -> (range.isLowUnbounded() || numericValue(type, range.getLowBoundedValue()).isPresent())
+							&& (range.isHighUnbounded() || numericValue(type, range.getHighBoundedValue()).isPresent()));
 		case TAG:
-			return column.getType() instanceof VarcharType && values.isDiscreteSet() && values.getDiscreteSet().stream()
-					.allMatch(value -> isTagQueryable(((Slice) value).toStringUtf8(), column.getTagSeparator()));
+			return isTagType(type) && tagValues(values).filter(list -> list.stream()
+					.allMatch(value -> isTagQueryable(tagValue(type, value), column.getTagSeparator()))).isPresent();
 		case TEXT:
-			return column.getType() instanceof VarcharType && values.isDiscreteSet() && values.getDiscreteSet().stream()
-					.allMatch(value -> textTerms(((Slice) value).toStringUtf8()).isPresent());
+			return type instanceof VarcharType && tagValues(values).filter(list -> list.stream()
+					.allMatch(value -> textTerms(((Slice) value).toStringUtf8()).isPresent())).isPresent();
 		default:
 			return false;
 		}
 	}
 
-	// NUMERIC fields hold doubles, so Redis compares a BIGINT value with a bound of 2^53 or more after rounding both:
-	// the query could leave out rows in the range, as well as return others
-	private static boolean isExactAsDouble(Range range) {
-		return (range.isLowUnbounded() || isExactAsDouble((Long) range.getLowBoundedValue()))
-				&& (range.isHighUnbounded() || isExactAsDouble((Long) range.getHighBoundedValue()));
+	/**
+	 * The values of a TAG or TEXT column's domain. Trino merges consecutive dates into a range, whose dates a tag
+	 * query also lists, up to {@link #MAX_TAG_VALUES}.
+	 */
+	static Optional<List<Object>> tagValues(ValueSet values) {
+		if (values.isDiscreteSet()) {
+			return Optional.of(values.getDiscreteSet());
+		}
+		if (values.getType() != DATE) {
+			return Optional.empty();
+		}
+		List<Object> days = new ArrayList<>();
+		for (Range range : values.getRanges().getOrderedRanges()) {
+			if (range.isLowUnbounded() || range.isHighUnbounded()) {
+				return Optional.empty();
+			}
+			long first = (Long) range.getLowBoundedValue() + (range.isLowInclusive() ? 0 : 1);
+			long last = (Long) range.getHighBoundedValue() - (range.isHighInclusive() ? 0 : 1);
+			if (last - first >= MAX_TAG_VALUES - days.size()) {
+				return Optional.empty();
+			}
+			for (long day = first; day <= last; day++) {
+				days.add(day);
+			}
+		}
+		return Optional.of(days);
+	}
+
+	private static boolean isNumericType(Type type) {
+		return NUMERIC_TYPES.contains(type)
+				|| (type instanceof DecimalType decimal && decimal.getPrecision() <= MAX_EXACT_DECIMAL_PRECISION);
+	}
+
+	/**
+	 * The double Redis compares a NUMERIC field's value with, for a value of the column's type: the one it parses
+	 * from the text the connector writes. Empty for a BIGINT or timestamp of 2^53 or more, which Redis would compare
+	 * after rounding both it and the field's values, so that the query could leave out rows as well as return others.
+	 */
+	static Optional<Double> numericValue(Type type, Object value) {
+		if (type == DOUBLE) {
+			return Optional.of((Double) value);
+		}
+		if (type == REAL) {
+			// Written as Float.toString, which Redis parses as a double: 1.1 rather than 1.100000023841858
+			return Optional.of(Double.parseDouble(Float.toString(intBitsToFloat(toIntExact((Long) value)))));
+		}
+		if (type instanceof DecimalType decimal) {
+			return Optional.of(Double.parseDouble(BigDecimal.valueOf((Long) value, decimal.getScale()).toString()));
+		}
+		long number;
+		if (type == TIMESTAMP_MILLIS) {
+			number = floorDiv((Long) value, MICROSECONDS_PER_MILLISECOND);
+		} else if (type == TIMESTAMP_TZ_MILLIS) {
+			number = unpackMillisUtc((Long) value);
+		} else {
+			number = (Long) value;
+		}
+		return isExactAsDouble(number) ? Optional.of((double) number) : Optional.empty();
+	}
+
+	private static boolean isTagType(Type type) {
+		return type instanceof VarcharType || type instanceof CharType || type == BOOLEAN || type == DATE
+				|| type == UUID;
+	}
+
+	/**
+	 * The text {@link RediSearchPageSink#value} writes for a value of a TAG or TEXT column. A CHAR value is without
+	 * the spaces the connector pads it with, which Redis trims from tags.
+	 */
+	static String tagValue(Type type, Object value) {
+		if (type == BOOLEAN) {
+			return value.toString();
+		}
+		if (type == DATE) {
+			return DateTimeFormatter.ISO_DATE.format(LocalDate.ofEpochDay((Long) value));
+		}
+		if (type == UUID) {
+			return trinoUuidToJavaUuid((Slice) value).toString();
+		}
+		return ((Slice) value).toStringUtf8();
 	}
 
 	static boolean isExactAsDouble(long value) {
@@ -163,9 +264,12 @@ public class RediSearchQueryBuilder {
 			return true;
 		case TAG:
 		case TEXT:
-			return column.isFilterable() && PROPERTY_NAME.matcher(column.getName()).matches()
-					&& domain.getValues().isDiscreteSet() && domain.getValues().getDiscreteSet().stream()
-							.noneMatch(value -> FILTER_UNSUPPORTED_CHARACTERS.matcher(((Slice) value).toStringUtf8()).find());
+			// A FILTER would compare a CHAR value with the spaces it's padded with, which other clients may not write
+			return column.isFilterable() && !(column.getType() instanceof CharType)
+					&& PROPERTY_NAME.matcher(column.getName()).matches()
+					&& tagValues(domain.getValues()).filter(values -> values.stream().noneMatch(
+							value -> FILTER_UNSUPPORTED_CHARACTERS.matcher(tagValue(column.getType(), value)).find()))
+							.isPresent();
 		default:
 			return false;
 		}
@@ -184,8 +288,9 @@ public class RediSearchQueryBuilder {
 			RediSearchColumnHandle column = (RediSearchColumnHandle) columnHandle;
 			if (column.getFieldType() != RediSearchFieldType.NUMERIC && !domain.isAll() && isExact(column, domain)) {
 				String property = property(column.getName());
-				filters.put(column.getName(), "exists(" + property + ") && " + anyOf(domain.getValues().getDiscreteSet()
-						.stream().map(value -> property + " == " + stringLiteral(((Slice) value).toStringUtf8())).toList()));
+				filters.put(column.getName(), "exists(" + property + ") && " + anyOf(tagValues(domain.getValues())
+						.orElseThrow().stream().map(value -> property + " == " + stringLiteral(tagValue(column.getType(), value)))
+						.toList()));
 			}
 		}));
 		return filters;
@@ -255,13 +360,17 @@ public class RediSearchQueryBuilder {
 		checkArgument(isSupported(column, domain), "Unsupported domain for %s: %s", column.getName(), domain);
 		Set<Object> singleValues = new LinkedHashSet<>();
 		List<String> disjuncts = new ArrayList<>();
+		if (column.getFieldType() != RediSearchFieldType.NUMERIC) {
+			tagValues(domain.getValues()).orElseThrow().forEach(value -> singleValues.add(translateValue(value, column)));
+			return singleValues(column, singleValues);
+		}
 		for (Range range : domain.getValues().getRanges().getOrderedRanges()) {
 			if (range.isSingleValue()) {
-				singleValues.add(translateValue(range.getSingleValue(), column.getType()));
+				singleValues.add(translateValue(range.getSingleValue(), column));
 			} else {
 				List<String> rangeConjuncts = new ArrayList<>();
 				if (!range.isLowUnbounded()) {
-					Object translated = translateValue(range.getLowBoundedValue(), column.getType());
+					Object translated = translateValue(range.getLowBoundedValue(), column);
 					if (translated instanceof Number) {
 						double doubleValue = ((Number) translated).doubleValue();
 						rangeConjuncts.add(numericRange(doubleValue, range.isLowInclusive(), Double.POSITIVE_INFINITY, true));
@@ -272,7 +381,7 @@ public class RediSearchQueryBuilder {
 					}
 				}
 				if (!range.isHighUnbounded()) {
-					Object translated = translateValue(range.getHighBoundedValue(), column.getType());
+					Object translated = translateValue(range.getHighBoundedValue(), column);
 					if (translated instanceof Number) {
 						double doubleValue = ((Number) translated).doubleValue();
 						rangeConjuncts.add(numericRange(Double.NEGATIVE_INFINITY, true, doubleValue, range.isHighInclusive()));
@@ -307,7 +416,7 @@ public class RediSearchQueryBuilder {
 		if (singleValues.size() == 1) {
 			return Optional.of(field(column.getName(), value(Iterables.getOnlyElement(singleValues), column)));
 		}
-		if (column.getType() instanceof VarcharType) {
+		if (column.getFieldType() == RediSearchFieldType.TAG) {
 			// Takes care of IN: col IN ('value1', 'value2', ...)
 			return Optional.of(field(column.getName(),
 					tags(singleValues.stream().map(String.class::cast).map(RediSearchQueryBuilder::escapeTag).toList())));
@@ -316,59 +425,28 @@ public class RediSearchQueryBuilder {
 				singleValues.stream().map(v -> value(v, column)).collect(Collectors.toList()))));
 	}
 
-	private String value(Object trinoNativeValue, RediSearchColumnHandle column) {
-		requireNonNull(trinoNativeValue, "trinoNativeValue is null");
-		requireNonNull(column, "column is null");
-		Type type = column.getType();
-		if (type == DOUBLE) {
-			return numericEquals((Double) trinoNativeValue);
+	// A value translateValue returned
+	private String value(Object translated, RediSearchColumnHandle column) {
+		requireNonNull(translated, "translated is null");
+		if (translated instanceof Double number) {
+			return numericEquals(number);
 		}
-		if (type == TINYINT) {
-			return numericEquals(SignedBytes.checkedCast(((Long) trinoNativeValue)));
-		}
-		if (type == SMALLINT) {
-			return numericEquals(Shorts.checkedCast(((Long) trinoNativeValue)));
-		}
-		if (type == IntegerType.INTEGER) {
-			return numericEquals(toIntExact(((Long) trinoNativeValue)));
-		}
-		if (type == BIGINT) {
-			return numericEquals((Long) trinoNativeValue);
-		}
-		if (type instanceof VarcharType) {
-			return tags(List.of(escapeTag((String) trinoNativeValue)));
-		}
-		throw new UnsupportedOperationException("Type " + type + " not supported");
+		return tags(List.of(escapeTag((String) translated)));
 	}
 
-	private Object translateValue(Object trinoNativeValue, Type type) {
+	/**
+	 * @return the double a NUMERIC field's value is compared with, or the text of a TAG or TEXT field's value
+	 */
+	private Object translateValue(Object trinoNativeValue, RediSearchColumnHandle column) {
 		requireNonNull(trinoNativeValue, "trinoNativeValue is null");
-		requireNonNull(type, "type is null");
+		Type type = column.getType();
 		checkArgument(Primitives.wrap(type.getJavaType()).isInstance(trinoNativeValue),
 				"%s (%s) is not a valid representation for %s", trinoNativeValue, trinoNativeValue.getClass(), type);
-
-		if (type == DOUBLE) {
-			return trinoNativeValue;
+		if (column.getFieldType() == RediSearchFieldType.NUMERIC) {
+			return numericValue(type, trinoNativeValue).orElseThrow(
+					() -> new IllegalArgumentException("Not exact as a double: " + trinoNativeValue + " for " + type));
 		}
-		if (type == TINYINT) {
-			return (long) SignedBytes.checkedCast(((Long) trinoNativeValue));
-		}
-
-		if (type == SMALLINT) {
-			return (long) Shorts.checkedCast(((Long) trinoNativeValue));
-		}
-
-		if (type == IntegerType.INTEGER) {
-			return (long) toIntExact(((Long) trinoNativeValue));
-		}
-
-		if (type == BIGINT) {
-			return trinoNativeValue;
-		}
-		if (type instanceof VarcharType) {
-			return ((Slice) trinoNativeValue).toStringUtf8();
-		}
-		throw new IllegalArgumentException("Unhandled type: " + type);
+		return tagValue(type, trinoNativeValue);
 	}
 
 	private Reducer reducer(RediSearchAggregation aggregation) {

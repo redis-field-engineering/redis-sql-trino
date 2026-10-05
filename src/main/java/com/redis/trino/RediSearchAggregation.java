@@ -28,6 +28,8 @@ import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.RealType.REAL;
 import static io.trino.spi.type.SmallintType.SMALLINT;
+import static io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
+import static io.trino.spi.type.TimestampWithTimeZoneType.TIMESTAMP_TZ_MILLIS;
 import static io.trino.spi.type.TinyintType.TINYINT;
 
 import java.util.Arrays;
@@ -53,6 +55,8 @@ public class RediSearchAggregation {
 	public static final String COUNT = "count";
 	private static final List<String> SUPPORTED_AGGREGATION_FUNCTIONS = Arrays.asList(MAX, MIN, AVG, SUM, COUNT);
 	private static final List<Type> NUMERIC_TYPES = Arrays.asList(REAL, DOUBLE, TINYINT, SMALLINT, INTEGER, BIGINT);
+	// Epoch milliseconds, which only have a smallest and largest: integers, which Redis formats in full
+	private static final List<Type> TIMESTAMP_TYPES = Arrays.asList(TIMESTAMP_MILLIS, TIMESTAMP_TZ_MILLIS);
 	private final String functionName;
 	private final Type outputType;
 	private final Optional<RediSearchColumnHandle> columnHandle;
@@ -135,7 +139,9 @@ public class RediSearchAggregation {
 				.filter(Variable.class::isInstance).map(Variable.class::cast).map(Variable::getName)
 				.filter(assignments::containsKey).findFirst().map(assignments::get)
 				.map(RediSearchColumnHandle.class::cast)
-				.filter(column -> RediSearchAggregation.isNumericType(column.getType()));
+				.filter(column -> isNumericType(column.getType())
+						|| ((MIN.equals(function.getFunctionName()) || MAX.equals(function.getFunctionName()))
+								&& TIMESTAMP_TYPES.contains(column.getType())));
 		if (parameterColumnHandle.isEmpty()) {
 			return Optional.empty();
 		}
