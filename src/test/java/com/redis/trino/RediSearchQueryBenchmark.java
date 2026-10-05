@@ -58,6 +58,8 @@ public class RediSearchQueryBenchmark {
 			.put("top_n", "SELECT orderkey, totalprice FROM orders ORDER BY totalprice DESC LIMIT 10")
 			.put("join",
 					"SELECT c.mktsegment, count(*) FROM orders o JOIN customer c ON o.custkey = c.custkey GROUP BY c.mktsegment")
+			.put("join_selective",
+					"SELECT count(*) FROM orders o JOIN customer c ON o.custkey = c.custkey WHERE c.nationkey = 3")
 			.put("information_schema_columns",
 					"SELECT count(*) FROM information_schema.columns WHERE table_schema = 'tpch'")
 			.put("describe", "DESCRIBE lineitem")
