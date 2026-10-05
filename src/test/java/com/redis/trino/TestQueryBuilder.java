@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -194,9 +195,9 @@ public class TestQueryBuilder {
 		assertThat(commandString(aggregation)).isEqualTo("LOAD * LOAD 3 __key style ibu "
 				+ "FILTER exists(@style) && @style == \"Wheat\" WITHCURSOR COUNT 1000 DIALECT 2");
 		// LOAD * names a field indexed AS another name by its hash field
-		assertThat(aggregation.getReader().read(Map.of("raw_abv", value("4.123456789012345"), "style", value("Wheat"))))
-				.containsExactlyInAnyOrderEntriesOf(
-						Map.of("abv", "4.123456789012345", "raw_abv", "4.123456789012345", "style", "Wheat"));
+		assertThat(aggregation.getReader().read(Map.of("raw_abv", value("4.123456789012345"), "style", value("Wheat"),
+				"name", value("Other field"))))
+				.containsExactly("Wheat", "4.123456789012345", null);
 		// INTEGER values are exact as doubles
 		assertThat(commandString(translator.aggregate(table, List.of(style, ibu), Optional.of(hashIndex()))))
 				.startsWith("LOAD 3 __key style ibu ");
@@ -219,8 +220,22 @@ public class TestQueryBuilder {
 		assertThat(commandString(aggregation)).isEqualTo("LOAD 3 __key score id WITHCURSOR COUNT 1000 DIALECT 3");
 		// DIALECT 3 returns the values at each JSON path as an array, with numbers as stored
 		assertThat(aggregation.getReader().read(Map.of("__key", value("doc:1"), "score", value("[9007199254740993]"),
-				"id", value("[\"1\"]")))).containsExactlyInAnyOrderEntriesOf(
-						Map.of("__key", "doc:1", "score", "9007199254740993", "id", "1"));
+				"id", value("[\"1\"]")))).containsExactly("doc:1", "9007199254740993", "1");
+	}
+
+	@Test
+	public void testReadsReducerResults() {
+		RediSearchAggregation count = new RediSearchAggregation(RediSearchAggregation.COUNT, BIGINT, Optional.empty(),
+				"c");
+		RediSearchAggregation sum = new RediSearchAggregation(RediSearchAggregation.SUM, DoubleType.DOUBLE,
+				Optional.of(numeric("abv", DoubleType.DOUBLE)), "s");
+		RediSearchRowReader reader = new RediSearchRowReader(List.of("style", "c", "s"), Map.of(), Set.of(),
+				List.of(count, sum));
+		// SUM over no values is nan, which SQL represents as null
+		assertThat(reader.read(Map.of("style", value("Wheat"), "c", value("2"), "s", value("nan"))))
+				.containsExactly("Wheat", "2", null);
+		// A global aggregation over no documents counts 0
+		assertThat(reader.emptyAggregation()).containsExactly(null, "0", null);
 	}
 
 	@Test

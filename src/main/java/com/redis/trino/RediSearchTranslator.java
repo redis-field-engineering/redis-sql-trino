@@ -162,7 +162,8 @@ public class RediSearchTranslator {
 		}
 		AggregateArgs aggregateArgs = loadAll ? new LoadAllArgs(args.build()) : args.build();
 		return new Aggregation(table.getIndex(), query, filters.values(), aggregateArgs, global,
-				new RediSearchRowReader(sources, jsonArrays));
+				new RediSearchRowReader(columns.stream().map(RediSearchColumnHandle::getName).toList(), sources,
+						jsonArrays, table.getMetricAggregations()));
 	}
 
 	// Values of these types can lose digits formatted as doubles. Integers of the other types are exact as doubles,

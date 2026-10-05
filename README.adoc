@@ -294,7 +294,7 @@ SELECT name, abv FROM beers WHERE abv > 5 LIMIT 10
 Rows to the client
 ----
 
-Redis returns the matching documents in batches of `redisearch.cursor-count` rows (default 1000), and Trino processes each batch as it arrives.
+Redis returns the matching documents in batches of `redisearch.cursor-count` rows (default 1000). The connector reads each batch while Trino processes the one before it.
 Each table scan is a single split, so one Trino worker reads the whole index.
 Redis rounds NUMERIC fields loaded by name to 12 significant digits, so a scan that reads DOUBLE, BIGINT or DECIMAL columns loads hashes with `LOAD *` and JSON documents with `DIALECT 3`, which return the values as stored.
 The results of `GROUPBY` and `REDUCE` are rounded that way.

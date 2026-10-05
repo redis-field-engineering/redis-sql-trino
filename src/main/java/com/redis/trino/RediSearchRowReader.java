@@ -27,7 +27,7 @@ import static java.util.Objects.requireNonNull;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -35,60 +35,90 @@ import java.util.Set;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableList;
 
 import io.lettuce.core.search.FieldValue;
 
 /**
- * Reads the values of an FT.AGGREGATE row by column name, from the fields the scan loaded them as.
+ * Reads the values of an FT.AGGREGATE row in column order, from the fields the scan loaded them as. Other fields, such
+ * as the rest of a hash loaded with LOAD *, are skipped.
  */
 public class RediSearchRowReader {
 
-	/**
-	 * Reads each column from the field of its name, as returned.
-	 */
-	public static final RediSearchRowReader BY_NAME = new RediSearchRowReader(Map.of(), Set.of());
-
 	private static final JsonFactory JSON = new JsonFactory();
 
-	private final Map<String, String> sources;
-	private final Set<String> jsonArrays;
+	private final List<String> columns;
+	// The field each column is read from
+	private final String[] fields;
+	private final boolean[] jsonArrays;
+	// The reducer whose result each column is, if any
+	private final RediSearchAggregation[] metrics;
 
 	/**
+	 * @param columns    the columns to read, in the order {@link #read} returns their values
 	 * @param sources    the field each column is read from, for columns not read from the field of their name
 	 * @param jsonArrays columns whose values come as JSON arrays of the values at their JSON path, as DIALECT 3
 	 *                   returns them
+	 * @param metrics    the reducers whose results the aggregation returns, under their aliases
 	 */
-	public RediSearchRowReader(Map<String, String> sources, Set<String> jsonArrays) {
-		this.sources = ImmutableMap.copyOf(requireNonNull(sources, "sources is null"));
-		this.jsonArrays = ImmutableSet.copyOf(requireNonNull(jsonArrays, "jsonArrays is null"));
-	}
-
-	public Map<String, String> read(Map<String, FieldValue> fields) {
-		Map<String, String> row = new HashMap<>();
-		for (Map.Entry<String, FieldValue> field : fields.entrySet()) {
-			FieldValue value = field.getValue();
-			if (value != null && !value.isNull()) {
-				row.put(field.getKey(), value.asString());
+	public RediSearchRowReader(List<String> columns, Map<String, String> sources, Set<String> jsonArrays,
+			List<RediSearchAggregation> metrics) {
+		this.columns = ImmutableList.copyOf(requireNonNull(columns, "columns is null"));
+		requireNonNull(sources, "sources is null");
+		requireNonNull(jsonArrays, "jsonArrays is null");
+		requireNonNull(metrics, "metrics is null");
+		this.fields = new String[this.columns.size()];
+		this.jsonArrays = new boolean[this.columns.size()];
+		this.metrics = new RediSearchAggregation[this.columns.size()];
+		for (int i = 0; i < fields.length; i++) {
+			String column = this.columns.get(i);
+			fields[i] = sources.getOrDefault(column, column);
+			this.jsonArrays[i] = jsonArrays.contains(column);
+			for (RediSearchAggregation metric : metrics) {
+				if (metric.getAlias().equals(column)) {
+					this.metrics[i] = metric;
+				}
 			}
 		}
-		sources.forEach((column, source) -> put(row, column, Optional.ofNullable(row.get(source))));
-		for (String column : jsonArrays) {
-			String array = row.get(column);
-			if (array != null) {
-				put(row, column, firstValue(array));
-			}
-		}
-		return row;
 	}
 
-	private static void put(Map<String, String> row, String column, Optional<String> value) {
-		if (value.isPresent()) {
-			row.put(column, value.get());
-		} else {
-			row.remove(column);
+	public List<String> getColumns() {
+		return columns;
+	}
+
+	/**
+	 * @return the value of each column, null for none
+	 */
+	public String[] read(Map<String, FieldValue> row) {
+		String[] values = new String[fields.length];
+		for (int i = 0; i < fields.length; i++) {
+			FieldValue field = row.get(fields[i]);
+			if (field == null || field.isNull()) {
+				continue;
+			}
+			String value = field.asString();
+			if (jsonArrays[i]) {
+				value = firstValue(value).orElse(null);
+			}
+			if (metrics[i] != null && metrics[i].isEmptyResult(value)) {
+				value = null;
+			}
+			values[i] = value;
 		}
+		return values;
+	}
+
+	/**
+	 * The row a global aggregation over no documents returns: count is 0 and the other metrics are null.
+	 */
+	public String[] emptyAggregation() {
+		String[] values = new String[fields.length];
+		for (int i = 0; i < metrics.length; i++) {
+			if (metrics[i] != null && RediSearchAggregation.COUNT.equals(metrics[i].getFunctionName())) {
+				values[i] = "0";
+			}
+		}
+		return values;
 	}
 
 	/**

@@ -381,7 +381,7 @@ public class RediSearchQueryBuilder {
 		if (reducers.isEmpty()) {
 			return Optional.empty();
 		}
-		log.info("Group fields=%s reducers=%s", groupFields, reducers);
+		log.debug("Group fields=%s reducers=%s", groupFields, reducers);
 		GroupBy groupBy = GroupBy.of(groupFields.stream().map(RediSearchQueryBuilder::property).toArray(String[]::new));
 		reducers.forEach(groupBy::reduce);
 		return Optional.of(groupBy);

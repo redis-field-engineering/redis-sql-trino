@@ -38,13 +38,13 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -62,8 +62,10 @@ import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.SslOptions;
 import io.lettuce.core.SslOptions.Builder;
+import io.lettuce.core.TimeoutOptions;
 import io.lettuce.core.api.StatefulConnection;
 import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.api.async.RediSearchAsyncCommands;
 import io.lettuce.core.api.sync.RediSearchCommands;
 import io.lettuce.core.cluster.ClusterClientOptions;
 import io.lettuce.core.cluster.RedisClusterClient;
@@ -184,6 +186,8 @@ public class RediSearchSession {
         ClientOptions.Builder builder = ClientOptions.builder();
         builder.sslOptions(sslOptions(config));
         builder.protocolVersion(protocolVersion(config));
+        // Asynchronous commands, such as the cursor reads scans prefetch, time out like synchronous ones
+        builder.timeoutOptions(TimeoutOptions.enabled());
         return builder.build();
     }
 
@@ -433,21 +437,22 @@ public class RediSearchSession {
     }
 
     /**
-     * A batch of aggregation rows and the cursor to read the next batch with, if there are more. In cluster mode the
-     * cursor also names the node that holds it, which reads and deletes are sent to.
+     * A batch of aggregation rows, each with its columns' values in the reader's column order, and the cursor to read
+     * the next batch with, if there are more. In cluster mode the cursor also names the node that holds it, which
+     * reads and deletes are sent to.
      */
     public static class AggregateResult {
-        private final List<Map<String, String>> rows;
+        private final List<String[]> rows;
         private final Optional<Cursor> cursor;
         private final RediSearchRowReader reader;
 
-        public AggregateResult(List<Map<String, String>> rows, Optional<Cursor> cursor, RediSearchRowReader reader) {
+        public AggregateResult(List<String[]> rows, Optional<Cursor> cursor, RediSearchRowReader reader) {
             this.rows = rows;
             this.cursor = cursor;
             this.reader = reader;
         }
 
-        public List<Map<String, String>> getRows() {
+        public List<String[]> getRows() {
             return rows;
         }
 
@@ -467,24 +472,20 @@ public class RediSearchSession {
         Optional<RediSearchIndexInfo> indexInfo = indexInfo(table.getIndex());
         indexInfo.ifPresent(info -> verifyIndexed(table.getIndex(), info));
         Aggregation aggregation = translator.aggregate(table, columns, indexInfo);
-        log.info("Running %s", aggregation);
-        AggregateResult result = result(table, aggregation.getReader(),
+        log.debug("Running %s", aggregation);
+        AggregateResult result = result(aggregation.getReader(), Optional.empty(),
                 sync.ftAggregate(aggregation.getIndex(), aggregation.getQuery(), aggregation.getArgs()));
         // A batch can come back empty while the cursor still has rows, so the aggregation is only empty once the
         // cursor is exhausted
         while (result.getRows().isEmpty() && result.getCursor().isPresent()) {
-            result = cursorRead(table, result.getReader(), result.getCursor().get());
+            Cursor cursor = result.getCursor().get();
+            result = result(result.getReader(), Optional.of(cursor), cursorCommands(cursor).read(table, cursor));
         }
         if (result.getRows().isEmpty() && aggregation.isGlobal()) {
-            // A global aggregation over no documents still returns one row: count is 0 and the other metrics are null.
-            // With GROUP BY terms there are no groups, so no rows.
-            Map<String, String> row = new HashMap<>();
-            for (RediSearchAggregation metric : table.getMetricAggregations()) {
-                if (RediSearchAggregation.COUNT.equals(metric.getFunctionName())) {
-                    row.put(metric.getAlias(), "0");
-                }
-            }
-            return new AggregateResult(List.of(row), Optional.empty(), result.getReader());
+            // A global aggregation over no documents still returns one row. With GROUP BY terms there are no groups,
+            // so no rows.
+            return new AggregateResult(List.<String[]>of(result.getReader().emptyAggregation()), Optional.empty(),
+                    result.getReader());
         }
         return result;
     }
@@ -499,38 +500,59 @@ public class RediSearchSession {
         }
     }
 
-    public AggregateResult cursorRead(RediSearchTableHandle tableHandle, RediSearchRowReader reader, Cursor cursor) {
-        String index = tableHandle.getIndex();
-        RediSearchCommands<String> commands = cursorCommands(cursor);
-        AggregateResult result;
-        if (config.getCursorCount() > 0) {
-            result = result(tableHandle, reader,
-                    commands.ftCursorread(index, cursor, Math.toIntExact(config.getCursorCount())));
-        } else {
-            result = result(tableHandle, reader, commands.ftCursorread(index, cursor));
-        }
-        // The cursor stays on the node that created it
-        result.getCursor().filter(next -> next.getNodeId().isEmpty())
-                .ifPresent(next -> cursor.getNodeId().ifPresent(next::setNodeId));
-        return result;
+    /**
+     * Starts reading the cursor's next batch. Pass the reply to {@link #result} to read its rows, on the caller's
+     * thread rather than the connection's.
+     */
+    public CompletableFuture<AggregationReply<String>> cursorReadAsync(RediSearchTableHandle table, Cursor cursor) {
+        return cursorCommands(cursor).readAsync(table, cursor);
     }
 
-    private static AggregateResult result(RediSearchTableHandle table, RediSearchRowReader reader,
+    /**
+     * @param cursor the cursor the reply was read from, if any
+     */
+    public static AggregateResult result(RediSearchRowReader reader, Optional<Cursor> cursor,
             AggregationReply<String> reply) {
-        List<Map<String, String>> rows = new ArrayList<>();
+        List<String[]> rows = new ArrayList<>();
         for (SearchReply<String> searchReply : reply.getReplies()) {
             for (SearchReply.SearchResult<String> result : searchReply.getResults()) {
-                Map<String, String> row = reader.read(result.getFields());
-                for (RediSearchAggregation metric : table.getMetricAggregations()) {
-                    if (metric.isEmptyResult(row.get(metric.getAlias()))) {
-                        row.remove(metric.getAlias());
-                    }
-                }
-                rows.add(row);
+                rows.add(reader.read(result.getFields()));
             }
         }
         // Cursor ID 0 means there are no more rows
-        return new AggregateResult(rows, reply.getCursor().filter(cursor -> cursor.getCursorId() != 0), reader);
+        Optional<Cursor> next = reply.getCursor().filter(c -> c.getCursorId() != 0);
+        // The cursor stays on the node that created it
+        next.filter(c -> c.getNodeId().isEmpty())
+                .ifPresent(c -> cursor.flatMap(Cursor::getNodeId).ifPresent(c::setNodeId));
+        return new AggregateResult(rows, next, reader);
+    }
+
+    /**
+     * Cursor commands for the connection that holds a cursor.
+     */
+    private class CursorCommands {
+        private final RediSearchCommands<String> sync;
+        private final RediSearchAsyncCommands<String> async;
+
+        CursorCommands(RediSearchCommands<String> sync, RediSearchAsyncCommands<String> async) {
+            this.sync = sync;
+            this.async = async;
+        }
+
+        AggregationReply<String> read(RediSearchTableHandle table, Cursor cursor) {
+            if (config.getCursorCount() > 0) {
+                return sync.ftCursorread(table.getIndex(), cursor, Math.toIntExact(config.getCursorCount()));
+            }
+            return sync.ftCursorread(table.getIndex(), cursor);
+        }
+
+        CompletableFuture<AggregationReply<String>> readAsync(RediSearchTableHandle table, Cursor cursor) {
+            if (config.getCursorCount() > 0) {
+                return async.ftCursorread(table.getIndex(), cursor, Math.toIntExact(config.getCursorCount()))
+                        .toCompletableFuture();
+            }
+            return async.ftCursorread(table.getIndex(), cursor).toCompletableFuture();
+        }
     }
 
     private FieldArgs buildField(String columnName, Type columnType) {
@@ -608,16 +630,24 @@ public class RediSearchSession {
     // a read connection, which it opens with READONLY, a command Redis Enterprise doesn't support; so they go over the
     // node's primary connection instead.
     @SuppressWarnings("unchecked")
-    private RediSearchCommands<String> cursorCommands(Cursor cursor) {
+    private CursorCommands cursorCommands(Cursor cursor) {
         if (connection instanceof StatefulRedisClusterConnection && cursor.getNodeId().isPresent()) {
-            return ((StatefulRedisClusterConnection<String, String>) connection).getConnection(cursor.getNodeId().get())
-                    .sync();
+            StatefulRedisConnection<String, String> node = ((StatefulRedisClusterConnection<String, String>) connection)
+                    .getConnection(cursor.getNodeId().get());
+            return new CursorCommands(node.sync(), node.async());
         }
-        return sync;
+        return new CursorCommands(sync, async);
     }
 
-    public void cursorDelete(RediSearchTableHandle tableHandle, Cursor cursor) {
-        cursorCommands(cursor).ftCursordel(tableHandle.getIndex(), cursor);
+    /**
+     * Deletes the cursor without waiting for Redis, e.g. from a callback on the connection's thread, where waiting
+     * would block the connection.
+     */
+    public void cursorDeleteAsync(RediSearchTableHandle tableHandle, Cursor cursor) {
+        cursorCommands(cursor).async.ftCursordel(tableHandle.getIndex(), cursor).exceptionally(e -> {
+            log.warn(e, "Could not delete cursor %s of index %s", cursor.getCursorId(), tableHandle.getIndex());
+            return null;
+        });
     }
 
     public Long deleteDocs(List<String> docIds) {
