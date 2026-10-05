@@ -2,6 +2,8 @@ package com.redis.trino;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 import io.airlift.json.JsonCodec;
@@ -13,11 +15,12 @@ public class TestTableHandle {
 
 	@Test
 	public void testRoundTrip() {
-		RediSearchTableHandle expected = new RediSearchTableHandle(new SchemaTableName("schema", "table"), "table");
+		RediSearchTableHandle expected = new RediSearchTableHandle(new SchemaTableName("schema", "table"), "table")
+				.withTopN(List.of(new RediSearchSortItem("price", false)), 10);
 
 		String json = codec.toJson(expected);
 		RediSearchTableHandle actual = codec.fromJson(json);
 
-		assertThat(actual.getSchemaTableName()).isEqualTo(expected.getSchemaTableName());
+		assertThat(actual).isEqualTo(expected);
 	}
 }

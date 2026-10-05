@@ -48,10 +48,12 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	// for group by fields
 	private final List<RediSearchAggregationTerm> aggregationTerms;
 	private final List<RediSearchAggregation> aggregations;
+	// A pushed-down ORDER BY, which keeps the first limit documents
+	private final List<RediSearchSortItem> sort;
 
 	public RediSearchTableHandle(SchemaTableName schemaTableName, String index) {
 		this(schemaTableName, index, TupleDomain.all(), OptionalLong.empty(), Collections.emptyList(),
-				Collections.emptyList());
+				Collections.emptyList(), Collections.emptyList());
 	}
 
 	@JsonCreator
@@ -59,13 +61,34 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 			@JsonProperty("index") String index, @JsonProperty("constraint") TupleDomain<ColumnHandle> constraint,
 			@JsonProperty("limit") OptionalLong limit,
 			@JsonProperty("aggTerms") List<RediSearchAggregationTerm> termAggregations,
-			@JsonProperty("aggregates") List<RediSearchAggregation> metricAggregations) {
+			@JsonProperty("aggregates") List<RediSearchAggregation> metricAggregations,
+			@JsonProperty("sort") List<RediSearchSortItem> sort) {
 		this.schemaTableName = requireNonNull(schemaTableName, "schemaTableName is null");
 		this.index = requireNonNull(index, "index is null");
 		this.constraint = requireNonNull(constraint, "constraint is null");
 		this.limit = requireNonNull(limit, "limit is null");
 		this.aggregationTerms = requireNonNull(termAggregations, "aggTerms is null");
 		this.aggregations = requireNonNull(metricAggregations, "aggregates is null");
+		this.sort = requireNonNull(sort, "sort is null");
+	}
+
+	public RediSearchTableHandle withConstraint(TupleDomain<ColumnHandle> constraint) {
+		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort);
+	}
+
+	public RediSearchTableHandle withLimit(long limit) {
+		return new RediSearchTableHandle(schemaTableName, index, constraint, OptionalLong.of(limit), aggregationTerms,
+				aggregations, sort);
+	}
+
+	public RediSearchTableHandle withAggregations(List<RediSearchAggregationTerm> terms,
+			List<RediSearchAggregation> metrics) {
+		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, terms, metrics, sort);
+	}
+
+	public RediSearchTableHandle withTopN(List<RediSearchSortItem> sort, long limit) {
+		return new RediSearchTableHandle(schemaTableName, index, constraint, OptionalLong.of(limit), aggregationTerms,
+				aggregations, sort);
 	}
 
 	@JsonProperty
@@ -98,9 +121,14 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 		return aggregations;
 	}
 
+	@JsonProperty
+	public List<RediSearchSortItem> getSort() {
+		return sort;
+	}
+
 	@Override
 	public int hashCode() {
-		return Objects.hash(schemaTableName, index, constraint, limit, aggregationTerms, aggregations);
+		return Objects.hash(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort);
 	}
 
 	@Override
@@ -115,12 +143,12 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 		return Objects.equals(this.schemaTableName, other.schemaTableName) && Objects.equals(this.index, other.index)
 				&& Objects.equals(this.constraint, other.constraint) && Objects.equals(this.limit, other.limit)
 				&& Objects.equals(this.aggregationTerms, other.aggregationTerms)
-				&& Objects.equals(this.aggregations, other.aggregations);
+				&& Objects.equals(this.aggregations, other.aggregations) && Objects.equals(this.sort, other.sort);
 	}
 
 	@Override
 	public String toString() {
 		return MoreObjects.toStringHelper(this).add("schemaTableName", schemaTableName).add("index", index)
-				.add("limit", limit).add("constraint", constraint).toString();
+				.add("limit", limit).add("sort", sort).add("constraint", constraint).toString();
 	}
 }

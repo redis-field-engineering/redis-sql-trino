@@ -94,8 +94,6 @@ public class RediSearchPageSourceProvider implements ConnectorPageSourceProvider
 			return table;
 		}
 		log.debug("Adding dynamic filter %s to %s", pushed, table);
-		return new RediSearchTableHandle(table.getSchemaTableName(), table.getIndex(),
-				table.getConstraint().intersect(pushed), table.getLimit(), table.getTermAggregations(),
-				table.getMetricAggregations());
+		return table.withConstraint(table.getConstraint().intersect(pushed));
 	}
 }

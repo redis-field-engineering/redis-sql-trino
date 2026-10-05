@@ -152,6 +152,37 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 				"VALUES 0");
 	}
 
+	@Test
+	public void testTopNPushdown() {
+		String sql = "SELECT orderkey, totalprice FROM orders ORDER BY totalprice DESC LIMIT 10";
+		assertQueryOrdered(sql);
+		// Redis returns only the 10 rows
+		assertThat(physicalInputPositions(getDistributedQueryRunner().executeWithPlan(getSession(), sql)))
+				.isEqualTo(10);
+		assertQueryOrdered("SELECT orderkey, totalprice FROM orders WHERE orderstatus = 'F' ORDER BY totalprice LIMIT 5");
+		// Not pushed down: a BIGINT key, NULLS FIRST
+		assertQueryOrdered("SELECT orderkey, totalprice FROM orders ORDER BY totalprice, orderkey DESC LIMIT 5");
+		assertQueryOrdered("SELECT orderkey, totalprice FROM orders ORDER BY totalprice DESC NULLS FIRST LIMIT 5");
+		// A filter or aggregation over the first rows applies to those rows only
+		assertQuery("SELECT orderkey FROM (SELECT * FROM orders ORDER BY totalprice DESC LIMIT 10) WHERE orderstatus = 'F'");
+		assertQuery("SELECT count(*), max(totalprice) FROM (SELECT * FROM orders ORDER BY totalprice LIMIT 10)");
+		assertQuery("SELECT count(*) FROM (SELECT * FROM orders LIMIT 10)", "VALUES 10");
+
+		// Documents without the value come last either way
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		redis.ftCreate("ranked", CreateArgs.builder().withPrefix("ranked:").build(),
+				List.of(TagFieldArgs.builder().name("id").build(), NumericFieldArgs.builder().name("score").build()));
+		redisearch.awaitIndexed("ranked");
+		Map.of("a", "10", "b", "9", "c", "100", "d", "-5").forEach(
+				(id, score) -> redis.hset("ranked:" + id, Map.of("id", id, "score", score)));
+		redis.hset("ranked:e", Map.of("id", "e"));
+		assertThat(computeActual("SELECT id FROM ranked ORDER BY score DESC LIMIT 5").getOnlyColumn())
+				.containsExactly("c", "a", "b", "d", "e");
+		assertThat(computeActual("SELECT id FROM ranked ORDER BY score LIMIT 2").getOnlyColumn()).containsExactly("d", "b");
+		assertThat(computeActual("SELECT id FROM ranked ORDER BY score NULLS FIRST LIMIT 2").getOnlyColumn())
+				.containsExactly("e", "d");
+	}
+
 	private long physicalInputPositions(MaterializedResultWithPlan result) {
 		return getDistributedQueryRunner().getCoordinator().getQueryManager().getFullQueryInfo(result.queryId())
 				.getQueryStats().getPhysicalInputPositions();

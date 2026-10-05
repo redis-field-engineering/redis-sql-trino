@@ -26,6 +26,11 @@ package com.redis.trino;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.ImmutableList.toImmutableList;
+import static io.trino.spi.type.DoubleType.DOUBLE;
+import static io.trino.spi.type.IntegerType.INTEGER;
+import static io.trino.spi.type.RealType.REAL;
+import static io.trino.spi.type.SmallintType.SMALLINT;
+import static io.trino.spi.type.TinyintType.TINYINT;
 import static java.util.Objects.requireNonNull;
 
 import java.util.Collection;
@@ -34,7 +39,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.UnaryOperator;
@@ -74,12 +78,15 @@ import io.trino.spi.connector.RetryMode;
 import io.trino.spi.connector.RowChangeParadigm;
 import io.trino.spi.connector.SaveMode;
 import io.trino.spi.connector.SchemaTableName;
+import io.trino.spi.connector.SortItem;
 import io.trino.spi.connector.TableNotFoundException;
+import io.trino.spi.connector.TopNApplicationResult;
 import io.trino.spi.expression.ConnectorExpression;
 import io.trino.spi.expression.Variable;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.statistics.ComputedStatistics;
+import io.trino.spi.type.Type;
 
 public class RediSearchMetadata implements ConnectorMetadata {
 
@@ -301,15 +308,58 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			return Optional.empty();
 		}
 
-		return Optional.of(new LimitApplicationResult<>(new RediSearchTableHandle(handle.getSchemaTableName(),
-				handle.getIndex(), handle.getConstraint(), OptionalLong.of(limit), handle.getTermAggregations(),
-				handle.getMetricAggregations()), true, false));
+		return Optional.of(new LimitApplicationResult<>(handle.withLimit(limit), true, false));
+	}
+
+	// Types whose values sort as doubles in the same order. A BIGINT of 2^53 or more could sort with its neighbors,
+	// and a DECIMAL with more digits than a double holds.
+	private static final Set<Type> SORTABLE_TYPES = Set.of(DOUBLE, REAL, INTEGER, SMALLINT, TINYINT);
+
+	/**
+	 * Pushes ORDER BY ... LIMIT down to Redis as SORTBY ... MAX for scans of hash indexes, on NUMERIC columns.
+	 * Redis sorts documents that have no value last in both directions, so only NULLS LAST is pushed down. Trino still
+	 * sorts the rows Redis returns.
+	 */
+	@Override
+	public Optional<TopNApplicationResult<ConnectorTableHandle>> applyTopN(ConnectorSession session,
+			ConnectorTableHandle table, long topNCount, List<SortItem> sortItems, Map<String, ColumnHandle> assignments) {
+		RediSearchTableHandle handle = (RediSearchTableHandle) table;
+		// Sorting the first rows, or the groups, would differ from sorting the documents
+		if (handle.getLimit().isPresent() || !handle.getSort().isEmpty() || !handle.getTermAggregations().isEmpty()
+				|| !handle.getMetricAggregations().isEmpty() || topNCount == 0) {
+			return Optional.empty();
+		}
+		// With DIALECT 3, a JSON index returns its values as JSON text, which Redis would sort as strings
+		if (rediSearchSession.getTable(handle.getSchemaTableName()).getIndexInfo().getKeyType()
+				.filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
+			return Optional.empty();
+		}
+		ImmutableList.Builder<RediSearchSortItem> sort = ImmutableList.builder();
+		for (SortItem sortItem : sortItems) {
+			RediSearchColumnHandle column = (RediSearchColumnHandle) assignments.get(sortItem.getName());
+			if (column == null || column.getFieldType() != RediSearchFieldType.NUMERIC || !column.isSupportsPredicates()
+					|| !SORTABLE_TYPES.contains(column.getType()) || !RediSearchQueryBuilder.isProperty(column.getName())) {
+				return Optional.empty();
+			}
+			switch (sortItem.getSortOrder()) {
+			case ASC_NULLS_LAST -> sort.add(new RediSearchSortItem(column.getName(), true));
+			case DESC_NULLS_LAST -> sort.add(new RediSearchSortItem(column.getName(), false));
+			default -> {
+				return Optional.empty();
+			}
+			}
+		}
+		return Optional.of(new TopNApplicationResult<>(handle.withTopN(sort.build(), topNCount), false, false));
 	}
 
 	@Override
 	public Optional<ConstraintApplicationResult<ConnectorTableHandle>> applyFilter(ConnectorSession session,
 			ConnectorTableHandle table, Constraint constraint) {
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
+		// The first rows of a sort, filtered, aren't the first of the filtered rows
+		if (!handle.getSort().isEmpty()) {
+			return Optional.empty();
+		}
 
 		// Expressions such as LIKE stay with Trino: a wildcard query isn't guaranteed to return every matching row
 		Map<ColumnHandle, Domain> supported = new HashMap<>();
@@ -337,8 +387,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			return Optional.empty();
 		}
 
-		handle = new RediSearchTableHandle(handle.getSchemaTableName(), handle.getIndex(), newDomain, handle.getLimit(),
-				handle.getTermAggregations(), handle.getMetricAggregations());
+		handle = handle.withConstraint(newDomain);
 
 		return Optional.of(new ConstraintApplicationResult<>(handle, TupleDomain.withColumnDomains(unsupported),
 				constraint.getExpression(), false));
@@ -352,7 +401,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		RediSearchTableHandle table = (RediSearchTableHandle) handle;
 		// Global aggregation is represented by [[]]
 		verify(!groupingSets.isEmpty(), "No grouping sets provided");
-		if (!table.getTermAggregations().isEmpty()) {
+		// GROUPBY would run before a LIMIT or SORTBY, over every document rather than the first ones
+		if (!table.getTermAggregations().isEmpty() || table.getLimit().isPresent() || !table.getSort().isEmpty()) {
 			return Optional.empty();
 		}
 		ImmutableList.Builder<ConnectorExpression> projections = ImmutableList.builder();
@@ -387,8 +437,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		if (aggregationList.isEmpty()) {
 			return Optional.empty();
 		}
-		RediSearchTableHandle tableHandle = new RediSearchTableHandle(table.getSchemaTableName(), table.getIndex(),
-				table.getConstraint(), table.getLimit(), terms.build(), aggregationList);
+		RediSearchTableHandle tableHandle = table.withAggregations(terms.build(), aggregationList);
 		return Optional.of(new AggregationApplicationResult<>(tableHandle, projections.build(),
 				resultAssignments.build(), Map.of(), false));
 	}

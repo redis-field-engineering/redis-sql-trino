@@ -40,6 +40,9 @@ import java.util.Set;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.search.arguments.AggregateArgs;
 import io.lettuce.core.search.arguments.AggregateArgs.GroupBy;
+import io.lettuce.core.search.arguments.AggregateArgs.SortBy;
+import io.lettuce.core.search.arguments.AggregateArgs.SortDirection;
+import io.lettuce.core.search.arguments.AggregateArgs.SortProperty;
 import io.lettuce.core.search.arguments.AggregateArgs.WithCursor;
 import io.lettuce.core.search.arguments.QueryDialects;
 import io.trino.spi.type.DecimalType;
@@ -156,9 +159,26 @@ public class RediSearchTranslator {
 			}
 		}
 		loads.forEach(args::load);
-		// Steps run in the order they're added: GROUPBY leaves only the groups, and LIMIT counts the filtered rows
+		// SORTBY sorts a copy of each column, loaded AS another name: next to LOAD *, a NUMERIC field's own name holds
+		// the hash's text, which Redis would sort as a string
+		List<RediSearchSortItem> sort = table.getSort();
+		for (int i = 0; i < sort.size(); i++) {
+			args.load(sort.get(i).getColumn(), sortAlias(i));
+		}
+		// Steps run in the order they're added: GROUPBY leaves only the groups, SORTBY keeps the first LIMIT of the
+		// filtered rows, and LIMIT counts the filtered rows
 		filters.values().forEach(args::filter);
 		groupBy.ifPresent(args::groupBy);
+		if (!sort.isEmpty()) {
+			SortProperty[] properties = new SortProperty[sort.size()];
+			for (int i = 0; i < sort.size(); i++) {
+				properties[i] = new SortProperty("@" + sortAlias(i),
+						sort.get(i).isAscending() ? SortDirection.ASC : SortDirection.DESC);
+			}
+			SortBy sortBy = SortBy.of(properties);
+			table.getLimit().ifPresent(sortBy::max);
+			args.sortBy(sortBy);
+		}
 		// Only a pushed-down SQL LIMIT caps the results; otherwise the cursor streams every matching document
 		table.getLimit().ifPresent(limit -> args.limit(0, limit));
 		args.withCursor(WithCursor.of(config.getCursorCount() > 0 ? config.getCursorCount() : null));
@@ -172,6 +192,10 @@ public class RediSearchTranslator {
 		return new Aggregation(table.getIndex(), query, filters.values(), aggregateArgs, global,
 				new RediSearchRowReader(columns.stream().map(RediSearchColumnHandle::getName).toList(), sources,
 						exactSources, jsonArrays, table.getMetricAggregations()));
+	}
+
+	private static String sortAlias(int position) {
+		return "__sort_" + position;
 	}
 
 	// Values of these types can lose digits formatted as doubles. Integers of the other types are exact as doubles,
