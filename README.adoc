@@ -431,9 +431,10 @@ See the https://{project-owner}.github.io/{project-name}/#sql-support[SQL suppor
 
 == Performance
 
-These are the query benchmark's timings for commit 95feb14 (October 2, 2026), from the Benchmark job of its pull request.
+These are the query benchmark's timings for commit 68202c8 (October 5, 2026), from the Benchmark job of its pull request (https://github.com/{project-owner}/{project-name}/pull/100[#100]); `master` merged that code as a43401c.
 That job runs on a GitHub Actions `ubuntu-latest` runner, with Trino in the test JVM and Redis in a one-shard database on a single-node Redis Enterprise Software 8.2 container.
 The data is TPC-H `tiny`: 60,175 `lineitem` rows, 15,000 `orders` and 1,500 `customer`.
+Queries run with Trino's default `join_distribution_type=AUTOMATIC`.
 Each query ran 5 times to warm up and was then timed 20 times, from submitting it to receiving its last row, in each of two runs.
 The table pools the 40 samples.
 
@@ -443,48 +444,63 @@ The table pools the 40 samples.
 
 |`+SELECT * FROM orders WHERE orderkey = 7+`
 |Filter
-|1 |30 |35
+|1 |23 |26
 
 |`+SELECT count(*) FROM lineitem WHERE shipmode = 'AIR'+`
 |Filter and count
-|1 |58 |66
+|1 |38 |45
 
 |`+SELECT * FROM lineitem LIMIT 1000+`
 |Limit
-|1,000 |66 |81
+|1,000 |41 |49
 
 |`+SELECT count(*), sum(extendedprice) FROM lineitem WHERE quantity < 10+`
 |Filter and aggregate
-|1 |71 |81
+|1 |50 |56
+
+|`+SELECT orderkey, totalprice FROM orders ORDER BY totalprice DESC LIMIT 10+`
+|Sort, and return the first 10
+|10 |53 |66
+
+|`+SELECT count(*) FROM orders o JOIN customer c ON o.custkey = c.custkey WHERE c.nationkey = 3+`
+|Filter the customers, then return only the orders of the 60 that match
+|1 |56 |64
 
 |`+SELECT returnflag, linestatus, count(*), sum(quantity), avg(extendedprice) FROM lineitem GROUP BY returnflag, linestatus+`
 |Group and aggregate
-|4 |171 |184
-
-|`+SELECT orderkey, totalprice FROM orders ORDER BY totalprice DESC LIMIT 10+`
-|Returns all 15,000 orders for Trino to sort
-|10 |232 |265
+|4 |103 |114
 
 |`+SELECT c.mktsegment, count(*) FROM orders o JOIN customer c ON o.custkey = c.custkey GROUP BY c.mktsegment+`
 |Returns all 15,000 orders and 1,500 customers for Trino to join
-|5 |345 |396
+|5 |153 |172
 
 |`+SELECT sum(quantity * extendedprice) FROM lineitem+`
 |Returns all 60,175 rows for Trino to sum
-|1 |1,191 |1,237
+|1 |599 |628
 
 |`DESCRIBE lineitem`
 |Metadata only (columns are cached)
-|16 |58 |61
+|16 |36 |41
 
 |`+SELECT count(*) FROM information_schema.columns WHERE table_schema = 'tpch'+`
 |Metadata only (columns are cached)
-|1 |39 |45
+|1 |26 |30
+
+|`+CREATE TABLE bench_orders AS SELECT * FROM tpch.tiny.orders+`
+|Writes 15,000 hashes, pipelined a page at a time
+|1 |191 |219
+
+|The first query, while two others sum `lineitem` as above
+|Filter
+|1 |33 |46
 |===
 
-Queries that Redis filters or aggregates finish in under 200 ms, because only the matching or aggregated rows come back to Trino.
-Summing an expression over the same `lineitem` table, which Redis can't compute, returns every row and takes about 1.2 s.
-Use the numbers to compare builds of the connector rather than to size a deployment: Trino and Redis share the runner's CPUs, and a production cluster runs them on separate machines.
+Queries that Redis filters, aggregates, sorts or limits finish in about 100 ms or less, because only the matching rows come back to Trino.
+So does a selective join: the keys of the 60 matching customers are added to the orders query, so Redis returns only their orders.
+Summing an expression over `lineitem`, which Redis can't compute, returns every row and takes about 0.6 s.
+
+Timings vary by up to 2x from one runner to another, so compare builds of the connector within one Benchmark job rather than across runs.
+Don't use them to size a deployment either: Trino and Redis share the runner's CPUs, and a production cluster runs them on separate machines.
 To time the queries yourself, see <<_building_from_source,Building from source>>.
 
 == Support
