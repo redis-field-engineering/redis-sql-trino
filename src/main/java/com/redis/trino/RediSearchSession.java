@@ -68,6 +68,7 @@ import io.lettuce.core.RedisFuture;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.SslOptions;
 import io.lettuce.core.SslOptions.Builder;
+import io.lettuce.core.StatefulRedisConnectionImpl;
 import io.lettuce.core.TimeoutOptions;
 import io.lettuce.core.api.StatefulConnection;
 import io.lettuce.core.api.StatefulRedisConnection;
@@ -162,6 +163,8 @@ public class RediSearchSession {
 
     private final AtomicInteger nextScanConnection = new AtomicInteger();
 
+    private final boolean resp3;
+
     public RediSearchSession(TypeManager typeManager, RediSearchConfig config) {
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
         this.config = requireNonNull(config, "config is null");
@@ -171,6 +174,7 @@ public class RediSearchSession {
         this.connection = primary.connection;
         this.sync = primary.sync;
         this.async = primary.async;
+        this.resp3 = isResp3(primary.connection);
         this.scanConnections = new Connection[Math.toIntExact(config.getScanConnections())];
         this.tableCache = EvictableCacheBuilder.newBuilder().expireAfterWrite(config.getTableCacheRefresh(), TimeUnit.SECONDS)
                 .build();
@@ -277,6 +281,24 @@ public class RediSearchSession {
 
     public StatefulConnection<String, String> getConnection() {
         return connection;
+    }
+
+    /**
+     * Whether the connections negotiated RESP3. Over RESP2, the shards of a sharded database send its coordinator the
+     * doubles they compute rounded to 12 significant digits.
+     */
+    public boolean isResp3() {
+        return resp3;
+    }
+
+    private static boolean isResp3(StatefulConnection<String, String> connection) {
+        StatefulConnection<String, String> negotiated = connection;
+        if (connection instanceof StatefulRedisClusterConnection<String, String> cluster) {
+            // A cluster connection doesn't expose the protocol it negotiated, but its connections to the nodes do
+            negotiated = cluster.getConnection(cluster.getPartitions().iterator().next().getNodeId());
+        }
+        return negotiated instanceof StatefulRedisConnectionImpl<?, ?> redisConnection
+                && redisConnection.getConnectionState().getNegotiatedProtocolVersion() == ProtocolVersion.RESP3;
     }
 
     public RedisClusterCommands<String, String> sync() {

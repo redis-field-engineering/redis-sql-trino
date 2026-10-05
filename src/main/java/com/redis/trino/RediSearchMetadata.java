@@ -462,7 +462,17 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		if (aggregationList.isEmpty()) {
 			return Optional.empty();
 		}
-		RediSearchTableHandle tableHandle = table.withAggregations(terms.build(), aggregationList);
+		ImmutableList<RediSearchAggregationTerm> termList = terms.build();
+		// Over RESP2, the shards of a sharded database send its coordinator the doubles they compute rounded to 12
+		// significant digits, which no mantissa and exponent computed after it merges them could restore
+		if (!rediSearchSession.isResp3()
+				&& (aggregationList.stream().map(RediSearchAggregation::getOutputType)
+						.anyMatch(RediSearchExactNumbers::isFloatingPoint)
+						|| termList.stream().map(RediSearchAggregationTerm::getType)
+								.anyMatch(RediSearchExactNumbers::isFloatingPoint))) {
+			return Optional.empty();
+		}
+		RediSearchTableHandle tableHandle = table.withAggregations(termList, aggregationList);
 		return Optional.of(new AggregationApplicationResult<>(tableHandle, projections.build(),
 				resultAssignments.build(), Map.of(), false));
 	}

@@ -41,7 +41,53 @@ public class TestAggregationPushdown extends AbstractTestQueryFramework {
 		redis.hset("beer:4", Map.of("id", "4", "brewery_id", "264", "abv", "6.0"));
 		redis.hset("beer:5", Map.of("id", "5", "brewery_id", "264"));
 		redis.hset("beer:6", Map.of("id", "6", "brewery_id", "100"));
+		createNumbers(redisearch);
 		return RediSearchQueryRunner.createRediSearchQueryRunner(redisearch);
+	}
+
+	/**
+	 * Doubles that Redis, which formats the numbers it computes to 12 significant digits, would round: two that only
+	 * differ after 12 digits, a sum with more, and the largest, smallest normal and a negative one. The document
+	 * without one has its own group: a sharded database's shards return nan as the sum of no values, which the
+	 * coordinator then adds.
+	 */
+	static void createNumbers(RediSearchServer redisearch) {
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		redis.ftCreate("numbers", CreateArgs.builder().withPrefix("number:").build(),
+				List.of(NumericFieldArgs.builder().name("d").build(), TagFieldArgs.builder().name("style").build()));
+		redisearch.awaitIndexed("numbers");
+		redis.hset("number:1", Map.of("d", "0.1234567890123456", "style", "Wheat"));
+		redis.hset("number:2", Map.of("d", "229577310901.21", "style", "Wheat"));
+		redis.hset("number:3", Map.of("d", "0.1234567890123457", "style", "Ale"));
+		redis.hset("number:4", Map.of("style", "None"));
+		redis.hset("number:5", Map.of("d", "-1.0000000000000002", "style", "Extreme"));
+		redis.hset("number:6", Map.of("d", "2.2250738585072014E-308", "style", "Extreme"));
+		redis.hset("number:7", Map.of("d", "1.7976931348623157E308", "style", "Extreme"));
+	}
+
+	@Test
+	public void testExactDoubles() {
+		assertExact("SELECT style, sum(d), min(d), max(d), avg(d) FROM numbers GROUP BY style", "VALUES "
+				+ "(VARCHAR 'Wheat', DOUBLE '0.1234567890123456' + DOUBLE '229577310901.21', DOUBLE '0.1234567890123456', "
+				+ "DOUBLE '229577310901.21', (DOUBLE '0.1234567890123456' + DOUBLE '229577310901.21') / 2), "
+				+ "(VARCHAR 'Ale', DOUBLE '0.1234567890123457', DOUBLE '0.1234567890123457', DOUBLE '0.1234567890123457', "
+				+ "DOUBLE '0.1234567890123457'), "
+				+ "(VARCHAR 'None', CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE)), "
+				// The sum, in any order, is the largest double
+				+ "(VARCHAR 'Extreme', DOUBLE '1.7976931348623157E308', DOUBLE '-1.0000000000000002', "
+				+ "DOUBLE '1.7976931348623157E308', DOUBLE '1.7976931348623157E308' / 3)");
+		assertExact("SELECT sum(d), max(d) FROM numbers WHERE style = 'Wheat'",
+				"VALUES (DOUBLE '0.1234567890123456' + DOUBLE '229577310901.21', DOUBLE '229577310901.21')");
+		// Formatted to 12 digits, the first two keys would be the same
+		assertExact("SELECT d, count(*) FROM numbers GROUP BY d", "VALUES (DOUBLE '0.1234567890123456', BIGINT '1'), "
+				+ "(DOUBLE '0.1234567890123457', BIGINT '1'), (DOUBLE '229577310901.21', BIGINT '1'), "
+				+ "(CAST(NULL AS DOUBLE), BIGINT '1'), (DOUBLE '-1.0000000000000002', BIGINT '1'), "
+				+ "(DOUBLE '2.2250738585072014E-308', BIGINT '1'), (DOUBLE '1.7976931348623157E308', BIGINT '1')");
+	}
+
+	private void assertExact(String sql, String expected) {
+		assertThat(query(sql)).isFullyPushedDown();
+		RediSearchQueryRunner.assertExactRows(getQueryRunner(), sql, expected);
 	}
 
 	@Test

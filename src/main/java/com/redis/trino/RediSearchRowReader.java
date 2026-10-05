@@ -39,6 +39,7 @@ import com.fasterxml.jackson.core.JsonToken;
 import com.google.common.collect.ImmutableList;
 
 import io.lettuce.core.search.FieldValue;
+import io.trino.spi.type.Type;
 
 /**
  * Reads the values of an FT.AGGREGATE row in column order, from the fields the scan loaded them as. Other fields, such
@@ -57,6 +58,8 @@ public class RediSearchRowReader {
 	private final int[] exactPositions;
 	// The reducer whose result each column is, if any
 	private final RediSearchAggregation[] metrics;
+	// The type of each column whose value is also returned as a mantissa and exponent
+	private final Type[] exactNumbers;
 
 	/**
 	 * @param columns    the columns to read, in the order {@link #read} returns their values
@@ -66,23 +69,28 @@ public class RediSearchRowReader {
 	 * @param jsonArrays columns whose values come as JSON arrays of the values at their JSON path, as DIALECT 3
 	 *                   returns them
 	 * @param metrics    the reducers whose results the aggregation returns, under their aliases
+	 * @param exactNumbers the types of the columns whose values are also returned as the fields
+	 *                   {@link RediSearchExactNumbers} names after their positions
 	 */
 	public RediSearchRowReader(List<String> columns, Map<String, String> sources, Map<String, String> exactSources,
-			Set<String> jsonArrays, List<RediSearchAggregation> metrics) {
+			Set<String> jsonArrays, List<RediSearchAggregation> metrics, Map<String, Type> exactNumbers) {
 		this.columns = ImmutableList.copyOf(requireNonNull(columns, "columns is null"));
 		requireNonNull(sources, "sources is null");
 		requireNonNull(exactSources, "exactSources is null");
 		requireNonNull(jsonArrays, "jsonArrays is null");
 		requireNonNull(metrics, "metrics is null");
+		requireNonNull(exactNumbers, "exactNumbers is null");
 		this.fields = new String[this.columns.size()];
 		this.jsonArrays = new boolean[this.columns.size()];
 		this.metrics = new RediSearchAggregation[this.columns.size()];
 		this.exactFields = new String[this.columns.size()];
+		this.exactNumbers = new Type[this.columns.size()];
 		for (int i = 0; i < fields.length; i++) {
 			String column = this.columns.get(i);
 			fields[i] = sources.getOrDefault(column, column);
 			exactFields[i] = exactSources.get(column);
 			this.jsonArrays[i] = jsonArrays.contains(column);
+			this.exactNumbers[i] = exactNumbers.get(column);
 			for (RediSearchAggregation metric : metrics) {
 				if (metric.getAlias().equals(column)) {
 					this.metrics[i] = metric;
@@ -139,9 +147,17 @@ public class RediSearchRowReader {
 			if (metrics[i] != null && metrics[i].isEmptyResult(value)) {
 				value = null;
 			}
+			if (value != null && exactNumbers[i] != null) {
+				value = RediSearchExactNumbers.read(value, asString(row.get(RediSearchExactNumbers.mantissaField(i))),
+						asString(row.get(RediSearchExactNumbers.exponentField(i))), exactNumbers[i]);
+			}
 			values[i] = value;
 		}
 		return values;
+	}
+
+	private static String asString(FieldValue field) {
+		return field == null || field.isNull() ? null : field.asString();
 	}
 
 	/**
