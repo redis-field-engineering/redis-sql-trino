@@ -30,7 +30,8 @@ import io.trino.spi.ErrorCodeSupplier;
 import io.trino.spi.ErrorType;
 
 public enum RediSearchErrorCode implements ErrorCodeSupplier {
-	REDISEARCH_INDEX_NOT_READY(0, EXTERNAL);
+	REDISEARCH_INDEX_NOT_READY(0, EXTERNAL),
+	REDISEARCH_UNEXPECTED_RESULT(1, EXTERNAL);
 
 	private final ErrorCode errorCode;
 

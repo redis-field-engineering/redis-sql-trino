@@ -61,6 +61,11 @@ public class RediSearchAggregationTerm {
 		if (column.getType() instanceof DecimalType) {
 			return Optional.empty();
 		}
+		// A floating-point key is also returned as a mantissa and exponent, by expressions that refer to it as @name
+		if (RediSearchExactNumbers.isFloatingPoint(column.getType())
+				&& !RediSearchQueryBuilder.isProperty(column.getName())) {
+			return Optional.empty();
+		}
 		return Optional.of(new RediSearchAggregationTerm(column.getName(), column.getType()));
 	}
 

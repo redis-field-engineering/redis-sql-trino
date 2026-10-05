@@ -46,6 +46,7 @@ import io.lettuce.core.search.arguments.AggregateArgs.SortProperty;
 import io.lettuce.core.search.arguments.AggregateArgs.WithCursor;
 import io.lettuce.core.search.arguments.QueryDialects;
 import io.trino.spi.type.DecimalType;
+import io.trino.spi.type.Type;
 
 public class RediSearchTranslator {
 
@@ -126,7 +127,8 @@ public class RediSearchTranslator {
 		Optional<GroupBy> groupBy = queryBuilder.group(table);
 		// A scan reads the documents' values. Redis returns a NUMERIC field loaded by name formatted as a double, and
 		// rounded to 12 significant digits unless it's an integer; LOAD * on a hash and DIALECT 3 on JSON return the
-		// values as stored. GROUPBY and REDUCE results have no such format.
+		// values as stored. GROUPBY keys and REDUCE results are formatted the same way, so APPLY also returns them as
+		// mantissas and exponents.
 		Optional<RediSearchIndexInfo.KeyType> keyType = indexInfo.flatMap(RediSearchIndexInfo::getKeyType);
 		boolean scan = groupBy.isEmpty();
 		boolean json = scan && keyType.filter(RediSearchIndexInfo.KeyType.JSON::equals).isPresent();
@@ -169,6 +171,17 @@ public class RediSearchTranslator {
 		// filtered rows, and LIMIT counts the filtered rows
 		filters.values().forEach(args::filter);
 		groupBy.ifPresent(args::groupBy);
+		// The keys and results that needn't be integers, as mantissas and exponents
+		Map<String, Type> exactNumbers = new HashMap<>();
+		if (groupBy.isPresent()) {
+			for (int i = 0; i < columns.size(); i++) {
+				RediSearchColumnHandle column = columns.get(i);
+				if (RediSearchExactNumbers.isFloatingPoint(column.getType())) {
+					RediSearchExactNumbers.apply(args, column.getName(), i);
+					exactNumbers.put(column.getName(), column.getType());
+				}
+			}
+		}
 		if (!sort.isEmpty()) {
 			SortProperty[] properties = new SortProperty[sort.size()];
 			for (int i = 0; i < sort.size(); i++) {
@@ -191,7 +204,7 @@ public class RediSearchTranslator {
 		AggregateArgs aggregateArgs = loadAll ? new LoadAllArgs(args.build()) : args.build();
 		return new Aggregation(table.getIndex(), query, filters.values(), aggregateArgs, global,
 				new RediSearchRowReader(columns.stream().map(RediSearchColumnHandle::getName).toList(), sources,
-						exactSources, jsonArrays, table.getMetricAggregations()));
+						exactSources, jsonArrays, table.getMetricAggregations(), exactNumbers));
 	}
 
 	private static String sortAlias(int position) {

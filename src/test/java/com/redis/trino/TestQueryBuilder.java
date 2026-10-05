@@ -11,6 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -25,6 +26,7 @@ import com.google.common.collect.ImmutableMap;
 import io.lettuce.core.codec.StringCodec;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.search.FieldValue;
+import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.predicate.Domain;
@@ -32,6 +34,7 @@ import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.predicate.ValueSet;
 import io.trino.spi.type.DoubleType;
 import io.trino.spi.type.IntegerType;
+import io.trino.spi.type.RealType;
 
 public class TestQueryBuilder {
 
@@ -282,12 +285,82 @@ public class TestQueryBuilder {
 		RediSearchAggregation sum = new RediSearchAggregation(RediSearchAggregation.SUM, DoubleType.DOUBLE,
 				Optional.of(numeric("abv", DoubleType.DOUBLE)), "s");
 		RediSearchRowReader reader = new RediSearchRowReader(List.of("style", "c", "s"), Map.of(), Map.of(), Set.of(),
-				List.of(count, sum));
+				List.of(count, sum), Map.of());
 		// SUM over no values is nan, which SQL represents as null
 		assertThat(reader.read(Map.of("style", value("Wheat"), "c", value("2"), "s", value("nan"))))
 				.containsExactly("Wheat", "2", null);
 		// A global aggregation over no documents counts 0
 		assertThat(reader.emptyAggregation()).containsExactly(null, "0", null);
+	}
+
+	@Test
+	public void testFloatingPointResultsAlsoAsMantissasAndExponents() {
+		RediSearchColumnHandle abv = numeric("abv", DoubleType.DOUBLE);
+		RediSearchAggregation sum = new RediSearchAggregation(RediSearchAggregation.SUM, DoubleType.DOUBLE,
+				Optional.of(abv), "s");
+		RediSearchAggregation count = new RediSearchAggregation(RediSearchAggregation.COUNT, BIGINT, Optional.empty(),
+				"c");
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers",
+				TupleDomain.all(), OptionalLong.empty(), List.of(new RediSearchAggregationTerm("abv", DoubleType.DOUBLE)),
+				List.of(sum, count), List.of());
+		RediSearchColumnHandle s = new RediSearchColumnHandle("s", DoubleType.DOUBLE, RediSearchFieldType.NUMERIC, false,
+				false, Optional.empty());
+		RediSearchColumnHandle c = new RediSearchColumnHandle("c", BIGINT, RediSearchFieldType.NUMERIC, false, false,
+				Optional.empty());
+		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
+				List.of(abv, s, c), Optional.of(hashIndex()));
+		// After GROUPBY, for the DOUBLE key and sum but not the count
+		assertThat(commandString(aggregation)).isEqualTo("LOAD 4 __key abv s c GROUPBY 1 @abv REDUCE SUM 1 @abv AS s "
+				+ "REDUCE COUNT 0 AS c APPLY floor(log2(abs(@abv))) AS __exponent_0 "
+				+ "APPLY abs(@abv) * 2 ^ (26 - floor(@__exponent_0 / 2)) * 2 ^ (27 - ceil(@__exponent_0 / 2)) AS __mantissa_0 "
+				+ "APPLY floor(log2(abs(@s))) AS __exponent_1 "
+				+ "APPLY abs(@s) * 2 ^ (26 - floor(@__exponent_1 / 2)) * 2 ^ (27 - ceil(@__exponent_1 / 2)) AS __mantissa_1 "
+				+ "WITHCURSOR COUNT 1000 DIALECT 2");
+		RediSearchRowReader reader = aggregation.getReader();
+		double key = 0.1234567890123456;
+		double total = -2.2957731090133344E11;
+		// log2 can round the exponent either way
+		for (int error = -1; error <= 1; error++) {
+			Map<String, FieldValue> row = new HashMap<>(Map.of("abv", value("0.123456789012"), "s",
+					value("-229577310901"), "c", value("2")));
+			row.putAll(exactNumber(0, key, Math.getExponent(key) + error));
+			row.putAll(exactNumber(1, total, Math.getExponent(total) + error));
+			assertThat(reader.read(row)).containsExactly(Double.toString(key), Double.toString(total), "2");
+		}
+		// floor(log2(x)), which rounds to 1024 for the largest double
+		Map<Double, Integer> extremes = Map.of(Double.MAX_VALUE, 1024, Double.MIN_NORMAL, -1022, Double.MIN_VALUE, -1074);
+		extremes.forEach((extreme, exponent) -> {
+			Map<String, FieldValue> row = new HashMap<>(Map.of("abv", value(String.format("%.12g", extreme)), "c",
+					value("1")));
+			row.putAll(exactNumber(0, extreme, exponent));
+			assertThat(reader.read(row)[0]).isEqualTo(Double.toString(extreme));
+		});
+		// The key of the documents without the field, a sum of no values, and zero, have no mantissa
+		assertThat(reader.read(Map.of("s", value("nan"), "c", value("1"), "__exponent_0", value("nan"), "__mantissa_0",
+				value("nan"), "__exponent_1", value("nan"), "__mantissa_1", value("nan")))).containsExactly(null, null, "1");
+		assertThat(reader.read(Map.of("abv", value("0"), "c", value("1"), "__exponent_0", value("-inf"), "__mantissa_0",
+				value("nan")))).containsExactly("0", null, "1");
+		// A mantissa that isn't the value's fails the query rather than returning a wrong value
+		Map<String, FieldValue> wrong = new HashMap<>(Map.of("abv", value("0.5"), "c", value("1")));
+		wrong.putAll(exactNumber(0, 0.25, Math.getExponent(0.25)));
+		assertThatThrownBy(() -> reader.read(wrong)).isInstanceOf(TrinoException.class)
+				.hasMessageContaining("for the value 0.5");
+	}
+
+	@Test
+	public void testRealResultsAsReals() {
+		RediSearchRowReader reader = new RediSearchRowReader(List.of("r"), Map.of(), Map.of(), Set.of(), List.of(),
+				Map.of("r", RealType.REAL));
+		Map<String, FieldValue> row = new HashMap<>(Map.of("r", value("0.3")));
+		row.putAll(exactNumber(0, 0.30000000000000004, Math.getExponent(0.3)));
+		assertThat(reader.read(row)).containsExactly(Float.toString(0.3f));
+	}
+
+	// The mantissa and exponent Redis returns for a value, with the exponent log2 rounded to
+	private static Map<String, FieldValue> exactNumber(int position, double value, int exponent) {
+		long mantissa = (long) Math.scalb(Math.abs(value), 53 - exponent);
+		return Map.of(RediSearchExactNumbers.exponentField(position), value(Integer.toString(exponent)),
+				RediSearchExactNumbers.mantissaField(position), value(Long.toString(mantissa)));
 	}
 
 	@Test
