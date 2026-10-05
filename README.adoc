@@ -418,6 +418,11 @@ Trino evaluates `LIKE`, `IS NULL`, `IS NOT NULL`, and comparisons other than `=`
 * `ORDER BY ... LIMIT` on hash indexes, when Redis evaluates the whole `WHERE` clause and every sort key is an indexed NUMERIC column of type DOUBLE, REAL, INTEGER, SMALLINT or TINYINT, ordered `NULLS LAST` (the default). Redis sorts documents without a value last and returns only the first rows, which Trino then sorts.
 * Join keys: in a join, the keys that the other side collects (its dynamic filter) are added to the query of a scan that Redis evaluates them in, under the same rules as `WHERE`. More than 256 keys become the range they span. A scan waits for them for up to `redisearch.dynamic-filtering.wait-timeout` (default 20s).
 
+=== Statistics
+
+Each table's row count is its index's document count (`num_docs` in `FT.INFO`, cached with the table), so Trino's cost-based optimizer can order joins and broadcast the smaller side of a join.
+Filters that Redis evaluates aren't estimated, so a filtered table's row count is its whole index's.
+
 === Known limitations
 
 Queries known to return wrong results or fail are tracked as https://github.com/{project-owner}/{project-name}/issues?q=is%3Aissue+is%3Aopen+label%3Abug[open issues labeled bug].

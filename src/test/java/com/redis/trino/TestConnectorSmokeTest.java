@@ -188,9 +188,12 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 		// The summary row, with no column name, has the row count
 		assertThat(computeActual("SHOW STATS FOR orders").getMaterializedRows().stream()
 				.filter(row -> row.getField(0) == null).findFirst().orElseThrow().getField(4)).isEqualTo(15000.0);
-		// With row counts, Trino broadcasts the smaller side of a join instead of repartitioning both
-		assertThat(computeActual("EXPLAIN (TYPE DISTRIBUTED) SELECT count(*) FROM orders o JOIN customer c "
-				+ "ON o.custkey = c.custkey").getOnlyValue().toString()).contains("REPLICATED");
+		// With row counts, Trino's default join distribution broadcasts the smaller side of a join instead of
+		// repartitioning both. The test session partitions every join.
+		Session automatic = Session.builder(getSession()).setSystemProperty("join_distribution_type", "AUTOMATIC")
+				.build();
+		assertThat(computeActual(automatic, "EXPLAIN (TYPE DISTRIBUTED) SELECT count(*) FROM orders o JOIN customer c "
+				+ "ON o.custkey = c.custkey").getOnlyValue().toString()).contains("distribution = REPLICATED");
 	}
 
 	private long physicalInputPositions(MaterializedResultWithPlan result) {

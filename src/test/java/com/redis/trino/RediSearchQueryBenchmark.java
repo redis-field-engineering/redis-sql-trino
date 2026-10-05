@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import com.google.common.collect.ImmutableMap;
 
 import io.airlift.log.Logger;
+import io.trino.Session;
 import io.trino.testing.DistributedQueryRunner;
 import io.trino.testing.MaterializedResult;
 
@@ -71,24 +72,27 @@ public class RediSearchQueryBenchmark {
 			server.getConnection().sync().flushall();
 			try (DistributedQueryRunner queryRunner = RediSearchQueryRunner.createRediSearchQueryRunner(server,
 					CUSTOMER, LINE_ITEM, NATION, ORDERS, REGION)) {
+				// Trino's default, which the test query runner replaces with partitioning every join
+				Session session = Session.builder(queryRunner.getDefaultSession())
+						.setSystemProperty("join_distribution_type", "AUTOMATIC").build();
 				Map<String, Result> results = new LinkedHashMap<>();
 				for (Map.Entry<String, String> query : QUERIES.entrySet()) {
-					results.put(query.getKey(), run(queryRunner, query.getValue()));
+					results.put(query.getKey(), run(queryRunner, session, query.getValue()));
 				}
 				write(results);
 			}
 		}
 	}
 
-	private static Result run(DistributedQueryRunner queryRunner, String sql) {
+	private static Result run(DistributedQueryRunner queryRunner, Session session, String sql) {
 		long rows = 0;
 		for (int i = 0; i < WARMUP; i++) {
-			rows = queryRunner.execute(sql).getRowCount();
+			rows = queryRunner.execute(session, sql).getRowCount();
 		}
 		double[] millis = new double[ITERATIONS];
 		for (int i = 0; i < ITERATIONS; i++) {
 			long start = System.nanoTime();
-			MaterializedResult result = queryRunner.execute(sql);
+			MaterializedResult result = queryRunner.execute(session, sql);
 			millis[i] = (System.nanoTime() - start) / 1_000_000.0;
 			assertThat(result.getRowCount()).as("row count of %s", sql).isEqualTo(rows);
 		}
