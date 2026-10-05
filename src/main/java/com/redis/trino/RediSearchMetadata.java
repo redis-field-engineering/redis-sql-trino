@@ -39,6 +39,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.UnaryOperator;
@@ -86,6 +87,8 @@ import io.trino.spi.expression.Variable;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.statistics.ComputedStatistics;
+import io.trino.spi.statistics.Estimate;
+import io.trino.spi.statistics.TableStatistics;
 import io.trino.spi.type.Type;
 
 public class RediSearchMetadata implements ConnectorMetadata {
@@ -283,6 +286,28 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			List<ConnectorTableHandle> sourceTableHandles, Collection<Slice> fragments,
 			Collection<ComputedStatistics> computedStatistics) {
 		// Do nothing
+	}
+
+	/**
+	 * The number of documents in the index, from the cached FT.INFO, so that the cost-based optimizer can order joins
+	 * and choose how to distribute them. Filters pushed down to Redis aren't estimated.
+	 */
+	@Override
+	public TableStatistics getTableStatistics(ConnectorSession session, ConnectorTableHandle tableHandle) {
+		RediSearchTableHandle handle = (RediSearchTableHandle) tableHandle;
+		// FT.INFO doesn't tell how many groups an aggregation returns
+		if (!handle.getTermAggregations().isEmpty() || !handle.getMetricAggregations().isEmpty()) {
+			return TableStatistics.empty();
+		}
+		OptionalLong documents = rediSearchSession.getTable(handle.getSchemaTableName()).getIndexInfo().getNumDocs();
+		if (documents.isEmpty()) {
+			return TableStatistics.empty();
+		}
+		long rows = documents.getAsLong();
+		if (handle.getLimit().isPresent()) {
+			rows = Math.min(rows, handle.getLimit().getAsLong());
+		}
+		return TableStatistics.builder().setRowCount(Estimate.of(rows)).build();
 	}
 
 	@Override
