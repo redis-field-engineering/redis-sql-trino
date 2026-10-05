@@ -31,6 +31,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import com.google.common.collect.ImmutableList;
 
@@ -96,15 +97,22 @@ public class RediSearchIndexInfo {
 	private final boolean indexing;
 	private final double percentIndexed;
 	private final boolean customStopwords;
+	private final OptionalLong numDocs;
 
 	public RediSearchIndexInfo(Optional<KeyType> keyType, List<String> prefixes, List<Field> fields, boolean indexing,
 			double percentIndexed, boolean customStopwords) {
+		this(keyType, prefixes, fields, indexing, percentIndexed, customStopwords, OptionalLong.empty());
+	}
+
+	public RediSearchIndexInfo(Optional<KeyType> keyType, List<String> prefixes, List<Field> fields, boolean indexing,
+			double percentIndexed, boolean customStopwords, OptionalLong numDocs) {
 		this.keyType = requireNonNull(keyType, "keyType is null");
 		this.prefixes = ImmutableList.copyOf(requireNonNull(prefixes, "prefixes is null"));
 		this.fields = ImmutableList.copyOf(requireNonNull(fields, "fields is null"));
 		this.indexing = indexing;
 		this.percentIndexed = percentIndexed;
 		this.customStopwords = customStopwords;
+		this.numDocs = requireNonNull(numDocs, "numDocs is null");
 	}
 
 	public Optional<KeyType> getKeyType() {
@@ -141,6 +149,13 @@ public class RediSearchIndexInfo {
 		return customStopwords;
 	}
 
+	/**
+	 * @return the number of documents in the index, if FT.INFO lists it
+	 */
+	public OptionalLong getNumDocs() {
+		return numDocs;
+	}
+
 	public static RediSearchIndexInfo parse(List<Object> reply) {
 		Map<String, Object> info = toMap(reply);
 		Optional<KeyType> keyType = Optional.empty();
@@ -170,7 +185,9 @@ public class RediSearchIndexInfo {
 		double percentIndexed = number(info.get("percent_indexed"), 1);
 		// Only listed for an index created with STOPWORDS
 		boolean customStopwords = info.containsKey("stopwords_list");
-		return new RediSearchIndexInfo(keyType, prefixes, fields, indexing, percentIndexed, customStopwords);
+		double numDocs = number(info.get("num_docs"), -1);
+		return new RediSearchIndexInfo(keyType, prefixes, fields, indexing, percentIndexed, customStopwords,
+				numDocs < 0 ? OptionalLong.empty() : OptionalLong.of((long) numDocs));
 	}
 
 	// FT.INFO lists each TAG field's SEPARATOR, empty when values aren't split; without one, assume the default
