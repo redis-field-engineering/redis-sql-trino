@@ -24,6 +24,7 @@
 package com.redis.trino;
 
 import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
@@ -45,6 +46,10 @@ public class RediSearchConfig {
     public static final long DEFAULT_CURSOR_COUNT = 1000;
 
     public static final Duration DEFAULT_TABLE_CACHE_REFRESH = Duration.ofMinutes(1);
+
+    // As long as Trino's JDBC connectors wait by default
+    public static final io.airlift.units.Duration DEFAULT_DYNAMIC_FILTERING_WAIT_TIMEOUT = new io.airlift.units.Duration(
+            20, TimeUnit.SECONDS);
 
     private String defaultSchema = DEFAULT_SCHEMA;
 
@@ -73,6 +78,8 @@ public class RediSearchConfig {
     private long cursorCount = DEFAULT_CURSOR_COUNT;
 
     private long tableCacheRefresh = DEFAULT_TABLE_CACHE_REFRESH.toSeconds();
+    private boolean dynamicFilteringEnabled = true;
+    private io.airlift.units.Duration dynamicFilteringWaitTimeout = DEFAULT_DYNAMIC_FILTERING_WAIT_TIMEOUT;
 
     @Min(0)
     public long getCursorCount() {
@@ -116,6 +123,29 @@ public class RediSearchConfig {
 
     public long getTableCacheRefresh() {
         return tableCacheRefresh;
+    }
+
+    public boolean isDynamicFilteringEnabled() {
+        return dynamicFilteringEnabled;
+    }
+
+    @Config("redisearch.dynamic-filtering.enabled")
+    @ConfigDescription("Add the join keys a join's build side collects to the query that scans the other side")
+    public RediSearchConfig setDynamicFilteringEnabled(boolean dynamicFilteringEnabled) {
+        this.dynamicFilteringEnabled = dynamicFilteringEnabled;
+        return this;
+    }
+
+    @NotNull
+    public io.airlift.units.Duration getDynamicFilteringWaitTimeout() {
+        return dynamicFilteringWaitTimeout;
+    }
+
+    @Config("redisearch.dynamic-filtering.wait-timeout")
+    @ConfigDescription("How long a scan waits for the build side of a join to collect its dynamic filters")
+    public RediSearchConfig setDynamicFilteringWaitTimeout(io.airlift.units.Duration dynamicFilteringWaitTimeout) {
+        this.dynamicFilteringWaitTimeout = dynamicFilteringWaitTimeout;
+        return this;
     }
 
     @NotNull

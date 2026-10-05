@@ -95,6 +95,7 @@ import io.trino.spi.connector.ColumnMetadata;
 import io.trino.spi.connector.SchemaNotFoundException;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.TableNotFoundException;
+import io.trino.spi.predicate.Domain;
 import io.trino.spi.type.BigintType;
 import io.trino.spi.type.BooleanType;
 import io.trino.spi.type.CharType;
@@ -303,6 +304,22 @@ public class RediSearchSession {
                 throw e;
             }
         }
+    }
+
+    /**
+     * Whether Redis can evaluate a column's domain in the table's query, which then matches every row in the domain,
+     * and maybe others.
+     */
+    public boolean canQuery(RediSearchTableHandle table, RediSearchColumnHandle column, Domain domain) {
+        return column.isSupportsPredicates() && RediSearchQueryBuilder.isSupported(column, domain)
+                && !hasCustomStopwords(table, column);
+    }
+
+    // TEXT queries drop the default stop words, which would match nothing; with its own list, a value's remaining terms
+    // could all be stop words
+    private boolean hasCustomStopwords(RediSearchTableHandle table, RediSearchColumnHandle column) {
+        return column.getFieldType() == RediSearchFieldType.TEXT
+                && getTable(table.getSchemaTableName()).getIndexInfo().hasCustomStopwords();
     }
 
     /**

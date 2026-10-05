@@ -23,6 +23,7 @@
  */
 package com.redis.trino;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 
@@ -41,16 +42,39 @@ import io.trino.spi.connector.FixedSplitSource;
 public class RediSearchSplitManager implements ConnectorSplitManager {
 
 	private final List<HostAddress> addresses;
+	private final RediSearchConfig config;
 
 	@Inject
 	public RediSearchSplitManager(RediSearchSession session) {
 		this.addresses = session.getAddresses();
+		this.config = session.getConfig();
 	}
 
 	@Override
 	public ConnectorSplitSource getSplits(ConnectorTransactionHandle transaction, ConnectorSession session,
 			ConnectorTableHandle table, Set<ColumnHandle> dynamicFilterColumns, Constraint constraint) {
 		RediSearchSplit split = new RediSearchSplit(addresses);
-		return new FixedSplitSource(List.of(split));
+		if (!config.isDynamicFilteringEnabled()
+				|| !acceptsDynamicFilter((RediSearchTableHandle) table, dynamicFilterColumns)) {
+			return new FixedSplitSource(split);
+		}
+		long waitTimeoutMillis = config.getDynamicFilteringWaitTimeout().toMillis();
+		// Trino holds the split back until the dynamic filters are collected, or the wait times out
+		return new FixedSplitSource(split) {
+			@Override
+			public long getRequestedDynamicFilterWaitTimeoutMillis() {
+				return waitTimeoutMillis;
+			}
+		};
+	}
+
+	/**
+	 * Whether a scan of the table can add a join's dynamic filter on any of the columns to its query: one that reads
+	 * documents, rather than groups or a limited number of them, and a column Redis can query.
+	 */
+	static boolean acceptsDynamicFilter(RediSearchTableHandle table, Collection<ColumnHandle> columns) {
+		return table.getLimit().isEmpty() && table.getTermAggregations().isEmpty()
+				&& table.getMetricAggregations().isEmpty() && columns.stream().map(RediSearchColumnHandle.class::cast)
+						.anyMatch(RediSearchColumnHandle::isSupportsPredicates);
 	}
 }

@@ -6,12 +6,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.ImmutableMap;
 
 import io.airlift.configuration.ConfigurationFactory;
+import io.airlift.units.Duration;
 
 public class TestConfig {
 
@@ -22,7 +24,9 @@ public class TestConfig {
 				.setCaseInsensitiveNames(false)
 				.setCursorCount(RediSearchConfig.DEFAULT_CURSOR_COUNT)
 				.setTableCacheRefresh(RediSearchConfig.DEFAULT_TABLE_CACHE_REFRESH.toSeconds()).setCluster(false)
-				.setCaCertPath(null).setKeyPassword(null).setKeyPath(null).setCertPath(null));
+				.setCaCertPath(null).setKeyPassword(null).setKeyPath(null).setCertPath(null)
+				.setDynamicFilteringEnabled(true)
+				.setDynamicFilteringWaitTimeout(RediSearchConfig.DEFAULT_DYNAMIC_FILTERING_WAIT_TIMEOUT));
 	}
 
 	@Test
@@ -30,7 +34,9 @@ public class TestConfig {
 		String uri = "redis://redis.example.com:12000";
 		String defaultSchema = "myschema";
 		Map<String, String> properties = ImmutableMap.<String, String>builder().put("redisearch.uri", uri)
-				.put("redisearch.default-schema-name", defaultSchema).put("redisearch.resp2", "true").buildOrThrow();
+				.put("redisearch.default-schema-name", defaultSchema).put("redisearch.resp2", "true")
+				.put("redisearch.dynamic-filtering.enabled", "false").put("redisearch.dynamic-filtering.wait-timeout", "3s")
+				.buildOrThrow();
 
 		ConfigurationFactory configurationFactory = new ConfigurationFactory(properties);
 		RediSearchConfig config = configurationFactory.build(RediSearchConfig.class);
@@ -40,6 +46,8 @@ public class TestConfig {
 		assertThat(config.getDefaultSchema()).isEqualTo(expected.getDefaultSchema());
 		assertThat(config.getUri()).isEqualTo(expected.getUri());
 		assertThat(config.isResp2()).isTrue();
+		assertThat(config.isDynamicFilteringEnabled()).isFalse();
+		assertThat(config.getDynamicFilteringWaitTimeout()).isEqualTo(new Duration(3, TimeUnit.SECONDS));
 	}
 
 	@Test

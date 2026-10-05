@@ -320,8 +320,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			RediSearchColumnHandle column = (RediSearchColumnHandle) entry.getKey();
 			Domain domain = entry.getValue();
 
-			if (column.isSupportsPredicates() && RediSearchQueryBuilder.isSupported(column, domain)
-					&& !hasCustomStopwords(handle, column)) {
+			if (rediSearchSession.canQuery(handle, column, domain)) {
 				supported.put(column, domain);
 				if (!RediSearchQueryBuilder.isExact(column, domain)) {
 					// Redis returns a superset of the matching rows, which Trino filters
@@ -343,13 +342,6 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 		return Optional.of(new ConstraintApplicationResult<>(handle, TupleDomain.withColumnDomains(unsupported),
 				constraint.getExpression(), false));
-	}
-
-	// TEXT queries drop the default stop words, which would match nothing; with its own list, a value's remaining terms
-	// could all be stop words
-	private boolean hasCustomStopwords(RediSearchTableHandle handle, RediSearchColumnHandle column) {
-		return column.getFieldType() == RediSearchFieldType.TEXT
-				&& rediSearchSession.getTable(handle.getSchemaTableName()).getIndexInfo().hasCustomStopwords();
 	}
 
 	@Override
