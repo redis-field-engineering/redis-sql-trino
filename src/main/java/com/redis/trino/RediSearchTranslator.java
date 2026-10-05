@@ -127,24 +127,32 @@ public class RediSearchTranslator {
 		Optional<RediSearchIndexInfo.KeyType> keyType = indexInfo.flatMap(RediSearchIndexInfo::getKeyType);
 		boolean scan = groupBy.isEmpty();
 		boolean json = scan && keyType.filter(RediSearchIndexInfo.KeyType.JSON::equals).isPresent();
-		boolean loadAll = scan && keyType.filter(RediSearchIndexInfo.KeyType.HASH::equals).isPresent()
-				&& columns.stream().anyMatch(RediSearchTranslator::isRoundedByRedis);
+		boolean hashScan = scan && keyType.filter(RediSearchIndexInfo.KeyType.HASH::equals).isPresent();
+		// LOAD * returns every field of each hash, so only scans that can't tell a rounded value from an exact one use it
+		boolean loadAll = hashScan && columns.stream().anyMatch(RediSearchTranslator::isRoundedUndetectably);
 		AggregateArgs.Builder args = AggregateArgs.builder().dialect(json ? JSON_DIALECT : DIALECT);
 		// Lettuce writes LOAD before the other steps, so FILTER compares the loaded values
 		Set<String> loads = new LinkedHashSet<>();
 		loads.add(RediSearchBuiltinField.KEY.getName());
 		loads.addAll(filters.keySet());
 		Map<String, String> sources = new HashMap<>();
+		Map<String, String> exactSources = new HashMap<>();
 		Map<String, RediSearchIndexInfo.Field> fields = indexInfo.map(RediSearchIndexInfo::getFields).orElse(List.of())
 				.stream().collect(toMap(RediSearchIndexInfo.Field::getAttribute, identity(), (first, second) -> first));
 		for (RediSearchColumnHandle column : columns) {
+			Optional<String> field = Optional.ofNullable(fields.get(column.getName()))
+					.map(RediSearchIndexInfo.Field::getIdentifier);
 			if (loadAll && isRoundedByRedis(column)) {
 				// Loaded by name, it would replace the value LOAD * returns under the hash field's name
-				Optional.ofNullable(fields.get(column.getName())).map(RediSearchIndexInfo.Field::getIdentifier)
-						.filter(field -> !field.equals(column.getName()))
-						.ifPresent(field -> sources.put(column.getName(), field));
+				field.filter(identifier -> !identifier.equals(column.getName()))
+						.ifPresent(identifier -> sources.put(column.getName(), identifier));
 			} else {
 				loads.add(column.getName());
+				if (hashScan && isRoundedByRedis(column)) {
+					// A BIGINT: Redis returns an integer in full, so a value it could have rounded is 2^53 or more,
+					// and is read again from the hash
+					exactSources.put(column.getName(), field.orElse(column.getName()));
+				}
 			}
 		}
 		loads.forEach(args::load);
@@ -163,14 +171,22 @@ public class RediSearchTranslator {
 		AggregateArgs aggregateArgs = loadAll ? new LoadAllArgs(args.build()) : args.build();
 		return new Aggregation(table.getIndex(), query, filters.values(), aggregateArgs, global,
 				new RediSearchRowReader(columns.stream().map(RediSearchColumnHandle::getName).toList(), sources,
-						jsonArrays, table.getMetricAggregations()));
+						exactSources, jsonArrays, table.getMetricAggregations()));
 	}
 
 	// Values of these types can lose digits formatted as doubles. Integers of the other types are exact as doubles,
 	// and REAL values have fewer than 12 significant digits.
 	private static boolean isRoundedByRedis(RediSearchColumnHandle column) {
-		return column.getFieldType() == RediSearchFieldType.NUMERIC && column.isSupportsPredicates()
-				&& (column.getType() == DOUBLE || column.getType() == BIGINT || column.getType() instanceof DecimalType);
+		return isRoundedUndetectably(column) || (isNumericField(column) && column.getType() == BIGINT);
+	}
+
+	// A rounded DOUBLE or DECIMAL can't be told from an exact value, unlike a BIGINT
+	private static boolean isRoundedUndetectably(RediSearchColumnHandle column) {
+		return isNumericField(column) && (column.getType() == DOUBLE || column.getType() instanceof DecimalType);
+	}
+
+	private static boolean isNumericField(RediSearchColumnHandle column) {
+		return column.getFieldType() == RediSearchFieldType.NUMERIC && column.isSupportsPredicates();
 	}
 
 	/**

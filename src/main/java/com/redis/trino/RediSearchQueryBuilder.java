@@ -138,7 +138,7 @@ public class RediSearchQueryBuilder {
 				&& (range.isHighUnbounded() || isExactAsDouble((Long) range.getHighBoundedValue()));
 	}
 
-	private static boolean isExactAsDouble(long value) {
+	static boolean isExactAsDouble(long value) {
 		return -MAX_EXACT_LONG < value && value < MAX_EXACT_LONG;
 	}
 

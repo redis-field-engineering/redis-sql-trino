@@ -16,6 +16,7 @@ import io.lettuce.core.search.arguments.CreateArgs.TargetType;
 import io.lettuce.core.search.arguments.NumericFieldArgs;
 import io.lettuce.core.search.arguments.TagFieldArgs;
 import io.lettuce.core.search.arguments.TextFieldArgs;
+import io.trino.spi.type.BigintType;
 import io.trino.sql.planner.plan.FilterNode;
 import io.trino.testing.AbstractTestQueryFramework;
 import io.trino.testing.QueryRunner;
@@ -147,6 +148,31 @@ public class TestWrites extends AbstractTestQueryFramework {
 		assertThat(query("SELECT __key, d FROM exact WHERE d < 0.1 LIMIT 5")).isFullyPushedDown()
 				.matches("VALUES (VARCHAR 'exact:2', DOUBLE '1.0E-7')");
 		assertThat(query("SELECT style FROM exact WHERE sorted = 229577310901.21")).matches("VALUES VARCHAR 'Wheat'");
+	}
+
+	@Test
+	public void testBigintValuesAsStored() {
+		assertUpdate("CREATE TABLE big (id varchar, b bigint)");
+		try {
+			assertUpdate("INSERT INTO big VALUES ('max', 9223372036854775807), ('min', -9223372036854775808), "
+					+ "('above', 9007199254740993), ('below', -9007199254740993), ('exact', 9007199254740991), "
+					+ "('small', -7), ('none', NULL)", 7);
+			// Loaded by name, and read again from the hash where Redis may have rounded the value
+			assertThat(query("SELECT id, b FROM big")).matches("VALUES (VARCHAR 'max', BIGINT '9223372036854775807'), "
+					+ "('min', BIGINT '-9223372036854775808'), ('above', BIGINT '9007199254740993'), "
+					+ "('below', BIGINT '-9007199254740993'), ('exact', BIGINT '9007199254740991'), ('small', BIGINT '-7'), "
+					+ "('none', CAST(NULL AS bigint))");
+		} finally {
+			assertUpdate("DROP TABLE big");
+		}
+		// A field indexed AS another name is read again from its hash field
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		redis.ftCreate("bigalias", CreateArgs.builder().withPrefix("bigalias:").build(),
+				List.of(NumericFieldArgs.builder().name("raw_b").as("b").build()));
+		RediSearchColumnTypes.write(redis, "bigalias", Map.of("b", BigintType.BIGINT));
+		redisearch.awaitIndexed("bigalias");
+		redis.hset("bigalias:1", Map.of("raw_b", "9007199254740993"));
+		assertThat(query("SELECT b FROM bigalias")).matches("VALUES BIGINT '9007199254740993'");
 	}
 
 	@Test

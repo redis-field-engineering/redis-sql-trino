@@ -201,9 +201,44 @@ public class TestQueryBuilder {
 		// INTEGER values are exact as doubles
 		assertThat(commandString(translator.aggregate(table, List.of(style, ibu), Optional.of(hashIndex()))))
 				.startsWith("LOAD 3 __key style ibu ");
+		// With LOAD *, a BIGINT is read as stored too
+		RediSearchColumnHandle id = numeric("id", BIGINT);
+		assertThat(commandString(translator.aggregate(table, List.of(id, abv), Optional.of(hashIndex()))))
+				.startsWith("LOAD * LOAD 2 __key style ");
 		// Without FT.INFO, columns are loaded by name
 		assertThat(commandString(translator.aggregate(table, List.of(style, abv), Optional.empty())))
 				.startsWith("LOAD 3 __key style abv ");
+	}
+
+	@Test
+	public void testBigintLoadedByName() {
+		RediSearchColumnHandle id = numeric("id", BIGINT);
+		RediSearchColumnHandle ibu = numeric("ibu", IntegerType.INTEGER);
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers");
+		RediSearchIndexInfo index = new RediSearchIndexInfo(Optional.of(RediSearchIndexInfo.KeyType.HASH), List.of(),
+				List.of(new RediSearchIndexInfo.Field("id", "raw_id", RediSearchFieldType.NUMERIC, Optional.empty()),
+						new RediSearchIndexInfo.Field("ibu", "ibu", RediSearchFieldType.NUMERIC, Optional.empty())),
+				false, 1, false);
+		// Redis returns an integer in full, so a BIGINT is loaded by name rather than with every field of the hash
+		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
+				List.of(ibu, id), Optional.of(index));
+		assertThat(commandString(aggregation)).isEqualTo("LOAD 3 __key ibu id WITHCURSOR COUNT 1000 DIALECT 2");
+		// and read again from its hash field if Redis may have rounded it
+		RediSearchRowReader reader = aggregation.getReader();
+		assertThat(reader.getExactPositions()).containsExactly(1);
+		assertThat(reader.getExactField(1)).isEqualTo("raw_id");
+		assertThat(RediSearchRowReader.isPossiblyRounded("9007199254740991")).isFalse();
+		assertThat(RediSearchRowReader.isPossiblyRounded("-9007199254740991")).isFalse();
+		assertThat(RediSearchRowReader.isPossiblyRounded("42")).isFalse();
+		assertThat(RediSearchRowReader.isPossiblyRounded("9007199254740992")).isTrue();
+		assertThat(RediSearchRowReader.isPossiblyRounded("-9007199254740992")).isTrue();
+		assertThat(RediSearchRowReader.isPossiblyRounded("9.22337203685e+18")).isTrue();
+		assertThat(RediSearchRowReader.isPossiblyRounded("42.5")).isTrue();
+		// Aggregations and JSON indexes aren't read again
+		RediSearchIndexInfo json = new RediSearchIndexInfo(Optional.of(RediSearchIndexInfo.KeyType.JSON), List.of(),
+				index.getFields(), false, 1, false);
+		assertThat(new RediSearchTranslator(new RediSearchConfig()).aggregate(table, List.of(ibu, id), Optional.of(json))
+				.getReader().getExactPositions()).isEmpty();
 	}
 
 	@Test
@@ -229,7 +264,7 @@ public class TestQueryBuilder {
 				"c");
 		RediSearchAggregation sum = new RediSearchAggregation(RediSearchAggregation.SUM, DoubleType.DOUBLE,
 				Optional.of(numeric("abv", DoubleType.DOUBLE)), "s");
-		RediSearchRowReader reader = new RediSearchRowReader(List.of("style", "c", "s"), Map.of(), Set.of(),
+		RediSearchRowReader reader = new RediSearchRowReader(List.of("style", "c", "s"), Map.of(), Map.of(), Set.of(),
 				List.of(count, sum));
 		// SUM over no values is nan, which SQL represents as null
 		assertThat(reader.read(Map.of("style", value("Wheat"), "c", value("2"), "s", value("nan"))))

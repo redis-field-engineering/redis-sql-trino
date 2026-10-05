@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.IntStream;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
@@ -51,28 +52,36 @@ public class RediSearchRowReader {
 	// The field each column is read from
 	private final String[] fields;
 	private final boolean[] jsonArrays;
+	// The hash field to read each BIGINT column's value from again, if Redis may have rounded it
+	private final String[] exactFields;
+	private final int[] exactPositions;
 	// The reducer whose result each column is, if any
 	private final RediSearchAggregation[] metrics;
 
 	/**
 	 * @param columns    the columns to read, in the order {@link #read} returns their values
 	 * @param sources    the field each column is read from, for columns not read from the field of their name
+	 * @param exactSources the hash field to read each BIGINT column loaded by name from again, if Redis may have
+	 *                   rounded the value it returned
 	 * @param jsonArrays columns whose values come as JSON arrays of the values at their JSON path, as DIALECT 3
 	 *                   returns them
 	 * @param metrics    the reducers whose results the aggregation returns, under their aliases
 	 */
-	public RediSearchRowReader(List<String> columns, Map<String, String> sources, Set<String> jsonArrays,
-			List<RediSearchAggregation> metrics) {
+	public RediSearchRowReader(List<String> columns, Map<String, String> sources, Map<String, String> exactSources,
+			Set<String> jsonArrays, List<RediSearchAggregation> metrics) {
 		this.columns = ImmutableList.copyOf(requireNonNull(columns, "columns is null"));
 		requireNonNull(sources, "sources is null");
+		requireNonNull(exactSources, "exactSources is null");
 		requireNonNull(jsonArrays, "jsonArrays is null");
 		requireNonNull(metrics, "metrics is null");
 		this.fields = new String[this.columns.size()];
 		this.jsonArrays = new boolean[this.columns.size()];
 		this.metrics = new RediSearchAggregation[this.columns.size()];
+		this.exactFields = new String[this.columns.size()];
 		for (int i = 0; i < fields.length; i++) {
 			String column = this.columns.get(i);
 			fields[i] = sources.getOrDefault(column, column);
+			exactFields[i] = exactSources.get(column);
 			this.jsonArrays[i] = jsonArrays.contains(column);
 			for (RediSearchAggregation metric : metrics) {
 				if (metric.getAlias().equals(column)) {
@@ -80,10 +89,37 @@ public class RediSearchRowReader {
 				}
 			}
 		}
+		this.exactPositions = IntStream.range(0, exactFields.length).filter(i -> exactFields[i] != null).toArray();
 	}
 
 	public List<String> getColumns() {
 		return columns;
+	}
+
+	/**
+	 * @return the positions of the columns whose values {@link #isPossiblyRounded} checks
+	 */
+	public int[] getExactPositions() {
+		return exactPositions;
+	}
+
+	/**
+	 * Whether Redis may have rounded a BIGINT value it returned: it formats an integer in full, so only one of 2^53 or
+	 * more, or one that isn't an integer at all, may differ from the value stored.
+	 */
+	public static boolean isPossiblyRounded(String value) {
+		try {
+			return !RediSearchQueryBuilder.isExactAsDouble(Long.parseLong(value));
+		} catch (NumberFormatException e) {
+			return true;
+		}
+	}
+
+	/**
+	 * @return the hash field to read the value of the column at a position in {@link #getExactPositions} from
+	 */
+	public String getExactField(int position) {
+		return exactFields[position];
 	}
 
 	/**

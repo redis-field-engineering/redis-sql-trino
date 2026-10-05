@@ -24,6 +24,7 @@
 package com.redis.trino;
 
 import static com.google.common.base.Throwables.throwIfInstanceOf;
+import static com.google.common.base.Throwables.throwIfUnchecked;
 import static com.google.common.base.Verify.verify;
 import static com.redis.trino.RediSearchErrorCode.REDISEARCH_INDEX_NOT_READY;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
@@ -45,6 +46,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -502,7 +504,7 @@ public class RediSearchSession {
 
     /**
      * Starts reading the cursor's next batch. Pass the reply to {@link #result} to read its rows, on the caller's
-     * thread rather than the connection's.
+     * thread rather than the connection's, which {@link #result} may wait on.
      */
     public CompletableFuture<AggregationReply<String>> cursorReadAsync(RediSearchTableHandle table, Cursor cursor) {
         return cursorCommands(cursor).readAsync(table, cursor);
@@ -511,12 +513,29 @@ public class RediSearchSession {
     /**
      * @param cursor the cursor the reply was read from, if any
      */
-    public static AggregateResult result(RediSearchRowReader reader, Optional<Cursor> cursor,
-            AggregationReply<String> reply) {
+    public AggregateResult result(RediSearchRowReader reader, Optional<Cursor> cursor, AggregationReply<String> reply) {
         List<String[]> rows = new ArrayList<>();
+        List<CompletableFuture<?>> exactReads = new ArrayList<>();
         for (SearchReply<String> searchReply : reply.getReplies()) {
             for (SearchReply.SearchResult<String> result : searchReply.getResults()) {
-                rows.add(reader.read(result.getFields()));
+                String[] row = reader.read(result.getFields());
+                for (int position : reader.getExactPositions()) {
+                    if (row[position] != null && RediSearchRowReader.isPossiblyRounded(row[position])) {
+                        // Pipelined, and rare: only values of 2^53 or more
+                        String key = result.getFields().get(RediSearchBuiltinField.KEY.getName()).asString();
+                        exactReads.add(async.hget(key, reader.getExactField(position)).toCompletableFuture()
+                                .thenAccept(value -> row[position] = value));
+                    }
+                }
+                rows.add(row);
+            }
+        }
+        if (!exactReads.isEmpty()) {
+            try {
+                CompletableFuture.allOf(exactReads.toArray(CompletableFuture[]::new)).join();
+            } catch (CompletionException e) {
+                throwIfUnchecked(e.getCause());
+                throw e;
             }
         }
         // Cursor ID 0 means there are no more rows

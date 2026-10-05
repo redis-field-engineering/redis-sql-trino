@@ -118,7 +118,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 				if (!nextBatch.isDone()) {
 					break;
 				}
-				start(RediSearchSession.result(reader, cursor, join(nextBatch)));
+				start(session.result(reader, cursor, join(nextBatch)));
 				continue;
 			}
 			String[] row = rows.next();
