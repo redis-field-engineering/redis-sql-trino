@@ -27,68 +27,134 @@ import static java.util.Objects.requireNonNull;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.IntStream;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableList;
 
 import io.lettuce.core.search.FieldValue;
 
 /**
- * Reads the values of an FT.AGGREGATE row by column name, from the fields the scan loaded them as.
+ * Reads the values of an FT.AGGREGATE row in column order, from the fields the scan loaded them as. Other fields, such
+ * as the rest of a hash loaded with LOAD *, are skipped.
  */
 public class RediSearchRowReader {
 
-	/**
-	 * Reads each column from the field of its name, as returned.
-	 */
-	public static final RediSearchRowReader BY_NAME = new RediSearchRowReader(Map.of(), Set.of());
-
 	private static final JsonFactory JSON = new JsonFactory();
 
-	private final Map<String, String> sources;
-	private final Set<String> jsonArrays;
+	private final List<String> columns;
+	// The field each column is read from
+	private final String[] fields;
+	private final boolean[] jsonArrays;
+	// The hash field to read each BIGINT column's value from again, if Redis may have rounded it
+	private final String[] exactFields;
+	private final int[] exactPositions;
+	// The reducer whose result each column is, if any
+	private final RediSearchAggregation[] metrics;
 
 	/**
+	 * @param columns    the columns to read, in the order {@link #read} returns their values
 	 * @param sources    the field each column is read from, for columns not read from the field of their name
+	 * @param exactSources the hash field to read each BIGINT column loaded by name from again, if Redis may have
+	 *                   rounded the value it returned
 	 * @param jsonArrays columns whose values come as JSON arrays of the values at their JSON path, as DIALECT 3
 	 *                   returns them
+	 * @param metrics    the reducers whose results the aggregation returns, under their aliases
 	 */
-	public RediSearchRowReader(Map<String, String> sources, Set<String> jsonArrays) {
-		this.sources = ImmutableMap.copyOf(requireNonNull(sources, "sources is null"));
-		this.jsonArrays = ImmutableSet.copyOf(requireNonNull(jsonArrays, "jsonArrays is null"));
-	}
-
-	public Map<String, String> read(Map<String, FieldValue> fields) {
-		Map<String, String> row = new HashMap<>();
-		for (Map.Entry<String, FieldValue> field : fields.entrySet()) {
-			FieldValue value = field.getValue();
-			if (value != null && !value.isNull()) {
-				row.put(field.getKey(), value.asString());
+	public RediSearchRowReader(List<String> columns, Map<String, String> sources, Map<String, String> exactSources,
+			Set<String> jsonArrays, List<RediSearchAggregation> metrics) {
+		this.columns = ImmutableList.copyOf(requireNonNull(columns, "columns is null"));
+		requireNonNull(sources, "sources is null");
+		requireNonNull(exactSources, "exactSources is null");
+		requireNonNull(jsonArrays, "jsonArrays is null");
+		requireNonNull(metrics, "metrics is null");
+		this.fields = new String[this.columns.size()];
+		this.jsonArrays = new boolean[this.columns.size()];
+		this.metrics = new RediSearchAggregation[this.columns.size()];
+		this.exactFields = new String[this.columns.size()];
+		for (int i = 0; i < fields.length; i++) {
+			String column = this.columns.get(i);
+			fields[i] = sources.getOrDefault(column, column);
+			exactFields[i] = exactSources.get(column);
+			this.jsonArrays[i] = jsonArrays.contains(column);
+			for (RediSearchAggregation metric : metrics) {
+				if (metric.getAlias().equals(column)) {
+					this.metrics[i] = metric;
+				}
 			}
 		}
-		sources.forEach((column, source) -> put(row, column, Optional.ofNullable(row.get(source))));
-		for (String column : jsonArrays) {
-			String array = row.get(column);
-			if (array != null) {
-				put(row, column, firstValue(array));
-			}
-		}
-		return row;
+		this.exactPositions = IntStream.range(0, exactFields.length).filter(i -> exactFields[i] != null).toArray();
 	}
 
-	private static void put(Map<String, String> row, String column, Optional<String> value) {
-		if (value.isPresent()) {
-			row.put(column, value.get());
-		} else {
-			row.remove(column);
+	public List<String> getColumns() {
+		return columns;
+	}
+
+	/**
+	 * @return the positions of the columns whose values {@link #isPossiblyRounded} checks
+	 */
+	public int[] getExactPositions() {
+		return exactPositions;
+	}
+
+	/**
+	 * Whether Redis may have rounded a BIGINT value it returned: it formats an integer in full, so only one of 2^53 or
+	 * more, or one that isn't an integer at all, may differ from the value stored.
+	 */
+	public static boolean isPossiblyRounded(String value) {
+		try {
+			return !RediSearchQueryBuilder.isExactAsDouble(Long.parseLong(value));
+		} catch (NumberFormatException e) {
+			return true;
 		}
+	}
+
+	/**
+	 * @return the hash field to read the value of the column at a position in {@link #getExactPositions} from
+	 */
+	public String getExactField(int position) {
+		return exactFields[position];
+	}
+
+	/**
+	 * @return the value of each column, null for none
+	 */
+	public String[] read(Map<String, FieldValue> row) {
+		String[] values = new String[fields.length];
+		for (int i = 0; i < fields.length; i++) {
+			FieldValue field = row.get(fields[i]);
+			if (field == null || field.isNull()) {
+				continue;
+			}
+			String value = field.asString();
+			if (jsonArrays[i]) {
+				value = firstValue(value).orElse(null);
+			}
+			if (metrics[i] != null && metrics[i].isEmptyResult(value)) {
+				value = null;
+			}
+			values[i] = value;
+		}
+		return values;
+	}
+
+	/**
+	 * The row a global aggregation over no documents returns: count is 0 and the other metrics are null.
+	 */
+	public String[] emptyAggregation() {
+		String[] values = new String[fields.length];
+		for (int i = 0; i < metrics.length; i++) {
+			if (metrics[i] != null && RediSearchAggregation.COUNT.equals(metrics[i].getFunctionName())) {
+				values[i] = "0";
+			}
+		}
+		return values;
 	}
 
 	/**

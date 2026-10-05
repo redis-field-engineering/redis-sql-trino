@@ -356,7 +356,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	public Optional<AggregationApplicationResult<ConnectorTableHandle>> applyAggregation(ConnectorSession session,
 			ConnectorTableHandle handle, List<AggregateFunction> aggregates, Map<String, ColumnHandle> assignments,
 			List<List<ColumnHandle>> groupingSets) {
-		log.info("applyAggregation aggregates=%s groupingSets=%s", aggregates, groupingSets);
+		log.debug("applyAggregation aggregates=%s groupingSets=%s", aggregates, groupingSets);
 		RediSearchTableHandle table = (RediSearchTableHandle) handle;
 		// Global aggregation is represented by [[]]
 		verify(!groupingSets.isEmpty(), "No grouping sets provided");

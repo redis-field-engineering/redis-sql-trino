@@ -59,57 +59,86 @@ import io.trino.spi.type.Int128;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
 
-public class RediSearchPageSourceResultWriter {
+/**
+ * Writes the values Redis returns, as strings, to Trino blocks.
+ */
+public final class RediSearchPageSourceResultWriter {
 
-	public void appendTo(Type type, String value, BlockBuilder output) {
-		Class<?> javaType = type.getJavaType();
-		if (javaType == boolean.class) {
-			type.writeBoolean(output, Boolean.parseBoolean(value));
-		} else if (javaType == long.class) {
-			type.writeLong(output, getLong(type, value));
-		} else if (javaType == double.class) {
-			type.writeDouble(output, Double.parseDouble(value));
-		} else if (javaType == Slice.class) {
-			writeSlice(output, type, value);
-		} else if (javaType == Int128.class) {
-			// Long decimals
-			type.writeObject(output, encodeScaledValue(new BigDecimal(value), ((DecimalType) type).getScale()));
-		} else {
-			throw new TrinoException(GENERIC_INTERNAL_ERROR,
-					"Unhandled type for " + javaType.getSimpleName() + ":" + type.getDisplayName());
-		}
+	/**
+	 * Writes a non-null value of one column's type.
+	 */
+	@FunctionalInterface
+	public interface ValueWriter {
+		void write(BlockBuilder output, String value);
 	}
 
-	private long getLong(Type type, String value) {
+	private RediSearchPageSourceResultWriter() {
+	}
+
+	/**
+	 * The writer for a column's values, chosen once per column rather than for each value.
+	 */
+	public static ValueWriter writer(Type type) {
+		Class<?> javaType = type.getJavaType();
+		if (javaType == boolean.class) {
+			return (output, value) -> type.writeBoolean(output, Boolean.parseBoolean(value));
+		}
+		if (javaType == long.class) {
+			LongParser parser = longParser(type);
+			return (output, value) -> type.writeLong(output, parser.parse(value));
+		}
+		if (javaType == double.class) {
+			return (output, value) -> type.writeDouble(output, Double.parseDouble(value));
+		}
+		if (javaType == Slice.class) {
+			return sliceWriter(type);
+		}
+		if (javaType == Int128.class) {
+			// Long decimals
+			int scale = ((DecimalType) type).getScale();
+			return (output, value) -> type.writeObject(output, encodeScaledValue(new BigDecimal(value), scale));
+		}
+		return unhandled("Unhandled type for " + javaType.getSimpleName() + ":" + type.getDisplayName());
+	}
+
+	@FunctionalInterface
+	private interface LongParser {
+		long parse(String value);
+	}
+
+	private static LongParser longParser(Type type) {
 		if (type.equals(BIGINT)) {
-			return parseInteger(type, value);
+			return value -> parseInteger(type, value);
 		}
 		if (type.equals(INTEGER)) {
-			return checkRange(type, value, Integer.MIN_VALUE, Integer.MAX_VALUE);
+			return value -> checkRange(type, value, Integer.MIN_VALUE, Integer.MAX_VALUE);
 		}
 		if (type.equals(SMALLINT)) {
-			return checkRange(type, value, Short.MIN_VALUE, Short.MAX_VALUE);
+			return value -> checkRange(type, value, Short.MIN_VALUE, Short.MAX_VALUE);
 		}
 		if (type.equals(TINYINT)) {
-			return checkRange(type, value, Byte.MIN_VALUE, Byte.MAX_VALUE);
+			return value -> checkRange(type, value, Byte.MIN_VALUE, Byte.MAX_VALUE);
 		}
 		if (type.equals(REAL)) {
-			return floatToIntBits((Float.parseFloat(value)));
+			return value -> floatToIntBits(Float.parseFloat(value));
 		}
-		if (type instanceof DecimalType) {
-			return encodeShortScaledValue(new BigDecimal(value), ((DecimalType) type).getScale());
+		if (type instanceof DecimalType decimalType) {
+			int scale = decimalType.getScale();
+			return value -> encodeShortScaledValue(new BigDecimal(value), scale);
 		}
 		if (type.equals(DATE)) {
-			return LocalDate.from(DateTimeFormatter.ISO_DATE.parse(value)).toEpochDay();
+			return value -> LocalDate.from(DateTimeFormatter.ISO_DATE.parse(value)).toEpochDay();
 		}
 		if (type.equals(TIMESTAMP_MILLIS)) {
-			return multiplyExact(parseInteger(type, value), MICROSECONDS_PER_MILLISECOND);
+			return value -> multiplyExact(parseInteger(type, value), MICROSECONDS_PER_MILLISECOND);
 		}
 		if (type.equals(TIMESTAMP_TZ_MILLIS)) {
-			return packDateTimeWithZone(parseInteger(type, value), UTC_KEY);
+			return value -> packDateTimeWithZone(parseInteger(type, value), UTC_KEY);
 		}
-		throw new TrinoException(GENERIC_INTERNAL_ERROR,
-				"Unhandled type for " + type.getJavaType().getSimpleName() + ":" + type.getDisplayName());
+		String message = "Unhandled type for " + type.getJavaType().getSimpleName() + ":" + type.getDisplayName();
+		return value -> {
+			throw new TrinoException(GENERIC_INTERNAL_ERROR, message);
+		};
 	}
 
 	// Redis returns the results of reducers, and other clients may write integers, in other forms, e.g. 42.0 or 4.2e1
@@ -138,18 +167,28 @@ public class RediSearchPageSourceResultWriter {
 				type.getDisplayName()));
 	}
 
-	private void writeSlice(BlockBuilder output, Type type, String value) {
+	private static ValueWriter sliceWriter(Type type) {
 		if (type instanceof VarcharType) {
-			type.writeSlice(output, utf8Slice(value));
-		} else if (type instanceof CharType) {
-			type.writeSlice(output, truncateToLengthAndTrimSpaces(utf8Slice(value), (CharType) type));
-		} else if (type.equals(UUID)) {
-			type.writeSlice(output, javaUuidToTrinoUuid(java.util.UUID.fromString(value)));
-		} else if (type.getBaseName().equals(JSON)) {
-			type.writeSlice(output, io.trino.plugin.base.util.JsonTypeUtil.jsonParse(utf8Slice(value)));
-		} else {
-			throw new TrinoException(GENERIC_INTERNAL_ERROR, "Unhandled type for Slice: " + type.getDisplayName());
+			return (output, value) -> type.writeSlice(output, utf8Slice(value));
 		}
+		if (type instanceof CharType charType) {
+			return (output, value) -> type.writeSlice(output, truncateToLengthAndTrimSpaces(utf8Slice(value), charType));
+		}
+		if (type.equals(UUID)) {
+			return (output, value) -> type.writeSlice(output, javaUuidToTrinoUuid(java.util.UUID.fromString(value)));
+		}
+		if (type.getBaseName().equals(JSON)) {
+			return (output, value) -> type.writeSlice(output,
+					io.trino.plugin.base.util.JsonTypeUtil.jsonParse(utf8Slice(value)));
+		}
+		return unhandled("Unhandled type for Slice: " + type.getDisplayName());
+	}
+
+	// Fails only once there's a value to write, so a column of the type that's always null still reads
+	private static ValueWriter unhandled(String message) {
+		return (output, value) -> {
+			throw new TrinoException(GENERIC_INTERNAL_ERROR, message);
+		};
 	}
 
 }

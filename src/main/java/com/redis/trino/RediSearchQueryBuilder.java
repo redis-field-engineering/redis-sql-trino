@@ -138,7 +138,7 @@ public class RediSearchQueryBuilder {
 				&& (range.isHighUnbounded() || isExactAsDouble((Long) range.getHighBoundedValue()));
 	}
 
-	private static boolean isExactAsDouble(long value) {
+	static boolean isExactAsDouble(long value) {
 		return -MAX_EXACT_LONG < value && value < MAX_EXACT_LONG;
 	}
 
@@ -381,7 +381,7 @@ public class RediSearchQueryBuilder {
 		if (reducers.isEmpty()) {
 			return Optional.empty();
 		}
-		log.info("Group fields=%s reducers=%s", groupFields, reducers);
+		log.debug("Group fields=%s reducers=%s", groupFields, reducers);
 		GroupBy groupBy = GroupBy.of(groupFields.stream().map(RediSearchQueryBuilder::property).toArray(String[]::new));
 		reducers.forEach(groupBy::reduce);
 		return Optional.of(groupBy);

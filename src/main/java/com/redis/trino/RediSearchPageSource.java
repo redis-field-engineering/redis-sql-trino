@@ -23,15 +23,18 @@
  */
 package com.redis.trino;
 
+import static com.google.common.base.Throwables.throwIfUnchecked;
 import static com.google.common.base.Verify.verify;
 
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
-import io.airlift.log.Logger;
+import com.redis.trino.RediSearchPageSourceResultWriter.ValueWriter;
+
+import io.lettuce.core.search.AggregationReply;
 import io.lettuce.core.search.AggregationReply.Cursor;
 import io.trino.spi.Page;
 import io.trino.spi.PageBuilder;
@@ -40,29 +43,43 @@ import io.trino.spi.connector.ConnectorPageSource;
 import io.trino.spi.connector.SourcePage;
 import io.trino.spi.type.Type;
 
+/**
+ * Reads the rows of an FT.AGGREGATE and its cursor. Each batch's next one is read while Trino processes it, and Trino
+ * waits on {@link #isBlocked()} when it gets ahead of Redis.
+ */
 public class RediSearchPageSource implements ConnectorPageSource {
 
-	private static final Logger log = Logger.get(RediSearchPageSource.class);
+	private static final int ROWS_PER_PAGE = 1024;
 
-	private static final int ROWS_PER_REQUEST = 1024;
-
-	private final RediSearchPageSourceResultWriter writer = new RediSearchPageSourceResultWriter();
-	private final String[] columnNames;
-	private final List<Type> columnTypes;
-	private final CursorIterator iterator;
-	private Map<String, String> currentDoc;
+	private final RediSearchSession session;
+	private final RediSearchTableHandle table;
+	private final ValueWriter[] writers;
+	private final PageBuilder pageBuilder;
+	private final RediSearchRowReader reader;
+	private Iterator<String[]> rows;
+	// The cursor the current batch came with, which the next one is read from
+	private Optional<Cursor> cursor;
+	// The read of the next batch, if the cursor has more
+	private CompletableFuture<AggregationReply<String>> nextBatch;
 	private long completedBytes;
 	private boolean finished;
 
-	private final PageBuilder pageBuilder;
-
 	public RediSearchPageSource(RediSearchSession session, RediSearchTableHandle table,
 			List<RediSearchColumnHandle> columns) {
-		this.columnNames = columns.stream().map(RediSearchColumnHandle::getName).toArray(String[]::new);
-		this.iterator = new CursorIterator(session, table, columns);
-		this.columnTypes = columns.stream().map(RediSearchColumnHandle::getType).collect(Collectors.toList());
-		this.currentDoc = null;
+		this.session = session;
+		this.table = table;
+		List<Type> columnTypes = columns.stream().map(RediSearchColumnHandle::getType).toList();
+		this.writers = columnTypes.stream().map(RediSearchPageSourceResultWriter::writer).toArray(ValueWriter[]::new);
 		this.pageBuilder = new PageBuilder(columnTypes);
+		RediSearchSession.AggregateResult first = session.aggregate(table, columns);
+		this.reader = first.getReader();
+		start(first);
+	}
+
+	private void start(RediSearchSession.AggregateResult batch) {
+		rows = batch.getRows().iterator();
+		cursor = batch.getCursor();
+		nextBatch = cursor.map(next -> session.cursorReadAsync(table, next)).orElse(null);
 	}
 
 	@Override
@@ -81,25 +98,42 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	}
 
 	@Override
+	public CompletableFuture<?> isBlocked() {
+		if (!rows.hasNext() && nextBatch != null && !nextBatch.isDone()) {
+			// Done either way: a failed read is reported by getNextSourcePage
+			return nextBatch.handle((reply, failure) -> null);
+		}
+		return NOT_BLOCKED;
+	}
+
+	@Override
 	public SourcePage getNextSourcePage() {
 		verify(pageBuilder.isEmpty());
-		for (int i = 0; i < ROWS_PER_REQUEST; i++) {
-			if (!iterator.hasNext()) {
-				finished = true;
-				break;
+		while (pageBuilder.getPositionCount() < ROWS_PER_PAGE && !pageBuilder.isFull()) {
+			if (!rows.hasNext()) {
+				if (nextBatch == null) {
+					finished = true;
+					break;
+				}
+				if (!nextBatch.isDone()) {
+					break;
+				}
+				start(session.result(reader, cursor, join(nextBatch)));
+				continue;
 			}
-			currentDoc = iterator.next();
-
+			String[] row = rows.next();
 			pageBuilder.declarePosition();
-			for (int column = 0; column < columnTypes.size(); column++) {
+			for (int column = 0; column < writers.length; column++) {
 				BlockBuilder output = pageBuilder.getBlockBuilder(column);
-				String value = currentValue(columnNames[column]);
-				if (value == null) {
+				if (row[column] == null) {
 					output.appendNull();
 				} else {
-					writer.appendTo(columnTypes.get(column), value, output);
+					writers[column].write(output, row[column]);
 				}
 			}
+		}
+		if (pageBuilder.isEmpty()) {
+			return null;
 		}
 		Page page = pageBuilder.build();
 		pageBuilder.reset();
@@ -108,66 +142,28 @@ public class RediSearchPageSource implements ConnectorPageSource {
 		return SourcePage.create(page);
 	}
 
-	private String currentValue(String columnName) {
-		if (RediSearchBuiltinField.isKeyColumn(columnName)) {
-			return currentDoc.get(RediSearchBuiltinField.KEY.getName());
+	private static <T> T join(CompletableFuture<T> future) {
+		try {
+			return future.join();
+		} catch (CompletionException e) {
+			throwIfUnchecked(e.getCause());
+			throw e;
 		}
-		return currentDoc.get(columnName);
 	}
 
 	@Override
 	public void close() {
-		try {
-			iterator.close();
-		} catch (Exception e) {
-			log.error(e, "Could not close cursor iterator");
-		}
-	}
-
-	private static class CursorIterator implements Iterator<Map<String, String>>, AutoCloseable {
-
-		private final RediSearchSession session;
-		private final RediSearchTableHandle table;
-		private Iterator<Map<String, String>> iterator;
-		private Optional<Cursor> cursor;
-		private RediSearchRowReader reader;
-
-		public CursorIterator(RediSearchSession session, RediSearchTableHandle table,
-				List<RediSearchColumnHandle> columns) {
-			this.session = session;
-			this.table = table;
-			read(session.aggregate(table, columns));
-		}
-
-		private void read(RediSearchSession.AggregateResult results) {
-			this.iterator = results.getRows().iterator();
-			this.cursor = results.getCursor();
-			this.reader = results.getReader();
-		}
-
-		@Override
-		public boolean hasNext() {
-			while (!iterator.hasNext()) {
-				if (cursor.isEmpty()) {
-					return false;
+		if (nextBatch != null) {
+			// Deleted once the read in flight finishes, unless it exhausted the cursor. Waiting for it here would hold
+			// up Trino's thread.
+			Cursor current = cursor.orElseThrow();
+			nextBatch.whenComplete((reply, failure) -> {
+				if (reply == null || reply.getCursor().filter(next -> next.getCursorId() != 0).isPresent()) {
+					session.cursorDeleteAsync(table, current);
 				}
-				read(session.cursorRead(table, reader, cursor.get()));
-			}
-			return true;
+			});
+			nextBatch = null;
 		}
-
-		@Override
-		public Map<String, String> next() {
-			return iterator.next();
-		}
-
-		@Override
-		public void close() throws Exception {
-			if (cursor.isPresent()) {
-				session.cursorDelete(table, cursor.get());
-				cursor = Optional.empty();
-			}
-		}
-
+		cursor = Optional.empty();
 	}
 }
