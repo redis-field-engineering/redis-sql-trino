@@ -4,6 +4,8 @@ import java.io.Closeable;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -16,6 +18,7 @@ import io.lettuce.core.RedisFuture;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
+import io.lettuce.core.cluster.SlotHash;
 import io.lettuce.core.codec.StringCodec;
 import io.lettuce.core.output.NestedMultiOutput;
 import io.lettuce.core.protocol.CommandArgs;
@@ -101,6 +104,46 @@ public class RediSearchServer implements Closeable {
             pipeline.flushCommands();
             LettuceFutures.awaitAll(pipeline.getTimeout(), futures.toArray(new RedisFuture[0]));
         }
+    }
+
+    /**
+     * One key {@code <keyPrefix><n>} for each of {@code shards}, on that shard of a sharded database: shards are
+     * numbered from 0 in the order of the lowest slot they own. A database without the OSS Cluster API has one shard,
+     * which every key is on.
+     */
+    @SuppressWarnings("unchecked")
+    public List<String> keysOnShards(String keyPrefix, int... shards) {
+        // The shard of each slot
+        int[] slotShards = new int[SlotHash.SLOT_COUNT];
+        int shardCount = 1;
+        if (getDeployment().isCluster()) {
+            List<List<Object>> ranges = new ArrayList<>();
+            for (Object range : connection.sync().clusterSlots()) {
+                ranges.add((List<Object>) range);
+            }
+            ranges.sort(Comparator.comparingLong(range -> (Long) range.get(0)));
+            // The master's ID, or its address
+            Map<Object, Integer> masters = new LinkedHashMap<>();
+            for (List<Object> range : ranges) {
+                List<Object> master = (List<Object>) range.get(2);
+                Object id = master.size() > 2 ? master.get(2) : master.subList(0, 2);
+                int shard = masters.computeIfAbsent(id, unused -> masters.size());
+                for (long slot = (Long) range.get(0); slot <= (Long) range.get(1); slot++) {
+                    slotShards[(int) slot] = shard;
+                }
+            }
+            shardCount = masters.size();
+        }
+        List<String> keys = new ArrayList<>();
+        int next = 1;
+        for (int shard : shards) {
+            String key = keyPrefix + next++;
+            while (slotShards[SlotHash.getSlot(key)] != shard % shardCount) {
+                key = keyPrefix + next++;
+            }
+            keys.add(key);
+        }
+        return keys;
     }
 
     public RedisClient getClient() {

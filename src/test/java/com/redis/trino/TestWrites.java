@@ -143,11 +143,10 @@ public class TestWrites extends AbstractTestQueryFramework {
 					3);
 			// An average of integers needn't be one, and Redis would round it to 12 digits
 			assertExactAggregation("SELECT avg(b) FROM exact_aggregates", "VALUES DOUBLE '5' / 3");
-			assertExactAggregation("SELECT g, avg(b), sum(r) FROM exact_aggregates GROUP BY g",
-					"VALUES (VARCHAR 'a', DOUBLE '1.5', REAL '0.3'), (VARCHAR 'b', DOUBLE '2', REAL '0.1')");
-			// In a query of its own: a sharded database's coordinator gives two averages' counts the same name
-			assertExactAggregation("SELECT g, avg(r) FROM exact_aggregates GROUP BY g",
-					"VALUES (VARCHAR 'a', REAL '0.15'), (VARCHAR 'b', REAL '0.1')");
+			// A sharded database's coordinator gave two averages' counts the same name
+			assertExactAggregation("SELECT g, avg(b), avg(r), sum(r) FROM exact_aggregates GROUP BY g",
+					"VALUES (VARCHAR 'a', DOUBLE '1.5', REAL '0.15', REAL '0.3'), "
+							+ "(VARCHAR 'b', DOUBLE '2', REAL '0.1', REAL '0.1')");
 			assertExactAggregation("SELECT r, count(*) FROM exact_aggregates GROUP BY r",
 					"VALUES (REAL '0.1', BIGINT '2'), (REAL '0.2', BIGINT '1')");
 		} finally {
