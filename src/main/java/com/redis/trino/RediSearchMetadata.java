@@ -333,6 +333,14 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			return Optional.empty();
 		}
 
+		// A scan of JSON documents keeps the rows equal to TAG and TEXT values after Redis has limited them
+		if (handle.getTermAggregations().isEmpty() && handle.getMetricAggregations().isEmpty()
+				&& !RediSearchQueryBuilder.equalities(handle.getConstraint()).isEmpty()
+				&& rediSearchSession.getTable(handle.getSchemaTableName()).getIndexInfo().getKeyType()
+						.filter(RediSearchIndexInfo.KeyType.JSON::equals).isPresent()) {
+			return Optional.empty();
+		}
+
 		return Optional.of(new LimitApplicationResult<>(handle.withLimit(limit), true, false));
 	}
 

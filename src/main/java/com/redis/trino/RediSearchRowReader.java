@@ -23,6 +23,7 @@
  */
 package com.redis.trino;
 
+import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static java.util.Objects.requireNonNull;
 
 import java.io.IOException;
@@ -37,6 +38,7 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 
 import io.lettuce.core.search.FieldValue;
 import io.trino.spi.type.Type;
@@ -60,6 +62,8 @@ public class RediSearchRowReader {
 	private final RediSearchAggregation[] metrics;
 	// The type of each column whose value is also returned as a mantissa and exponent
 	private final Type[] exactNumbers;
+	// The values the fields the reader keeps rows by must have
+	private final Map<String, Set<String>> equalities;
 
 	/**
 	 * @param columns    the columns to read, in the order {@link #read} returns their values
@@ -74,6 +78,16 @@ public class RediSearchRowReader {
 	 */
 	public RediSearchRowReader(List<String> columns, Map<String, String> sources, Map<String, String> exactSources,
 			Set<String> jsonArrays, List<RediSearchAggregation> metrics, Map<String, Type> exactNumbers) {
+		this(columns, sources, exactSources, jsonArrays, metrics, exactNumbers, Map.of());
+	}
+
+	/**
+	 * @param equalities the values that a scan of JSON documents keeps the rows by: the first of each field's values,
+	 *                   which come as JSON arrays, must be one of its values
+	 */
+	public RediSearchRowReader(List<String> columns, Map<String, String> sources, Map<String, String> exactSources,
+			Set<String> jsonArrays, List<RediSearchAggregation> metrics, Map<String, Type> exactNumbers,
+			Map<String, List<String>> equalities) {
 		this.columns = ImmutableList.copyOf(requireNonNull(columns, "columns is null"));
 		requireNonNull(sources, "sources is null");
 		requireNonNull(exactSources, "exactSources is null");
@@ -98,6 +112,22 @@ public class RediSearchRowReader {
 			}
 		}
 		this.exactPositions = IntStream.range(0, exactFields.length).filter(i -> exactFields[i] != null).toArray();
+		this.equalities = requireNonNull(equalities, "equalities is null").entrySet().stream()
+				.collect(toImmutableMap(Map.Entry::getKey, entry -> ImmutableSet.copyOf(entry.getValue())));
+	}
+
+	/**
+	 * Whether a row has the values the reader keeps rows by, where FILTER can't compare them.
+	 */
+	public boolean matches(Map<String, FieldValue> row) {
+		for (Map.Entry<String, Set<String>> equality : equalities.entrySet()) {
+			FieldValue field = row.get(equality.getKey());
+			if (field == null || field.isNull()
+					|| firstValue(field.asString()).filter(equality.getValue()::contains).isEmpty()) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	public List<String> getColumns() {

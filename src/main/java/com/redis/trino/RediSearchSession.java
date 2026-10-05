@@ -384,7 +384,18 @@ public class RediSearchSession {
      */
     public boolean canQuery(RediSearchTableHandle table, RediSearchColumnHandle column, Domain domain) {
         return column.isSupportsPredicates() && RediSearchQueryBuilder.isSupported(column, domain)
-                && !hasCustomStopwords(table, column);
+                && !hasCustomStopwords(table, column) && !hasJsonBooleanValue(table, column, domain);
+    }
+
+    // A TAG field indexes a JSON boolean as the tag true or false, but the connector reads it as 1 or 0, as DIALECT 2
+    // loads it: a tag query for 1 or 0 wouldn't match it
+    private boolean hasJsonBooleanValue(RediSearchTableHandle table, RediSearchColumnHandle column, Domain domain) {
+        return column.getFieldType() == RediSearchFieldType.TAG
+                && getTable(table.getSchemaTableName()).getIndexInfo().getKeyType()
+                        .filter(RediSearchIndexInfo.KeyType.JSON::equals).isPresent()
+                && RediSearchQueryBuilder.tagValues(domain.getValues()).orElseThrow().stream()
+                        .map(value -> RediSearchQueryBuilder.tagValue(column.getType(), value))
+                        .anyMatch(value -> value.equals("1") || value.equals("0"));
     }
 
     // TEXT queries drop the default stop words, which would match nothing; with its own list, a value's remaining terms
@@ -501,9 +512,10 @@ public class RediSearchSession {
     private RediSearchColumnHandle buildColumnHandle(RediSearchIndexInfo.Field field,
             Optional<RediSearchIndexInfo.KeyType> keyType, Optional<String> declaredType) {
         RediSearchFieldType type = field.getType();
-        // On hashes, FILTER compares the TAG or TEXT value as stored, which is what the connector reads. How it
-        // compares loaded JSON values, such as arrays, hasn't been checked, so Trino filters those.
-        boolean filterable = keyType.filter(RediSearchIndexInfo.KeyType.HASH::equals).isPresent()
+        // FILTER compares a hash's TAG or TEXT value as stored, and with DIALECT 2 the first of a JSON document's values
+        // at the path, a boolean as 1 or 0: the values the connector reads. Scans read JSON documents with DIALECT 3,
+        // whose values FILTER can't compare, so the connector keeps their equal rows itself.
+        boolean filterable = keyType.isPresent()
                 && (type == RediSearchFieldType.TAG || type == RediSearchFieldType.TEXT);
         return new RediSearchColumnHandle(field.getAttribute(), columnType(field, declaredType), type, false, true,
                 field.getSeparator(), filterable);
@@ -613,6 +625,9 @@ public class RediSearchSession {
         List<CompletableFuture<?>> exactReads = new ArrayList<>();
         for (SearchReply<String> searchReply : reply.getReplies()) {
             for (SearchReply.SearchResult<String> result : searchReply.getResults()) {
+                if (!reader.matches(result.getFields())) {
+                    continue;
+                }
                 String[] row = reader.read(result.getFields());
                 for (int position : reader.getExactPositions()) {
                     if (row[position] != null && RediSearchRowReader.isPossiblyRounded(row[position])) {
