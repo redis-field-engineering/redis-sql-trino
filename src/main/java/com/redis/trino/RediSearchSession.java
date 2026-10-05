@@ -23,7 +23,6 @@
  */
 package com.redis.trino;
 
-import static com.google.common.base.Throwables.throwIfInstanceOf;
 import static com.google.common.base.Throwables.throwIfUnchecked;
 import static com.google.common.base.Verify.verify;
 import static com.redis.trino.RediSearchErrorCode.REDISEARCH_INDEX_NOT_READY;
@@ -37,6 +36,7 @@ import static java.util.stream.Collectors.toSet;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -47,15 +47,16 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import com.google.common.cache.Cache;
+import com.google.common.base.Ticker;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.util.concurrent.UncheckedExecutionException;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.redis.trino.RediSearchTranslator.Aggregation;
 
 import io.airlift.log.Logger;
@@ -93,7 +94,6 @@ import io.lettuce.core.search.arguments.GeoFieldArgs;
 import io.lettuce.core.search.arguments.NumericFieldArgs;
 import io.lettuce.core.search.arguments.TagFieldArgs;
 import io.lettuce.core.search.arguments.TextFieldArgs;
-import io.trino.cache.EvictableCacheBuilder;
 import io.trino.spi.HostAddress;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ColumnMetadata;
@@ -156,7 +156,10 @@ public class RediSearchSession {
 
     private final RedisClusterAsyncCommands<String, String> async;
 
-    private final Cache<SchemaTableName, RediSearchTable> tableCache;
+    private final RediSearchTableCache tableCache;
+
+    // Describes cached tables again
+    private final ThreadPoolExecutor tableRefresher;
 
     // Opened by the first scans to use them
     private final Connection[] scanConnections;
@@ -164,6 +167,8 @@ public class RediSearchSession {
     private final AtomicInteger nextScanConnection = new AtomicInteger();
 
     private final boolean resp3;
+
+    private static final int TABLE_REFRESH_THREADS = 2;
 
     public RediSearchSession(TypeManager typeManager, RediSearchConfig config) {
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
@@ -176,8 +181,12 @@ public class RediSearchSession {
         this.async = primary.async;
         this.resp3 = isResp3(primary.connection);
         this.scanConnections = new Connection[Math.toIntExact(config.getScanConnections())];
-        this.tableCache = EvictableCacheBuilder.newBuilder().expireAfterWrite(config.getTableCacheRefresh(), TimeUnit.SECONDS)
-                .build();
+        this.tableRefresher = new ThreadPoolExecutor(TABLE_REFRESH_THREADS, TABLE_REFRESH_THREADS, 1, TimeUnit.MINUTES,
+                new LinkedBlockingQueue<>(),
+                new ThreadFactoryBuilder().setDaemon(true).setNameFormat("redisearch-table-refresh-%s").build());
+        tableRefresher.allowCoreThreadTimeOut(true);
+        this.tableCache = new RediSearchTableCache(Duration.ofSeconds(config.getTableCacheRefresh()),
+                this::loadTableSchema, tableRefresher, Ticker.systemTicker());
     }
 
     private AbstractRedisClient client(RediSearchConfig config) {
@@ -314,6 +323,7 @@ public class RediSearchSession {
     }
 
     public void shutdown() {
+        tableRefresher.shutdownNow();
         synchronized (scanConnections) {
             for (Connection scanConnection : scanConnections) {
                 if (scanConnection != null) {
@@ -344,12 +354,7 @@ public class RediSearchSession {
      * @throws TableNotFoundException if no index by that name was found
      */
     public RediSearchTable getTable(SchemaTableName tableName) throws TableNotFoundException {
-        try {
-            return tableCache.get(tableName, () -> loadTableSchema(tableName));
-        } catch (ExecutionException | UncheckedExecutionException e) {
-            throwIfInstanceOf(e.getCause(), TrinoException.class);
-            throw new RuntimeException(e);
-        }
+        return tableCache.get(tableName);
     }
 
     public Set<String> getAllTables() {

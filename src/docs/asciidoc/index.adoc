@@ -62,7 +62,7 @@ redisearch.uri=redis://localhost:6379
 |`4`
 
 |`redisearch.table-cache-refresh`
-|Seconds an index's schema is cached. Indexes and fields created outside Trino can take this long to appear.
+|Seconds after which the connector describes a cached index again (`FT.INFO`, its saved column types and a few documents), in the background: queries keep planning with the cached schema meanwhile. An index no query reads for ten times as long is dropped from the cache, and the next query waits for it. Fields added and indexes dropped outside Trino can take this long to show. `0` disables the cache.
 |`60`
 
 |`redisearch.dynamic-filtering.enabled`
@@ -265,7 +265,7 @@ So when a query reads DOUBLE, BIGINT or DECIMAL columns, the connector loads has
 NUMERIC fields still hold doubles for queries and aggregations in Redis: see <<pushdown,Pushdown>>.
 
 A value its column's type can't hold, such as `4.5` written by another client to a BIGINT column, fails the query with `Value '4.5' is not a valid bigint`.
-To read the table with the default types instead, delete the key (`DEL __trino:columns:<table>`); the connector reads it again within `redisearch.table-cache-refresh` seconds.
+To read the table with the default types instead, delete the key (`DEL __trino:columns:<table>`); the first query after `redisearch.table-cache-refresh` seconds has the connector describe the table again, and the queries after it use the default types.
 The TAG fields aren't full-text TEXT fields.
 They're `CASESENSITIVE` and split values into tags on the ASCII unit separator (`\x1f`) instead of `,`, so Redis can prefilter `=` and `IN` on values containing commas, and doesn't return rows that only differ in case.
 
