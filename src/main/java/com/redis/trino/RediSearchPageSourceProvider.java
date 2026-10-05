@@ -32,6 +32,8 @@ import com.google.inject.Inject;
 
 import com.google.common.collect.ImmutableList;
 
+import io.airlift.log.Logger;
+
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ConnectorPageSource;
 import io.trino.spi.connector.ConnectorPageSourceProvider;
@@ -41,9 +43,17 @@ import io.trino.spi.connector.ConnectorTableCredentials;
 import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.ConnectorTransactionHandle;
 import io.trino.spi.connector.DynamicFilter;
+import io.trino.spi.connector.EmptyPageSource;
 import io.trino.spi.connector.MemoryContext;
+import io.trino.spi.predicate.TupleDomain;
 
 public class RediSearchPageSourceProvider implements ConnectorPageSourceProvider {
+
+	private static final Logger log = Logger.get(RediSearchPageSourceProvider.class);
+
+	// A larger set of join keys becomes the range it spans, which keeps the query short
+	private static final int DYNAMIC_FILTER_COMPACTION_THRESHOLD = 256;
+
 	private final RediSearchSession rediSearchSession;
 
 	@Inject
@@ -57,11 +67,35 @@ public class RediSearchPageSourceProvider implements ConnectorPageSourceProvider
 			ConnectorSplit split, ConnectorTableHandle table, Optional<ConnectorTableCredentials> tableCredentials,
 			List<ColumnHandle> columns, DynamicFilter dynamicFilter, MemoryContext memoryContext) {
 		RediSearchTableHandle tableHandle = (RediSearchTableHandle) table;
+		if (rediSearchSession.getConfig().isDynamicFilteringEnabled()
+				&& RediSearchSplitManager.acceptsDynamicFilter(tableHandle, dynamicFilter.getColumnsCovered())) {
+			tableHandle = withDynamicFilter(tableHandle, dynamicFilter.getCurrentPredicate());
+			if (tableHandle.getConstraint().isNone()) {
+				// No row can match a join key
+				return new EmptyPageSource();
+			}
+		}
 		ImmutableList.Builder<RediSearchColumnHandle> handles = ImmutableList.builder();
 		for (ColumnHandle handle : requireNonNull(columns, "columns is null")) {
 			handles.add((RediSearchColumnHandle) handle);
 		}
 		ImmutableList<RediSearchColumnHandle> columnHandles = handles.build();
 		return new RediSearchPageSource(rediSearchSession, tableHandle, columnHandles);
+	}
+
+	/**
+	 * The table, with the dynamic filter's domains that Redis can evaluate added to its query. Its query may return
+	 * rows outside them, such as a TAG query's case-insensitive matches, which the join leaves out.
+	 */
+	private RediSearchTableHandle withDynamicFilter(RediSearchTableHandle table, TupleDomain<ColumnHandle> dynamicFilter) {
+		TupleDomain<ColumnHandle> pushed = dynamicFilter.simplify(DYNAMIC_FILTER_COMPACTION_THRESHOLD)
+				.filter((column, domain) -> rediSearchSession.canQuery(table, (RediSearchColumnHandle) column, domain));
+		if (pushed.isAll()) {
+			return table;
+		}
+		log.debug("Adding dynamic filter %s to %s", pushed, table);
+		return new RediSearchTableHandle(table.getSchemaTableName(), table.getIndex(),
+				table.getConstraint().intersect(pushed), table.getLimit(), table.getTermAggregations(),
+				table.getMetricAggregations());
 	}
 }

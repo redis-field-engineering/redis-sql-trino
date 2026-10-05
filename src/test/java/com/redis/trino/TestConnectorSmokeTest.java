@@ -23,8 +23,10 @@ import io.lettuce.core.search.arguments.CreateArgs.TargetType;
 import io.lettuce.core.search.arguments.NumericFieldArgs;
 import io.lettuce.core.search.arguments.TagFieldArgs;
 import io.lettuce.core.search.arguments.TextFieldArgs;
+import io.trino.Session;
 import io.trino.testing.BaseConnectorSmokeTest;
 import io.trino.testing.QueryRunner;
+import io.trino.testing.QueryRunner.MaterializedResultWithPlan;
 import io.trino.testing.TestingConnectorBehavior;
 
 public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
@@ -131,6 +133,28 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 		populateBeers();
 		getQueryRunner().execute("select id, last_mod from beers");
 		getQueryRunner().execute("select __key from beers");
+	}
+
+	@Test
+	public void testDynamicFilterPushdown() {
+		// The 60 customers of nation 3: their keys are added to the orders query
+		String sql = "SELECT count(*) FROM orders o JOIN customer c ON o.custkey = c.custkey WHERE c.nationkey = 3";
+		Session withoutDynamicFilters = Session.builder(getSession())
+				.setSystemProperty("enable_dynamic_filtering", "false").build();
+		MaterializedResultWithPlan without = getDistributedQueryRunner().executeWithPlan(withoutDynamicFilters, sql);
+		MaterializedResultWithPlan with = getDistributedQueryRunner().executeWithPlan(getSession(), sql);
+		assertThat(with.result().getOnlyValue()).isEqualTo(without.result().getOnlyValue());
+		// Redis returns only those customers' orders, rather than all 15,000
+		assertThat(physicalInputPositions(without)).isGreaterThan(15000);
+		assertThat(physicalInputPositions(with)).isLessThan(2000);
+		// No customer matches, so the orders aren't read at all
+		assertQuery("SELECT count(*) FROM orders o JOIN customer c ON o.custkey = c.custkey WHERE c.nationkey = 99",
+				"VALUES 0");
+	}
+
+	private long physicalInputPositions(MaterializedResultWithPlan result) {
+		return getDistributedQueryRunner().getCoordinator().getQueryManager().getFullQueryInfo(result.queryId())
+				.getQueryStats().getPhysicalInputPositions();
 	}
 
 	@Test

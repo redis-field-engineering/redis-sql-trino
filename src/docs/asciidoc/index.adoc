@@ -60,6 +60,14 @@ redisearch.uri=redis://localhost:6379
 |`redisearch.table-cache-refresh`
 |Seconds an index's schema is cached. Indexes and fields created outside Trino can take this long to appear.
 |`60`
+
+|`redisearch.dynamic-filtering.enabled`
+|Add the join keys that the other side of a join collects (its dynamic filter) to the query that scans an index.
+|`true`
+
+|`redisearch.dynamic-filtering.wait-timeout`
+|How long a scan waits for the other side of a join to collect its dynamic filter before it starts without it.
+|`20s`
 |===
 
 .Redis connection properties
