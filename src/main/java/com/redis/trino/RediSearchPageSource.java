@@ -26,6 +26,8 @@ package com.redis.trino;
 import static com.google.common.base.Throwables.throwIfUnchecked;
 import static com.google.common.base.Verify.verify;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
@@ -34,6 +36,7 @@ import java.util.concurrent.CompletionException;
 
 import com.redis.trino.RediSearchPageSourceResultWriter.ValueWriter;
 
+import io.airlift.log.Logger;
 import io.lettuce.core.search.AggregationReply;
 import io.lettuce.core.search.AggregationReply.Cursor;
 import io.trino.spi.Page;
@@ -44,12 +47,19 @@ import io.trino.spi.connector.SourcePage;
 import io.trino.spi.type.Type;
 
 /**
- * Reads the rows of an FT.AGGREGATE and its cursor. Each batch's next one is read while Trino processes it, and Trino
- * waits on {@link #isBlocked()} when it gets ahead of Redis.
+ * Reads the rows of an FT.AGGREGATE and its cursor. While Trino processes a batch, the next {@link #READS_AHEAD}
+ * batches are read, so that Redis computes one while the client receives and decodes the one before. Trino waits on
+ * {@link #isBlocked()} when it gets ahead of Redis.
  */
 public class RediSearchPageSource implements ConnectorPageSource {
 
+	private static final Logger log = Logger.get(RediSearchPageSource.class);
+
 	private static final int ROWS_PER_PAGE = 1024;
+
+	// A cursor keeps its ID from read to read, so a read can be sent before the reply to the one before arrives.
+	// Redis runs a connection's commands in order, so the replies come in the order of the batches.
+	static final int READS_AHEAD = 2;
 
 	private final RediSearchSession session;
 	private final RediSearchSession.Connection connection;
@@ -58,10 +68,10 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	private final PageBuilder pageBuilder;
 	private final RediSearchRowReader reader;
 	private Iterator<String[]> rows;
-	// The cursor the current batch came with, which the next one is read from
+	// The cursor the batches are read from, until one exhausts it
 	private Optional<Cursor> cursor;
-	// The read of the next batch, if the cursor has more
-	private CompletableFuture<AggregationReply<String>> nextBatch;
+	// The reads of the next batches, oldest first
+	private final Deque<CompletableFuture<AggregationReply<String>>> reads = new ArrayDeque<>();
 	private long completedBytes;
 	private boolean finished;
 
@@ -81,7 +91,19 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	private void start(RediSearchSession.AggregateResult batch) {
 		rows = batch.getRows().iterator();
 		cursor = batch.getCursor();
-		nextBatch = cursor.map(next -> session.cursorReadAsync(connection, table, next)).orElse(null);
+		if (cursor.isEmpty()) {
+			// Exhausted, and gone: the reads sent after this batch's fail ("Cursor not found"), and have no rows
+			reads.forEach(read -> read.whenComplete((reply, failure) -> {
+				if (failure != null) {
+					log.debug("Ignoring the failure of a read after the cursor was exhausted: %s", failure);
+				}
+			}));
+			reads.clear();
+			return;
+		}
+		while (reads.size() < READS_AHEAD) {
+			reads.add(session.cursorReadAsync(connection, table, cursor.get()));
+		}
 	}
 
 	@Override
@@ -101,9 +123,10 @@ public class RediSearchPageSource implements ConnectorPageSource {
 
 	@Override
 	public CompletableFuture<?> isBlocked() {
-		if (!rows.hasNext() && nextBatch != null && !nextBatch.isDone()) {
+		CompletableFuture<AggregationReply<String>> next = reads.peek();
+		if (!rows.hasNext() && next != null && !next.isDone()) {
 			// Done either way: a failed read is reported by getNextSourcePage
-			return nextBatch.handle((reply, failure) -> null);
+			return next.handle((reply, failure) -> null);
 		}
 		return NOT_BLOCKED;
 	}
@@ -113,14 +136,16 @@ public class RediSearchPageSource implements ConnectorPageSource {
 		verify(pageBuilder.isEmpty());
 		while (pageBuilder.getPositionCount() < ROWS_PER_PAGE && !pageBuilder.isFull()) {
 			if (!rows.hasNext()) {
-				if (nextBatch == null) {
+				CompletableFuture<AggregationReply<String>> next = reads.peek();
+				if (next == null) {
 					finished = true;
 					break;
 				}
-				if (!nextBatch.isDone()) {
+				if (!next.isDone()) {
 					break;
 				}
-				start(session.result(connection, reader, cursor, join(nextBatch)));
+				reads.remove();
+				start(session.result(connection, reader, cursor, join(next)));
 				continue;
 			}
 			String[] row = rows.next();
@@ -155,16 +180,20 @@ public class RediSearchPageSource implements ConnectorPageSource {
 
 	@Override
 	public void close() {
-		if (nextBatch != null) {
-			// Deleted once the read in flight finishes, unless it exhausted the cursor. Waiting for it here would hold
-			// up Trino's thread.
+		if (!reads.isEmpty()) {
+			// Deleted once the reads in flight finish, unless one exhausted the cursor: Redis would fail a read that
+			// arrived after the delete. Waiting for them here would hold up Trino's thread.
 			Cursor current = cursor.orElseThrow();
-			nextBatch.whenComplete((reply, failure) -> {
-				if (reply == null || reply.getCursor().filter(next -> next.getCursorId() != 0).isPresent()) {
+			List<CompletableFuture<AggregationReply<String>>> pending = List.copyOf(reads);
+			CompletableFuture.allOf(pending.toArray(CompletableFuture[]::new)).whenComplete((ignored, failure) -> {
+				boolean exhausted = pending.stream().filter(read -> !read.isCompletedExceptionally())
+						.map(CompletableFuture::join)
+						.anyMatch(reply -> reply.getCursor().filter(next -> next.getCursorId() != 0).isEmpty());
+				if (!exhausted) {
 					session.cursorDeleteAsync(connection, table, current);
 				}
 			});
-			nextBatch = null;
+			reads.clear();
 		}
 		cursor = Optional.empty();
 	}
