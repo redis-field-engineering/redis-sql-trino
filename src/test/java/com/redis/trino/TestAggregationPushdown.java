@@ -13,6 +13,7 @@ import io.lettuce.core.api.sync.RedisCommands;
 import io.lettuce.core.search.arguments.CreateArgs;
 import io.lettuce.core.search.arguments.NumericFieldArgs;
 import io.lettuce.core.search.arguments.TagFieldArgs;
+import io.trino.sql.planner.plan.AggregationNode;
 import io.trino.sql.planner.plan.FilterNode;
 import io.trino.testing.AbstractTestQueryFramework;
 import io.trino.testing.QueryRunner;
@@ -92,6 +93,27 @@ public class TestAggregationPushdown extends AbstractTestQueryFramework {
 		assertExact("SELECT sum(d), avg(d) FROM split WHERE g = 'Shared'", "VALUES (DOUBLE '4.5', DOUBLE '4.5')");
 		assertExact("SELECT sum(e), avg(e) FROM split WHERE g = 'Shared'",
 				"VALUES (CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE))");
+	}
+
+	@Test
+	public void testAggregatesOfArithmetic() {
+		// An APPLY step computes the arithmetic, and a document missing either value has none
+		assertExact("SELECT g, sum(d * e), avg(d + e) FROM split GROUP BY g", "VALUES "
+				+ "(VARCHAR 'Ale', DOUBLE '0.1234567890123457' * 2, DOUBLE '0.1234567890123457' + 2), "
+				+ "(VARCHAR 'Mixed', DOUBLE '4.5', DOUBLE '5.5'), "
+				+ "(VARCHAR 'Shared', CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE)), "
+				+ "(VARCHAR 'None', CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE))");
+		assertExact("SELECT sum(-d * e), count(*) FROM split WHERE g = 'Mixed'", "VALUES (DOUBLE '-4.5', BIGINT '3')");
+		// Scans compute it in the connector
+		assertThat(query("SELECT g, d * e, d / 0 FROM split WHERE g IN ('Ale', 'Mixed')")).isFullyPushedDown()
+				.matches("VALUES (VARCHAR 'Ale', DOUBLE '0.1234567890123457' * 2, infinity()), "
+						+ "(VARCHAR 'Ale', CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE)), "
+						+ "(VARCHAR 'Mixed', DOUBLE '4.5', infinity()), "
+						+ "(VARCHAR 'Mixed', CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE)), "
+						+ "(VARCHAR 'Mixed', CAST(NULL AS DOUBLE), infinity())");
+		// Trino orders nan as larger than other doubles, where Redis's MAX doesn't
+		assertThat(query("SELECT max(d * e) FROM split")).isNotFullyPushedDown(AggregationNode.class)
+				.matches("VALUES DOUBLE '4.5'");
 	}
 
 	/**

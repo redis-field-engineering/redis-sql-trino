@@ -416,6 +416,47 @@ public class TestQueryBuilder {
 	}
 
 	@Test
+	public void testSumsOfArithmetic() {
+		RediSearchColumnHandle product = RediSearchColumnHandle.expression(RediSearchExpression.operation(
+				RediSearchExpression.Operator.MULTIPLY, RediSearchExpression.column("abv", DoubleType.DOUBLE),
+				RediSearchExpression.column("ibu", BIGINT)));
+		RediSearchAggregation sum = new RediSearchAggregation(RediSearchAggregation.SUM, DoubleType.DOUBLE,
+				Optional.of(product), "s", true);
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers",
+				TupleDomain.all(), OptionalLong.empty(), List.of(), List.of(sum), List.of());
+		RediSearchColumnHandle s = new RediSearchColumnHandle("s", DoubleType.DOUBLE, RediSearchFieldType.NUMERIC, false,
+				false, Optional.empty());
+		// A document without either value adds 0, and isn't counted
+		assertThat(commandString(new RediSearchTranslator(new RediSearchConfig()).aggregate(table, List.of(s),
+				Optional.of(hashIndex())))).isEqualTo("LOAD 4 __key abv ibu s "
+						+ "APPLY case(exists(@abv) && exists(@ibu), (@abv * @ibu), 0) AS __value_s "
+						+ "APPLY exists(@abv) && exists(@ibu) AS __has_s "
+						+ "GROUPBY 0 REDUCE SUM 1 @__value_s AS s REDUCE SUM 1 @__has_s AS __count_s "
+						+ "APPLY floor(log2(abs(@s))) AS __exponent_0 "
+						+ "APPLY abs(@s) * 2 ^ (26 - floor(@__exponent_0 / 2)) * 2 ^ (27 - ceil(@__exponent_0 / 2)) AS __mantissa_0 "
+						+ "WITHCURSOR COUNT 1000 DIALECT 2");
+		assertThat(sum.toString()).isEqualTo("sum((@abv * @ibu))");
+	}
+
+	@Test
+	public void testScansComputeArithmetic() {
+		RediSearchColumnHandle style = filterable("style", RediSearchFieldType.TAG);
+		RediSearchColumnHandle product = RediSearchColumnHandle.expression(RediSearchExpression.operation(
+				RediSearchExpression.Operator.MULTIPLY, RediSearchExpression.column("abv", DoubleType.DOUBLE),
+				RediSearchExpression.column("ibu", BIGINT)));
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers");
+		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
+				List.of(product, style), Optional.of(hashIndex()));
+		// The columns it refers to are read as stored, from the hashes LOAD * returns
+		assertThat(commandString(aggregation)).isEqualTo("LOAD * LOAD 2 __key style WITHCURSOR COUNT 1000 DIALECT 2");
+		RediSearchRowReader reader = aggregation.getReader();
+		String[] row = reader.read(Map.of("style", value("Wheat"), "raw_abv", value("0.1"), "ibu", value("3")));
+		assertThat(reader.project(row)).containsExactly(Double.toString(0.1 * 3), "Wheat");
+		assertThat(reader.project(reader.read(Map.of("style", value("Wheat"), "ibu", value("3")))))
+				.containsExactly(null, "Wheat");
+	}
+
+	@Test
 	public void testFloatingPointResultsAlsoAsMantissasAndExponents() {
 		RediSearchColumnHandle abv = numeric("abv", DoubleType.DOUBLE);
 		RediSearchAggregation sum = new RediSearchAggregation(RediSearchAggregation.SUM, DoubleType.DOUBLE,

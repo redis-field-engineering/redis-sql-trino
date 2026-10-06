@@ -56,6 +56,10 @@ public class RediSearchAggregationTerm {
 
 	public static Optional<RediSearchAggregationTerm> fromColumnHandle(ColumnHandle columnHandle) {
 		RediSearchColumnHandle column = (RediSearchColumnHandle) columnHandle;
+		// Arithmetic isn't a field Redis can group by
+		if (column.getExpression().isPresent()) {
+			return Optional.empty();
+		}
 		// Redis groups a NUMERIC field by its double value and returns it formatted as one, which a DECIMAL column
 		// may not be able to hold exactly
 		if (column.getType() instanceof DecimalType) {
