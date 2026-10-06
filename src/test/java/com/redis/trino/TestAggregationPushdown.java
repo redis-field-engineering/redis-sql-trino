@@ -104,6 +104,9 @@ public class TestAggregationPushdown extends AbstractTestQueryFramework {
 				+ "(VARCHAR 'Shared', CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE)), "
 				+ "(VARCHAR 'None', CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE))");
 		assertExact("SELECT sum(-d * e), count(*) FROM split WHERE g = 'Mixed'", "VALUES (DOUBLE '-4.5', BIGINT '3')");
+		// Constants Java writes in scientific notation, 1.0E-4 and 1.0E10, which APPLY reads as numbers
+		assertExact("SELECT sum(d * 1e-4), avg(d * 1e10) FROM split WHERE g = 'Mixed'",
+				"VALUES (DOUBLE '4.5' * 1e-4 + DOUBLE '1.5' * 1e-4, (DOUBLE '4.5' * 1e10 + DOUBLE '1.5' * 1e10) / 2)");
 		// Scans compute it in the connector
 		assertThat(query("SELECT g, d * e, d / 0 FROM split WHERE g IN ('Ale', 'Mixed')")).isFullyPushedDown()
 				.matches("VALUES (VARCHAR 'Ale', DOUBLE '0.1234567890123457' * 2, infinity()), "
