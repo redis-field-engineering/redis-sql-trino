@@ -11,6 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,9 +33,18 @@ import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.predicate.ValueSet;
+import io.trino.spi.type.BooleanType;
+import io.trino.spi.type.CharType;
+import io.trino.spi.type.DateTimeEncoding;
+import io.trino.spi.type.DateType;
+import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.DoubleType;
 import io.trino.spi.type.IntegerType;
 import io.trino.spi.type.RealType;
+import io.trino.spi.type.TimeZoneKey;
+import io.trino.spi.type.TimestampType;
+import io.trino.spi.type.TimestampWithTimeZoneType;
+import io.trino.spi.type.UuidType;
 
 public class TestQueryBuilder {
 
@@ -164,6 +174,78 @@ public class TestQueryBuilder {
 		// and so does a field name an expression can't refer to
 		assertThat(RediSearchQueryBuilder.isExact(filterable("brewery-id", RediSearchFieldType.TAG), varchars("1")))
 				.isFalse();
+	}
+
+	@Test
+	public void testDeclaredTypesQueried() {
+		RediSearchQueryBuilder builder = new RediSearchQueryBuilder();
+		// As RediSearchPageSink writes the values
+		assertThat(builder.buildQuery(domain(declared("flag", BooleanType.BOOLEAN, RediSearchFieldType.TAG),
+				Domain.singleValue(BooleanType.BOOLEAN, true)))).isEqualTo("@flag:{true}");
+		assertThat(builder.buildQuery(domain(declared("day", DateType.DATE, RediSearchFieldType.TAG),
+				Domain.multipleValues(DateType.DATE, List.of(LocalDate.of(2024, 1, 2).toEpochDay(),
+						LocalDate.of(2024, 1, 3).toEpochDay()))))).isEqualTo("@day:{2024\\-01\\-02 | 2024\\-01\\-03}");
+		// Trino merges consecutive dates into a range, whose dates the tag query lists
+		long day = LocalDate.of(2024, 1, 2).toEpochDay();
+		assertThat(builder.buildQuery(domain(declared("day", DateType.DATE, RediSearchFieldType.TAG),
+				Domain.create(ValueSet.ofRanges(range(DateType.DATE, day, true, day + 2, true)), false))))
+				.isEqualTo("@day:{2024\\-01\\-02 | 2024\\-01\\-03 | 2024\\-01\\-04}");
+		assertThat(RediSearchQueryBuilder.isSupported(declared("day", DateType.DATE, RediSearchFieldType.TAG),
+				Domain.create(ValueSet.ofRanges(range(DateType.DATE, day, true, day + 1000, true)), false))).isFalse();
+		assertThat(RediSearchQueryBuilder.isSupported(declared("day", DateType.DATE, RediSearchFieldType.TAG),
+				Domain.create(ValueSet.ofRanges(greaterThan(DateType.DATE, day)), false))).isFalse();
+		// No dates between them
+		RediSearchColumnHandle dayColumn = declared("day", DateType.DATE, RediSearchFieldType.TAG);
+		Domain none = Domain.create(ValueSet.ofRanges(range(DateType.DATE, day, false, day + 1, false)), false);
+		assertThat(RediSearchQueryBuilder.isSupported(dayColumn, none)).isFalse();
+		assertThat(RediSearchQueryBuilder.isExact(dayColumn, none)).isFalse();
+		RediSearchColumnHandle uuid = declared("u", UuidType.UUID, RediSearchFieldType.TAG);
+		Domain uuidValue = Domain.singleValue(UuidType.UUID,
+				UuidType.javaUuidToTrinoUuid(java.util.UUID.fromString("12151FD2-7586-11E9-8F9E-2A86E4085A59")));
+		assertThat(builder.buildQuery(domain(uuid, uuidValue)))
+				.isEqualTo("@u:{12151fd2\\-7586\\-11e9\\-8f9e\\-2a86e4085a59}");
+		assertThat(builder.filters(TupleDomain.withColumnDomains(Map.of(uuid, uuidValue))))
+				.containsEntry("u", "exists(@u) && @u == \"12151fd2-7586-11e9-8f9e-2a86e4085a59\"");
+		// Written padded with spaces, which Redis trims from tags but a FILTER would compare
+		RediSearchColumnHandle chars = declared("c", CharType.createCharType(3), RediSearchFieldType.TAG);
+		Domain ab = Domain.singleValue(CharType.createCharType(3), utf8Slice("ab"));
+		assertThat(builder.buildQuery(domain(chars, ab))).isEqualTo("@c:{ab}");
+		assertThat(RediSearchQueryBuilder.isExact(chars, ab)).isFalse();
+		// Written as Float.toString, which Redis parses as the double 1.1
+		RediSearchColumnHandle real = declared("r", RealType.REAL, RediSearchFieldType.NUMERIC);
+		assertThat(builder.buildQuery(domain(real, Domain.create(ValueSet.ofRanges(
+				greaterThan(RealType.REAL, (long) Float.floatToIntBits(1.1f))), false)))).isEqualTo("@r:[(1.1 inf]");
+		DecimalType decimal = DecimalType.createDecimalType(10, 2);
+		assertThat(builder.buildQuery(domain(declared("dec", decimal, RediSearchFieldType.NUMERIC),
+				Domain.create(ValueSet.ofRanges(range(decimal, 110L, true, 250L, false)), false))))
+				.isEqualTo("(@dec:[1.1 inf] @dec:[-inf (2.5])");
+		// More digits than a double holds
+		DecimalType longDecimal = DecimalType.createDecimalType(16, 2);
+		assertThat(RediSearchQueryBuilder.isSupported(declared("dec", longDecimal, RediSearchFieldType.NUMERIC),
+				Domain.singleValue(longDecimal, 110L))).isFalse();
+		// Epoch milliseconds
+		long millis = 1704164645006L;
+		assertThat(builder.buildQuery(domain(declared("ts", TimestampType.TIMESTAMP_MILLIS, RediSearchFieldType.NUMERIC),
+				Domain.singleValue(TimestampType.TIMESTAMP_MILLIS, millis * 1000))))
+				.isEqualTo("@ts:[1.704164645006E12 1.704164645006E12]");
+		assertThat(builder.buildQuery(domain(
+				declared("tstz", TimestampWithTimeZoneType.TIMESTAMP_TZ_MILLIS, RediSearchFieldType.NUMERIC),
+				Domain.create(ValueSet.ofRanges(lessThan(TimestampWithTimeZoneType.TIMESTAMP_TZ_MILLIS,
+						DateTimeEncoding.packDateTimeWithZone(millis, TimeZoneKey.getTimeZoneKey("America/Denver")))),
+						false)))).isEqualTo("@tstz:[-inf (1.704164645006E12]");
+		assertThat(RediSearchQueryBuilder.isSupported(
+				declared("ts", TimestampType.TIMESTAMP_MILLIS, RediSearchFieldType.NUMERIC),
+				Domain.singleValue(TimestampType.TIMESTAMP_MILLIS, (1L << 53) * 1000))).isFalse();
+	}
+
+	private static RediSearchColumnHandle declared(String name, io.trino.spi.type.Type type,
+			RediSearchFieldType fieldType) {
+		return new RediSearchColumnHandle(name, type, fieldType, false, true,
+				fieldType == RediSearchFieldType.TAG ? Optional.of('\u001f') : Optional.empty(), true);
+	}
+
+	private static TupleDomain<ColumnHandle> domain(RediSearchColumnHandle column, Domain domain) {
+		return TupleDomain.withColumnDomains(Map.of(column, domain));
 	}
 
 	@Test
