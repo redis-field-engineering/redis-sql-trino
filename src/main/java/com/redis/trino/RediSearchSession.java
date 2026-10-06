@@ -686,6 +686,8 @@ public class RediSearchSession {
                 throw e;
             }
         }
+        // Once the values are exact
+        rows.replaceAll(reader::project);
         // Cursor ID 0 means there are no more rows
         Optional<Cursor> next = reply.getCursor().filter(c -> c.getCursorId() != 0);
         // The cursor stays on the node that created it

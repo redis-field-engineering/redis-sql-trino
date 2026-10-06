@@ -31,6 +31,7 @@ import static java.util.stream.Collectors.toMap;
 
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -120,8 +121,11 @@ public class RediSearchTranslator {
 	 * @param indexInfo the index's FT.INFO, which tells how to read the values exactly; without it, they're loaded
 	 *                  by name
 	 */
-	public Aggregation aggregate(RediSearchTableHandle table, List<RediSearchColumnHandle> columns,
+	public Aggregation aggregate(RediSearchTableHandle table, List<RediSearchColumnHandle> outputs,
 			Optional<RediSearchIndexInfo> indexInfo) {
+		// Arithmetic the scan returns is computed by the reader, from the columns it refers to
+		List<RediSearchColumnHandle> columns = readColumns(outputs);
+		boolean computes = columns.size() != outputs.size() || !columns.equals(outputs);
 		String query = queryBuilder.buildQuery(table.getConstraint());
 		Map<String, List<String>> equalities = RediSearchQueryBuilder.equalities(table.getConstraint());
 		Optional<GroupBy> groupBy = queryBuilder.group(table);
@@ -145,7 +149,7 @@ public class RediSearchTranslator {
 		// Sums and averages counting values, whose APPLY steps refer to their columns
 		List<RediSearchAggregation> countingValues = table.getMetricAggregations().stream()
 				.filter(RediSearchAggregation::isCountingValues).toList();
-		countingValues.forEach(metric -> loads.add(metric.getColumnHandle().orElseThrow().getName()));
+		countingValues.forEach(metric -> loads.addAll(metric.getInputFields()));
 		Map<String, String> sources = new HashMap<>();
 		Map<String, String> exactSources = new HashMap<>();
 		Map<String, RediSearchIndexInfo.Field> fields = indexInfo.map(RediSearchIndexInfo::getFields).orElse(List.of())
@@ -224,7 +228,20 @@ public class RediSearchTranslator {
 		return new Aggregation(table.getIndex(), query, filters.values(), aggregateArgs, global,
 				new RediSearchRowReader(columns.stream().map(RediSearchColumnHandle::getName).toList(), sources,
 						exactSources, jsonArrays, table.getMetricAggregations(), exactNumbers,
-						json ? equalities : Map.of()));
+						json ? equalities : Map.of(), computes ? Optional.of(outputs) : Optional.empty()));
+	}
+
+	/**
+	 * The columns a scan reads: those it returns, except arithmetic, and the columns the arithmetic refers to.
+	 */
+	private static List<RediSearchColumnHandle> readColumns(List<RediSearchColumnHandle> outputs) {
+		Map<String, RediSearchColumnHandle> columns = new LinkedHashMap<>();
+		outputs.stream().filter(column -> column.getExpression().isEmpty())
+				.forEach(column -> columns.putIfAbsent(column.getName(), column));
+		outputs.stream().flatMap(column -> column.getExpression().stream())
+				.forEach(expression -> expression.getColumns().forEach((name, type) -> columns.putIfAbsent(name,
+						new RediSearchColumnHandle(name, type, RediSearchFieldType.NUMERIC, false, true, Optional.empty()))));
+		return List.copyOf(columns.values());
 	}
 
 	private static String sortAlias(int position) {

@@ -36,6 +36,7 @@ import static java.util.Objects.requireNonNull;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,6 +51,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
 import io.airlift.log.Logger;
+import io.trino.plugin.base.expression.ConnectorExpressions;
 import io.airlift.slice.Slice;
 import io.trino.spi.StandardErrorCode;
 import io.trino.spi.TrinoException;
@@ -73,6 +75,7 @@ import io.trino.spi.connector.ConnectorTableVersion;
 import io.trino.spi.connector.Constraint;
 import io.trino.spi.connector.ConstraintApplicationResult;
 import io.trino.spi.connector.LimitApplicationResult;
+import io.trino.spi.connector.ProjectionApplicationResult;
 import io.trino.spi.connector.NotFoundException;
 import io.trino.spi.connector.RelationColumnsMetadata;
 import io.trino.spi.connector.RetryMode;
@@ -82,6 +85,7 @@ import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.SortItem;
 import io.trino.spi.connector.TableNotFoundException;
 import io.trino.spi.connector.TopNApplicationResult;
+import io.trino.spi.expression.Call;
 import io.trino.spi.expression.ConnectorExpression;
 import io.trino.spi.expression.Variable;
 import io.trino.spi.predicate.Domain;
@@ -424,6 +428,56 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 		return Optional.of(new ConstraintApplicationResult<>(handle, TupleDomain.withColumnDomains(unsupported),
 				constraint.getExpression(), false));
+	}
+
+	/**
+	 * Pushes arithmetic on DOUBLE NUMERIC columns of hash indexes, such as {@code quantity * extendedprice}, down as
+	 * columns of their own ({@link RediSearchExpression}), so that a sum or average of it is pushed down too: an APPLY
+	 * step computes it before GROUPBY. A scan computes it in the connector. Other projections stay with Trino.
+	 */
+	@Override
+	public Optional<ProjectionApplicationResult<ConnectorTableHandle>> applyProjection(ConnectorSession session,
+			ConnectorTableHandle handle, List<ConnectorExpression> projections, Map<String, ColumnHandle> assignments) {
+		RediSearchTableHandle table = (RediSearchTableHandle) handle;
+		// After GROUPBY the columns are keys and reducers' results; DIALECT 3 reads JSON numbers, which APPLY would
+		// compute on as DIALECT 2 loads them
+		if (!table.getTermAggregations().isEmpty() || !table.getMetricAggregations().isEmpty()
+				|| rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo().getKeyType()
+						.filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
+			return Optional.empty();
+		}
+		ImmutableList.Builder<ConnectorExpression> newProjections = ImmutableList.builder();
+		Map<String, Assignment> newAssignments = new LinkedHashMap<>();
+		// The variable of each pushed-down column, which equal expressions share
+		Map<RediSearchColumnHandle, String> variables = new HashMap<>();
+		for (ConnectorExpression projection : projections) {
+			Optional<RediSearchExpression> expression = projection instanceof Call
+					? RediSearchExpression.translate(projection, assignments)
+					: Optional.empty();
+			if (expression.isEmpty()) {
+				newProjections.add(projection);
+				for (Variable variable : ConnectorExpressions.extractVariables(projection)) {
+					newAssignments.putIfAbsent(variable.getName(),
+							new Assignment(variable.getName(), assignments.get(variable.getName()), variable.getType()));
+				}
+				continue;
+			}
+			RediSearchColumnHandle column = RediSearchColumnHandle.expression(expression.get());
+			String variable = variables.computeIfAbsent(column, unused -> {
+				String name = "expr_" + variables.size();
+				while (assignments.containsKey(name) || newAssignments.containsKey(name)) {
+					name = name + "_";
+				}
+				return name;
+			});
+			newProjections.add(new Variable(variable, column.getType()));
+			newAssignments.putIfAbsent(variable, new Assignment(variable, column, column.getType()));
+		}
+		if (variables.isEmpty()) {
+			return Optional.empty();
+		}
+		return Optional.of(new ProjectionApplicationResult<>(table, newProjections.build(),
+				ImmutableList.copyOf(newAssignments.values()), false));
 	}
 
 	@Override

@@ -24,6 +24,7 @@
 package com.redis.trino;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
+import static io.trino.spi.type.DoubleType.DOUBLE;
 import static java.util.Objects.requireNonNull;
 
 import java.util.Objects;
@@ -45,10 +46,16 @@ public class RediSearchColumnHandle implements ColumnHandle {
 	private final boolean supportsPredicates;
 	private final Optional<Character> tagSeparator;
 	private final boolean filterable;
+	private final Optional<RediSearchExpression> expression;
 
 	public RediSearchColumnHandle(String name, Type type, RediSearchFieldType fieldType, boolean hidden,
 			boolean supportsPredicates, Optional<Character> tagSeparator) {
 		this(name, type, fieldType, hidden, supportsPredicates, tagSeparator, false);
+	}
+
+	public RediSearchColumnHandle(String name, Type type, RediSearchFieldType fieldType, boolean hidden,
+			boolean supportsPredicates, Optional<Character> tagSeparator, boolean filterable) {
+		this(name, type, fieldType, hidden, supportsPredicates, tagSeparator, filterable, Optional.empty());
 	}
 
 	@JsonCreator
@@ -56,7 +63,8 @@ public class RediSearchColumnHandle implements ColumnHandle {
 			@JsonProperty("fieldType") RediSearchFieldType fieldType, @JsonProperty("hidden") boolean hidden,
 			@JsonProperty("supportsPredicates") boolean supportsPredicates,
 			@JsonProperty("tagSeparator") Optional<Character> tagSeparator,
-			@JsonProperty("filterable") boolean filterable) {
+			@JsonProperty("filterable") boolean filterable,
+			@JsonProperty("expression") Optional<RediSearchExpression> expression) {
 		this.name = requireNonNull(name, "name is null");
 		this.type = requireNonNull(type, "type is null");
 		this.fieldType = requireNonNull(fieldType, "fieldType is null");
@@ -64,6 +72,16 @@ public class RediSearchColumnHandle implements ColumnHandle {
 		this.supportsPredicates = supportsPredicates;
 		this.tagSeparator = requireNonNull(tagSeparator, "tagSeparator is null");
 		this.filterable = filterable;
+		this.expression = requireNonNull(expression, "expression is null");
+	}
+
+	/**
+	 * A column of Trino's that's arithmetic on the table's columns, rather than an index field. Redis can't query or
+	 * sort it.
+	 */
+	public static RediSearchColumnHandle expression(RediSearchExpression expression) {
+		return new RediSearchColumnHandle("__expr" + expression.toRedis(), DOUBLE, RediSearchFieldType.NUMERIC, false,
+				false, Optional.empty(), false, Optional.of(expression));
 	}
 
 	@JsonProperty
@@ -109,13 +127,21 @@ public class RediSearchColumnHandle implements ColumnHandle {
 		return filterable;
 	}
 
+	/**
+	 * @return the arithmetic this column is the result of, if it isn't an index field's
+	 */
+	@JsonProperty
+	public Optional<RediSearchExpression> getExpression() {
+		return expression;
+	}
+
 	public ColumnMetadata toColumnMetadata() {
 		return ColumnMetadata.builder().setName(name).setType(type).setHidden(hidden).build();
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(name, type, fieldType, hidden, supportsPredicates, tagSeparator, filterable);
+		return Objects.hash(name, type, fieldType, hidden, supportsPredicates, tagSeparator, filterable, expression);
 	}
 
 	@Override
@@ -129,13 +155,14 @@ public class RediSearchColumnHandle implements ColumnHandle {
 		RediSearchColumnHandle other = (RediSearchColumnHandle) obj;
 		return Objects.equals(name, other.name) && Objects.equals(type, other.type) && this.fieldType == other.fieldType
 				&& this.hidden == other.hidden && this.supportsPredicates == other.supportsPredicates
-				&& Objects.equals(tagSeparator, other.tagSeparator) && this.filterable == other.filterable;
+				&& Objects.equals(tagSeparator, other.tagSeparator) && this.filterable == other.filterable
+				&& Objects.equals(expression, other.expression);
 	}
 
 	@Override
 	public String toString() {
 		return toStringHelper(this).add("name", name).add("type", type).add("fieldType", fieldType)
 				.add("hidden", hidden).add("supportsPredicates", supportsPredicates).add("tagSeparator", tagSeparator)
-				.add("filterable", filterable).toString();
+				.add("filterable", filterable).add("expression", expression.orElse(null)).omitNullValues().toString();
 	}
 }

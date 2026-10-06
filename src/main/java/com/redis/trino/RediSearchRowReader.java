@@ -26,7 +26,9 @@ package com.redis.trino;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static io.trino.spi.type.RealType.REAL;
 import static java.util.Locale.ENGLISH;
+import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static java.util.Objects.requireNonNull;
+import static java.util.function.Function.identity;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -64,6 +66,9 @@ public class RediSearchRowReader {
 	private final RediSearchAggregation[] metrics;
 	// The type of each column whose value is also returned as a mantissa and exponent
 	private final Type[] exactNumbers;
+	// The columns the scan returns, if it computes arithmetic from the columns read
+	private final Optional<List<RediSearchColumnHandle>> outputs;
+	private final Map<String, Integer> positions;
 	// The values the fields the reader keeps rows by must have
 	private final Map<String, Set<String>> equalities;
 
@@ -80,16 +85,18 @@ public class RediSearchRowReader {
 	 */
 	public RediSearchRowReader(List<String> columns, Map<String, String> sources, Map<String, String> exactSources,
 			Set<String> jsonArrays, List<RediSearchAggregation> metrics, Map<String, Type> exactNumbers) {
-		this(columns, sources, exactSources, jsonArrays, metrics, exactNumbers, Map.of());
+		this(columns, sources, exactSources, jsonArrays, metrics, exactNumbers, Map.of(), Optional.empty());
 	}
 
 	/**
 	 * @param equalities the values that a scan of JSON documents keeps the rows by: the first of each field's values,
 	 *                   which come as JSON arrays, must be one of its values
+	 * @param outputs    the columns the scan returns, which {@link #project} computes from the rows {@link #read}
+	 *                   returns, if it reads other columns than those to compute arithmetic from
 	 */
 	public RediSearchRowReader(List<String> columns, Map<String, String> sources, Map<String, String> exactSources,
 			Set<String> jsonArrays, List<RediSearchAggregation> metrics, Map<String, Type> exactNumbers,
-			Map<String, List<String>> equalities) {
+			Map<String, List<String>> equalities, Optional<List<RediSearchColumnHandle>> outputs) {
 		this.columns = ImmutableList.copyOf(requireNonNull(columns, "columns is null"));
 		requireNonNull(sources, "sources is null");
 		requireNonNull(exactSources, "exactSources is null");
@@ -114,8 +121,30 @@ public class RediSearchRowReader {
 			}
 		}
 		this.exactPositions = IntStream.range(0, exactFields.length).filter(i -> exactFields[i] != null).toArray();
+		this.outputs = requireNonNull(outputs, "outputs is null").map(List::copyOf);
+		this.positions = IntStream.range(0, this.columns.size()).boxed()
+				.collect(toImmutableMap(this.columns::get, identity()));
 		this.equalities = requireNonNull(equalities, "equalities is null").entrySet().stream()
 				.collect(toImmutableMap(Map.Entry::getKey, entry -> ImmutableSet.copyOf(entry.getValue())));
+	}
+
+	/**
+	 * @param row the values {@link #read} returned, with the exact values of {@link #getExactPositions}
+	 * @return the value of each column the scan returns: the row, or arithmetic computed from it
+	 */
+	public String[] project(String[] row) {
+		if (outputs.isEmpty()) {
+			return row;
+		}
+		List<RediSearchColumnHandle> columns = outputs.get();
+		String[] values = new String[columns.size()];
+		for (int i = 0; i < values.length; i++) {
+			RediSearchColumnHandle column = columns.get(i);
+			values[i] = column.getExpression().isPresent()
+					? column.getExpression().get().evaluate(name -> row[positions.get(name)])
+					: row[positions.get(column.getName())];
+		}
+		return values;
 	}
 
 	/**
