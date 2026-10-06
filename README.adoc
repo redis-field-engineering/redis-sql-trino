@@ -407,7 +407,7 @@ These aren't supported:
 Redis evaluates these parts of a query. Trino evaluates everything else on the rows Redis returns.
 
 * `WHERE` on indexed fields, combined with `AND`: `=` and `IN`; and `<`, `+<=+`, `>`, `>=` and `BETWEEN` on NUMERIC fields.
-Trino evaluates filters on columns created as other types than VARCHAR, BIGINT, INTEGER, SMALLINT, TINYINT and DOUBLE, such as DATE or DECIMAL.
+Columns created through Trino as BOOLEAN, DATE, UUID or CHAR are queried as TAG fields, and as REAL, DECIMAL (of up to 15 digits), TIMESTAMP(3) or TIMESTAMP(3) WITH TIME ZONE as NUMERIC fields, comparing values as the connector writes them.
 On TAG and TEXT fields, the query also matches rows that aren't equal.
 A TEXT query finds the documents containing the value's words.
 A TAG query matches any of the tags Redis splits a value into on the field's `SEPARATOR`, ignoring surrounding whitespace and, unless the field is `CASESENSITIVE`, case.
