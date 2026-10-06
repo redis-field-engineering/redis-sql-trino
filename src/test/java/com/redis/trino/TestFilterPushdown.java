@@ -61,10 +61,19 @@ public class TestFilterPushdown extends AbstractTestQueryFramework {
 		redis.ftCreate("jsonstyles", CreateArgs.builder().on(TargetType.JSON).withPrefix("jsonstyle:").build(),
 				List.of(TagFieldArgs.builder().name("$.id").as("id").build(),
 						TagFieldArgs.builder().name("$.style").as("style").build(),
-						TextFieldArgs.builder().name("$.name").as("name").build()));
+						TextFieldArgs.builder().name("$.name").as("name").build(),
+						TagFieldArgs.builder().name("$.tags[*]").as("tags").build(),
+						TagFieldArgs.builder().name("$.flag").as("flag").build()));
 		redisearch.awaitIndexed("jsonstyles");
-		redis.jsonSet("jsonstyle:1", JsonPath.ROOT_PATH, "{\"id\": \"1\", \"style\": \"Wheat\", \"name\": \"Hocus Pocus\"}");
-		redis.jsonSet("jsonstyle:2", JsonPath.ROOT_PATH, "{\"id\": \"2\", \"style\": \"wheat\", \"name\": \"hocus pocus\"}");
+		redis.jsonSet("jsonstyle:1", JsonPath.ROOT_PATH, "{\"id\": \"1\", \"style\": \"Wheat\", \"name\": \"Hocus Pocus\", "
+				+ "\"tags\": [\"a\", \"b\"], \"flag\": true}");
+		redis.jsonSet("jsonstyle:2", JsonPath.ROOT_PATH, "{\"id\": \"2\", \"style\": \"wheat\", \"name\": \"hocus pocus\", "
+				+ "\"tags\": [\"b\", \"a\"], \"flag\": false}");
+		// An array at a path of single values, which the connector reads as its JSON text, and nulls
+		redis.jsonSet("jsonstyle:3", JsonPath.ROOT_PATH, "{\"id\": \"3\", \"style\": [\"Wheat\", \"Ale\"], "
+				+ "\"name\": null, \"tags\": [], \"flag\": null}");
+		redis.jsonSet("jsonstyle:4", JsonPath.ROOT_PATH, "{\"id\": \"4\"}");
+		redis.jsonSet("jsonstyle:5", JsonPath.ROOT_PATH, "{\"id\": \"5\", \"style\": \"1\", \"flag\": \"1\"}");
 		return RediSearchQueryRunner.createRediSearchQueryRunner(redisearch);
 	}
 
@@ -157,12 +166,38 @@ public class TestFilterPushdown extends AbstractTestQueryFramework {
 
 	@Test
 	public void testJsonEquality() {
-		// FILTER isn't used on JSON indexes, so Trino keeps the equal rows Redis returns
-		assertThat(query("SELECT id FROM jsonstyles WHERE style = 'Wheat'")).isNotFullyPushedDown(FilterNode.class)
+		// Scans keep the equal rows themselves, since FILTER can't compare the arrays DIALECT 3 loads
+		assertThat(query("SELECT id FROM jsonstyles WHERE style = 'Wheat'")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '1'");
-		assertThat(query("SELECT id FROM jsonstyles WHERE name = 'Hocus Pocus'")).isNotFullyPushedDown(FilterNode.class)
+		assertThat(query("SELECT id FROM jsonstyles WHERE name = 'Hocus Pocus'")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '1'");
-		assertThat(query("SELECT count(*) FROM jsonstyles WHERE style = 'wheat'")).matches("VALUES BIGINT '1'");
+		assertThat(query("SELECT id FROM jsonstyles WHERE style IN ('Wheat', 'wheat')")).isFullyPushedDown()
+				.matches("VALUES VARCHAR '1', '2'");
+		// The first of the values at a path
+		assertThat(query("SELECT id FROM jsonstyles WHERE tags = 'b'")).isFullyPushedDown().matches("VALUES VARCHAR '2'");
+		// With DIALECT 2, aggregations compare the same values with FILTER
+		assertThat(query("SELECT count(*) FROM jsonstyles WHERE style = 'wheat'")).isFullyPushedDown()
+				.matches("VALUES BIGINT '1'");
+		assertThat(query("SELECT style, count(*) FROM jsonstyles WHERE tags = 'a' GROUP BY style")).isFullyPushedDown()
+				.matches("VALUES (VARCHAR 'Wheat', BIGINT '1')");
+		assertThat(query("SELECT count(*) FROM jsonstyles WHERE name = 'hocus pocus'")).isFullyPushedDown()
+				.matches("VALUES BIGINT '1'");
+		// Redis would limit the documents @tags:{b} matches, 1 and 2, before the scan keeps the equal ones
+		assertThat(query("SELECT id FROM jsonstyles WHERE tags = 'b' LIMIT 1")).matches("VALUES VARCHAR '2'");
+	}
+
+	@Test
+	public void testJsonBooleans() {
+		// A TAG field indexes a JSON boolean as the tag true, but the connector reads it as 1, so Trino compares 1
+		assertThat(query("SELECT id FROM jsonstyles WHERE flag = '1'")).isNotFullyPushedDown(FilterNode.class)
+				.matches("VALUES VARCHAR '1', '5'");
+		assertThat(query("SELECT id FROM jsonstyles WHERE flag = '0'")).matches("VALUES VARCHAR '2'");
+		// even for a field of strings
+		assertThat(query("SELECT id FROM jsonstyles WHERE style = '1'")).isNotFullyPushedDown(FilterNode.class)
+				.matches("VALUES VARCHAR '5'");
+		assertThat(query("SELECT id FROM jsonstyles WHERE flag = 'true'")).isFullyPushedDown().returnsEmptyResult();
+		assertThat(query("SELECT count(*) FROM jsonstyles WHERE flag = 'true'")).isFullyPushedDown()
+				.matches("VALUES BIGINT '0'");
 	}
 
 	private String explain(String sql) {

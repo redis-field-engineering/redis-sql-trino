@@ -119,7 +119,8 @@ public class RediSearchColumnHandle implements ColumnHandle {
 
 	/**
 	 * @return whether an FT.AGGREGATE FILTER on this field compares the same value the connector reads, so it can
-	 *         check SQL equality exactly. True for TAG and TEXT fields of hash indexes.
+	 *         check SQL equality exactly. True for TAG and TEXT fields of hash indexes, and of JSON indexes with
+	 *         DIALECT 2, which aggregations use; scans of JSON documents keep the equal rows in the connector.
 	 */
 	@JsonProperty
 	public boolean isFilterable() {
