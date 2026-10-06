@@ -75,6 +75,85 @@ Redis deployments that include the Query Engine:
 |7.8.0
 |===
 
+=== Tested deployment matrix
+
+Functional compatibility was tested on 2026-10-06 with connector `0.4.1-SNAPSHOT` at commit `de16df3`, Trino 483, and Temurin Java 25.0.4.1.
+The same targeted Trino probe exercised 11 checks: catalog connection, TAG table creation, INSERT, row scans, TAG predicate pushdown, COUNT, ADD COLUMN, UPDATE/readback, DELETE/readback, NUMERIC table creation, and SUM.
+These results cover that probe; they do not establish full-suite coverage or performance characteristics.
+
+[cols="2,2,3,3",options="header"]
+|===
+|Deployment |Redis / Search version |Settings used |Result
+
+|Redis Cloud Essentials, RAM (non-Flex)
+|Redis 8.6; Search 8.6.10
+|AWS us-east-1; 5 GB RAM; Single-Zone persistence plan; RESP3; clustering and OSS Cluster API disabled
+|*PASS*: all 11 checks
+
+|Redis Cloud Essentials, Flex
+|Redis 8.6; Search absent
+|AWS us-east-1; 5 GB RAM + flash; Single-Zone persistence plan; RESP3; clustering and OSS Cluster API disabled
+|*BLOCKED*: `FT._LIST` is unavailable; later connector checks were not reached
+
+|Local Redis Enterprise Software, RAM (non-Flex)
+|Software 8.2.0-78 (arm64); engine 8.6.2; Search 8.6.11
+|256 MiB RAM; `bigstore=false`; one shard; replication disabled; RESP3
+|*PASS*: all 11 checks
+
+|Local Redis Enterprise Software, Flex
+|Software 8.2.0-78 (arm64); engine 8.6.2 (`8.6-big`); Search 8.6.11
+|1 GiB total / 128 MiB RAM; `bigstore=true`; `search_on_bigstore=true`; one shard; replication disabled; RESP3
+|*FAIL*: TAG table creation succeeds; INSERT is blocked during schema discovery. Direct command probes confirmed the limitations below
+|===
+
+Both local databases ran on the same single-node `redislabs/redis:latest` container; the version above records the actual tested build.
+Connector settings were `redisearch.default-schema-name=tpch`, `redisearch.scan-connections=1`, and `redisearch.cluster=false`.
+Tests used `redis://` connections, a temporary ACL user scoped to the Cloud databases, and no authentication on the local test endpoints.
+Temporary users, roles, databases, indexes, and test hashes were removed after testing.
+
+==== Flex limitations
+
+Redis Cloud Essentials Flex does not include Search and Query: the tested database had no Search module and none of `FT._LIST`, `FT.INFO`, `FT.SEARCH`, `FT.AGGREGATE`, `FT.CREATE`, `FT.ALTER`, or `FT.DROPINDEX` were registered.
+https://redis.io/docs/latest/operate/rc/databases/create-database/create-flex-database/[Redis documents Search and Query on Flex] as a Cloud Pro Preview feature, unavailable on Essentials.
+*Cloud Pro Flex Preview was not tested.* Its documented limitations also include `FT.AGGREGATE` and NUMERIC fields, both required by this connector.
+
+The tested local Flex build loaded Search and advertised its commands, but execution rejected these operations:
+
+[cols="2,3,3",options="header"]
+|===
+|Operation |Observed error |Connector impact
+
+|`FT.SEARCH index *` with returned fields
+|`NOCONTENT or RETURN 0 must be provided in Redis Flex`
+|Schema discovery fails before INSERT; reduced searches returning keys work
+
+|`FT.AGGREGATE`
+|`FT.AGGREGATE is not supported in Redis Flex`
+|All table scans and aggregation paths require this command
+
+|`FT.CREATE` with NUMERIC fields
+|`NUMERIC fields are not supported in Flex indexes`
+|Numeric SQL column creation fails, including bigint and double
+
+|`FT.ALTER`
+|`FT.ALTER is not supported in Redis Flex`
+|ADD COLUMN fails
+
+|`FT.DROPINDEX ... DD`
+|`DD is not supported in Redis Flex`
+|The connector's index-and-data deletion operation is unsupported
+|===
+
+Local Flex accepted TAG indexes with `SKIPINITIALSCAN`, core hash writes, TAG predicates with `NOCONTENT`, `FT.SEARCH ... RETURN 0`, and `FT.DROPINDEX` without `DD`.
+The connector already supplies `SKIPINITIALSCAN` when creating tables.
+*Flex is not supported by the current connector on these tested targets.* Later Redis Software builds need another execution-level compatibility run; `COMMAND INFO` alone cannot establish support.
+
+Follow-up issues:
+
+* https://github.com/redis-field-engineering/redis-sql-trino/issues/118[#118: actionable diagnostics for missing Search capabilities]
+* https://github.com/redis-field-engineering/redis-sql-trino/issues/119[#119: Flex schema discovery and read paths]
+* https://github.com/redis-field-engineering/redis-sql-trino/issues/120[#120: Flex numeric and DDL limitations]
+
 == Quick start
 
 To understand how {name} works, it's best to try it for yourself.
