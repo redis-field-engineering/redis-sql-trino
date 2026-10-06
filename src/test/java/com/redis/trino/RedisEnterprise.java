@@ -266,6 +266,8 @@ public class RedisEnterprise implements Closeable {
 		synchronized (freePorts) {
 			port = requireNonNull(freePorts.poll(), "No free database port");
 		}
+		// Whether a database the cluster still counts the shards of is left over from a failure
+		boolean leftOver = false;
 		try {
 			ImmutableMap.Builder<String, Object> spec = ImmutableMap.<String, Object>builder()
 					.put("name", "db" + databaseCount.incrementAndGet()).put("type", "redis")
@@ -279,14 +281,33 @@ public class RedisEnterprise implements Closeable {
 						.put("shard_key_regex", List.of(Map.of("regex", ".*\\{(?<tag>.*)\\}.*"), Map.of("regex", "(?<tag>.*)")));
 			}
 			long uid = create(spec.buildOrThrow());
-			await("database " + uid, () -> "active".equals(request("GET", "/v1/bdbs/" + uid, null, true).get("status")));
-			String host = container.getHost();
-			await("database " + uid + " endpoint", () -> isPingable(host, port));
-			return new Database(uid, host, port, deployment);
+			try {
+				await("database " + uid, () -> "active".equals(status(uid)));
+				String host = container.getHost();
+				await("database " + uid + " endpoint", () -> isPingable(host, port));
+				return new Database(uid, host, port, deployment);
+			} catch (RuntimeException e) {
+				// The license counts its shards until it's gone: other test classes would fail to create theirs
+				try {
+					delete(uid);
+				} catch (RuntimeException deleteFailure) {
+					e.addSuppressed(deleteFailure);
+					leftOver = true;
+				}
+				throw e;
+			}
 		} catch (RuntimeException e) {
-			release(port, deployment);
+			if (!leftOver) {
+				release(port, deployment);
+			}
 			throw e;
 		}
+	}
+
+	// The REST API briefly answers with other statuses, such as 401, while the cluster changes
+	private Object status(long uid) {
+		HttpResponse<String> response = send("GET", "/v1/bdbs/" + uid, null, true);
+		return response.statusCode() == 200 ? JSON.fromJson(response.body()).get("status") : null;
 	}
 
 	// The node also refuses a database it has no memory left for, until other test classes delete theirs
@@ -306,11 +327,14 @@ public class RedisEnterprise implements Closeable {
 	}
 
 	public void deleteDatabase(Database database) {
-		send("DELETE", "/v1/bdbs/" + database.uid, null, true);
-		// The license counts shards until the database is gone
-		await("deleting database " + database.uid,
-				() -> send("GET", "/v1/bdbs/" + database.uid, null, true).statusCode() == 404);
+		delete(database.uid);
 		release(database.port, database.deployment);
+	}
+
+	private void delete(long uid) {
+		send("DELETE", "/v1/bdbs/" + uid, null, true);
+		// The license counts shards until the database is gone
+		await("deleting database " + uid, () -> send("GET", "/v1/bdbs/" + uid, null, true).statusCode() == 404);
 	}
 
 	private void release(int port, Deployment deployment) {
