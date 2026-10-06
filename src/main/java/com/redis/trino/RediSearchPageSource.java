@@ -48,8 +48,7 @@ import io.trino.spi.type.Type;
 
 /**
  * Reads the rows of an FT.AGGREGATE and its cursor. While Trino processes a batch, the next {@link #READS_AHEAD}
- * batches are read, so that Redis computes one while the client receives and decodes the one before. Trino waits on
- * {@link #isBlocked()} when it gets ahead of Redis.
+ * batches are read. Trino waits on {@link #isBlocked()} when it gets ahead of Redis.
  */
 public class RediSearchPageSource implements ConnectorPageSource {
 
@@ -57,9 +56,11 @@ public class RediSearchPageSource implements ConnectorPageSource {
 
 	private static final int ROWS_PER_PAGE = 1024;
 
-	// A cursor keeps its ID from read to read, so a read can be sent before the reply to the one before arrives.
-	// Redis runs a connection's commands in order, so the replies come in the order of the batches.
-	static final int READS_AHEAD = 2;
+	// A cursor keeps its ID from read to read, so a read can be sent before the reply to the one before arrives, and
+	// Redis runs a connection's commands in order, so the replies come in the order of the batches. Reading two ahead
+	// made a full scan 14% faster, but other queries on the scan's connection waited behind both batches: point
+	// lookups during scans took 2.8 times as long (#115).
+	static final int READS_AHEAD = 1;
 
 	private final RediSearchSession session;
 	private final RediSearchSession.Connection connection;
