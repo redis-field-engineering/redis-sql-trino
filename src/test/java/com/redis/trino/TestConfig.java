@@ -26,6 +26,7 @@ public class TestConfig {
 				.setScanConnections(RediSearchConfig.DEFAULT_SCAN_CONNECTIONS)
 				.setTableCacheRefresh(RediSearchConfig.DEFAULT_TABLE_CACHE_REFRESH.toSeconds()).setCluster(false)
 				.setCaCertPath(null).setKeyPassword(null).setKeyPath(null).setCertPath(null)
+				.setAggregationPushdownEnabled(true)
 				.setDynamicFilteringEnabled(true)
 				.setDynamicFilteringWaitTimeout(RediSearchConfig.DEFAULT_DYNAMIC_FILTERING_WAIT_TIMEOUT));
 	}
@@ -36,6 +37,7 @@ public class TestConfig {
 		String defaultSchema = "myschema";
 		Map<String, String> properties = ImmutableMap.<String, String>builder().put("redisearch.uri", uri)
 				.put("redisearch.default-schema-name", defaultSchema).put("redisearch.resp2", "true")
+				.put("redisearch.aggregation-pushdown.enabled", "false")
 				.put("redisearch.scan-connections", "2").put("redisearch.dynamic-filtering.enabled", "false").put("redisearch.dynamic-filtering.wait-timeout", "3s")
 				.buildOrThrow();
 
@@ -48,6 +50,7 @@ public class TestConfig {
 		assertThat(config.getUri()).isEqualTo(expected.getUri());
 		assertThat(config.isResp2()).isTrue();
 		assertThat(config.getScanConnections()).isEqualTo(2);
+		assertThat(config.isAggregationPushdownEnabled()).isFalse();
 		assertThat(config.isDynamicFilteringEnabled()).isFalse();
 		assertThat(config.getDynamicFilteringWaitTimeout()).isEqualTo(new Duration(3, TimeUnit.SECONDS));
 	}

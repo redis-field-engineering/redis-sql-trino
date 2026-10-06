@@ -274,6 +274,11 @@ public class RedisEnterprise implements Closeable {
 					.put("memory_size", DATABASE_MEMORY).put("port", port).put("redis_version", redisVersion)
 					.put("module_list", List.of(Map.of("module_name", "search", "module_args", ""),
 							Map.of("module_name", "ReJSON", "module_args", "")));
+			// Opt-in tuning for benchmarks; ordinary tests retain the database defaults.
+			int performanceFactor = Integer.getInteger("benchmark.query-performance-factor", 0);
+			if (performanceFactor > 0) {
+				spec.put("query_performance_factor", Map.of("active", true, "scaling_factor", performanceFactor));
+			}
 			if (deployment == Deployment.SHARDED) {
 				spec.put("sharding", true).put("shards_count", deployment.getShards()).put("oss_cluster", true)
 						.put("oss_cluster_api_preferred_ip_type", networkAlias.isPresent() ? "internal" : "external")

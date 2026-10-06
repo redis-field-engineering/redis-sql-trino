@@ -80,8 +80,20 @@ public class RediSearchConfig {
 
     private long tableCacheRefresh = DEFAULT_TABLE_CACHE_REFRESH.toSeconds();
     private long scanConnections = DEFAULT_SCAN_CONNECTIONS;
+    private boolean aggregationPushdownEnabled = true;
     private boolean dynamicFilteringEnabled = true;
     private io.airlift.units.Duration dynamicFilteringWaitTimeout = DEFAULT_DYNAMIC_FILTERING_WAIT_TIMEOUT;
+
+    public boolean isAggregationPushdownEnabled() {
+        return aggregationPushdownEnabled;
+    }
+
+    @Config("redisearch.aggregation-pushdown.enabled")
+    @ConfigDescription("Compute aggregations in Redis; disable to reduce contention with latency-sensitive queries")
+    public RediSearchConfig setAggregationPushdownEnabled(boolean aggregationPushdownEnabled) {
+        this.aggregationPushdownEnabled = aggregationPushdownEnabled;
+        return this;
+    }
 
     @Min(0)
     public long getCursorCount() {
