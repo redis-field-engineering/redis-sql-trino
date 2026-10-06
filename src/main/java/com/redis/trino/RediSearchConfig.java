@@ -129,12 +129,14 @@ public class RediSearchConfig {
     }
 
     @Config("redisearch.table-cache-refresh")
-    @ConfigDescription("Duration in seconds since the entry creation after which to automatically refresh the table cache.")
+    @ConfigDescription("Seconds after which a cached table is described again in the background, while queries keep "
+            + "using it; a table no query reads for ten times as long expires. 0 disables the cache.")
     public RediSearchConfig setTableCacheRefresh(long refreshDuration) {
         this.tableCacheRefresh = refreshDuration;
         return this;
     }
 
+    @Min(0)
     public long getTableCacheRefresh() {
         return tableCacheRefresh;
     }
