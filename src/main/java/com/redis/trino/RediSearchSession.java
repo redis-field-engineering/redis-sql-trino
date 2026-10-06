@@ -64,6 +64,7 @@ import io.lettuce.core.AbstractRedisClient;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.LettuceFutures;
 import io.lettuce.core.RedisClient;
+import io.lettuce.core.RedisCommandExecutionException;
 import io.lettuce.core.RedisCommandTimeoutException;
 import io.lettuce.core.RedisFuture;
 import io.lettuce.core.RedisURI;
@@ -88,10 +89,12 @@ import io.lettuce.core.protocol.ProtocolVersion;
 import io.lettuce.core.search.AggregationReply;
 import io.lettuce.core.search.AggregationReply.Cursor;
 import io.lettuce.core.search.SearchReply;
+import io.lettuce.core.search.arguments.AggregateArgs;
 import io.lettuce.core.search.arguments.CreateArgs;
 import io.lettuce.core.search.arguments.FieldArgs;
 import io.lettuce.core.search.arguments.GeoFieldArgs;
 import io.lettuce.core.search.arguments.NumericFieldArgs;
+import io.lettuce.core.search.arguments.QueryDialects;
 import io.lettuce.core.search.arguments.TagFieldArgs;
 import io.lettuce.core.search.arguments.TextFieldArgs;
 import io.trino.spi.HostAddress;
@@ -169,6 +172,9 @@ public class RediSearchSession {
     private final boolean resp3;
 
     private static final int TABLE_REFRESH_THREADS = 2;
+
+    // Whether APPLY steps can use case(), once a probe has evaluated it
+    private volatile Boolean caseSupported;
 
     public RediSearchSession(TypeManager typeManager, RediSearchConfig config) {
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
@@ -300,6 +306,38 @@ public class RediSearchSession {
      */
     public boolean isResp3() {
         return resp3;
+    }
+
+    /**
+     * Whether Redis evaluates {@code case()} in APPLY steps. Redis 8.2 and later do; Redis 8.0 and Redis Stack 7.4
+     * have it only with unstable features enabled, and fail a query only once they evaluate it on a document. So the
+     * probe evaluates it on one of the index's documents; if the index has none, it tells nothing and is tried again
+     * next time.
+     */
+    public boolean isCaseSupported(String index) {
+        Boolean supported = caseSupported;
+        if (supported != null) {
+            return supported;
+        }
+        try {
+            AggregationReply<String> reply = sync.ftAggregate(index, "*",
+                    AggregateArgs.builder().apply("case(1, 1, 0)", "__probe").limit(0, 1)
+                            .dialect(QueryDialects.DIALECT2).build());
+            if (reply.getReplies().stream().anyMatch(searchReply -> !searchReply.getResults().isEmpty())) {
+                caseSupported = true;
+                return true;
+            }
+        } catch (RedisCommandExecutionException e) {
+            // "Unknown function name 'case'", or unavailable without unstable features
+            if (e.getMessage() != null && e.getMessage().contains("case")) {
+                log.info("Redis can't evaluate case(), so Redis computes sums and averages with SUM and AVG: %s",
+                        e.getMessage());
+                caseSupported = false;
+            } else {
+                log.warn(e, "Could not tell whether Redis evaluates case()");
+            }
+        }
+        return false;
     }
 
     private static boolean isResp3(StatefulConnection<String, String> connection) {
