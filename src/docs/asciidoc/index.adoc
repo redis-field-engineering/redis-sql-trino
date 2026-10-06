@@ -302,6 +302,10 @@ Over RESP2 (`redisearch.resp2`, or a database without RESP3), the shards of a sh
 On a BIGINT column, results and keys are exact only for values and sums below 2^53.
 Trino groups DECIMAL columns itself, and DOUBLE and REAL columns whose names aren't made of letters, digits and `_`.
 Trino evaluates `HAVING` on the groups Redis returns.
+* `sum` and `avg` of arithmetic on hash indexes, such as `sum(quantity * extendedprice)`: `+`, `-`, `*`, `/` and unary `-` on DOUBLE NUMERIC columns, on integer NUMERIC columns cast to DOUBLE, and on DOUBLE constants.
+An `APPLY` step computes the arithmetic before `GROUPBY`, for the documents that have all of its columns (`+APPLY "case(exists(@quantity) && exists(@extendedprice), (@quantity * @extendedprice), 0)"+`), so it needs `case()` too.
+A scan that returns the arithmetic computes it in the connector, from the values as stored.
+Trino computes arithmetic on integers, which SQL fails on when it overflows, on REAL values, which Redis would compute as doubles, and `min` and `max` of arithmetic, since Trino orders nan above other doubles.
 * `LIMIT`, unless Trino filters the rows itself. Trino sorts `ORDER BY \... LIMIT` itself.
 
 [[known-limitations]]

@@ -18,6 +18,7 @@ import io.lettuce.core.search.arguments.TagFieldArgs;
 import io.lettuce.core.search.arguments.TextFieldArgs;
 import io.trino.spi.type.BigintType;
 import io.trino.sql.planner.plan.FilterNode;
+import io.trino.sql.planner.plan.ProjectNode;
 import io.trino.testing.AbstractTestQueryFramework;
 import io.trino.testing.QueryRunner;
 
@@ -151,6 +152,23 @@ public class TestWrites extends AbstractTestQueryFramework {
 					"VALUES (REAL '0.1', BIGINT '2'), (REAL '0.2', BIGINT '1')");
 		} finally {
 			assertUpdate("DROP TABLE exact_aggregates");
+		}
+	}
+
+	@Test
+	public void testAggregatesOfArithmeticOnDeclaredTypes() {
+		assertUpdate("CREATE TABLE arithmetic (a bigint, b bigint, r real, x double)");
+		try {
+			assertUpdate("INSERT INTO arithmetic VALUES (2, 3, REAL '1.1', 0.5), (4, 5, REAL '2.5', 1.5)", 2);
+			// A BIGINT cast to a double, which Redis parses the same
+			assertExactAggregation("SELECT sum(a * x) FROM arithmetic", "VALUES DOUBLE '7'");
+			// Integer arithmetic overflows in SQL but not in Redis, and Redis would compute REAL values as doubles
+			assertThat(query("SELECT sum(a * b) FROM arithmetic")).isNotFullyPushedDown(ProjectNode.class)
+					.matches("VALUES BIGINT '26'");
+			assertThat(query("SELECT sum(r * x) FROM arithmetic")).isNotFullyPushedDown(ProjectNode.class)
+					.matches("SELECT sum(CAST(REAL '1.1' AS double) * 0.5 + CAST(REAL '2.5' AS double) * 1.5)");
+		} finally {
+			assertUpdate("DROP TABLE arithmetic");
 		}
 	}
 

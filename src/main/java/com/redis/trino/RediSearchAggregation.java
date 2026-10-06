@@ -139,15 +139,25 @@ public class RediSearchAggregation {
 	 * operators and functions of other expressions fail on a missing value; case evaluates only the branch it takes.
 	 */
 	public String valueExpression() {
-		String property = "@" + columnHandle.orElseThrow().getName();
-		return "case(exists(" + property + "), " + property + ", 0)";
+		RediSearchColumnHandle column = columnHandle.orElseThrow();
+		String value = column.getExpression().map(RediSearchExpression::toRedis).orElse("@" + column.getName());
+		return "case(" + hasValueExpression() + ", " + value + ", 0)";
 	}
 
 	/**
-	 * 1 for a document with a value, and 0 for one without.
+	 * 1 for a document with a value, and 0 for one without: for arithmetic, one with all of its columns' values.
 	 */
 	public String hasValueExpression() {
-		return "exists(@" + columnHandle.orElseThrow().getName() + ")";
+		return String.join(" && ", getInputFields().stream().map(field -> "exists(@" + field + ")").toList());
+	}
+
+	/**
+	 * @return the fields the aggregation reads: its column's, or the columns its arithmetic reads
+	 */
+	public List<String> getInputFields() {
+		RediSearchColumnHandle column = columnHandle.orElseThrow();
+		return column.getExpression().map(expression -> List.copyOf(expression.getColumns().keySet()))
+				.orElse(List.of(column.getName()));
 	}
 
 	/**
@@ -210,9 +220,16 @@ public class RediSearchAggregation {
 			return Optional.empty();
 		}
 		String functionName = function.getFunctionName();
-		// Expressions can only refer to a field whose name is a property
+		RediSearchColumnHandle column = parameterColumnHandle.get();
+		// Expressions can only refer to a field whose name is a property; arithmetic only refers to those
 		boolean countingValues = countValues && (SUM.equals(functionName) || AVG.equals(functionName))
-				&& RediSearchQueryBuilder.isProperty(parameterColumnHandle.get().getName());
+				&& (column.getExpression().isPresent() || RediSearchQueryBuilder.isProperty(column.getName()));
+		// Only the sum and average of arithmetic, which an APPLY step computes, and only with case(), which keeps a
+		// document without a value from failing it. Trino orders nan as larger than other doubles, where Redis's MIN
+		// and MAX don't.
+		if (column.getExpression().isPresent() && !countingValues) {
+			return Optional.empty();
+		}
 		return Optional.of(new RediSearchAggregation(functionName, function.getOutputType(), parameterColumnHandle,
 				alias, countingValues));
 	}
@@ -238,6 +255,7 @@ public class RediSearchAggregation {
 
 	@Override
 	public String toString() {
-		return String.format("%s(%s)", functionName, columnHandle.map(RediSearchColumnHandle::getName).orElse(""));
+		return String.format("%s(%s)", functionName, columnHandle.map(column -> column.getExpression()
+				.map(RediSearchExpression::toRedis).orElse(column.getName())).orElse(""));
 	}
 }
