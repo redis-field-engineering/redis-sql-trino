@@ -294,8 +294,11 @@ Trino also evaluates `LIKE`. A Redis wildcard query matches single words of a TE
 * `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, and `min` and `max` on TIMESTAMP(3) and TIMESTAMP(3) WITH TIME ZONE columns, with or without `GROUP BY`, as `FT.AGGREGATE` with `GROUPBY` and `REDUCE`.
 If any aggregate in a query can't be pushed down, such as `count(DISTINCT \...)` or `count(column)`, or Trino filters the rows itself, as it does for filters on TAG and TEXT fields of JSON indexes, Trino computes all of them.
 `count(column)` skips nulls, but Redis's `COUNT` counts documents, so only `count(*)` is pushed down.
+`sum` and `avg` add up each document's value, or 0 for a document without one (`APPLY "case(exists(@x), @x, 0)"`), and count the values (`APPLY "exists(@x)"`); the connector returns null for a group with no values and divides each average itself.
+On a sharded database, Redis's own `SUM` and `AVG` return null for a group when one shard has none of its values, and `AVG` divides by the number of documents.
+`case()` needs Redis 8.2 or later, or unstable features enabled on Redis 8.0 and Redis Stack 7.4; without it, and for columns whose names aren't made of letters, digits and `_`, the connector sends `SUM` and `AVG`, which are right on a single shard.
 Redis computes on the double values of NUMERIC fields, and formats the results and the `GROUP BY` keys rounded to 12 significant digits unless they're integers.
-So for each DOUBLE or REAL result and key, which includes every `avg`, `APPLY` steps also return it as an integer mantissa and exponent, which Redis formats in full, and the connector reads the exact double.
+So for each DOUBLE or REAL result and key, and the sum each `avg` is divided from, `APPLY` steps also return it as an integer mantissa and exponent, which Redis formats in full, and the connector reads the exact double.
 Over RESP2 (`redisearch.resp2`, or a database without RESP3), the shards of a sharded database send these values to its coordinator already rounded, so Trino computes those aggregations.
 On a BIGINT column, results and keys are exact only for values and sums below 2^53.
 Trino groups DECIMAL columns itself, and DOUBLE and REAL columns whose names aren't made of letters, digits and `_`.
