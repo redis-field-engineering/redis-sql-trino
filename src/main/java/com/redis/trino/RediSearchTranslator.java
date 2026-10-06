@@ -142,6 +142,10 @@ public class RediSearchTranslator {
 		Set<String> loads = new LinkedHashSet<>();
 		loads.add(RediSearchBuiltinField.KEY.getName());
 		loads.addAll(equalities.keySet());
+		// Sums and averages counting values, whose APPLY steps refer to their columns
+		List<RediSearchAggregation> countingValues = table.getMetricAggregations().stream()
+				.filter(RediSearchAggregation::isCountingValues).toList();
+		countingValues.forEach(metric -> loads.add(metric.getColumnHandle().orElseThrow().getName()));
 		Map<String, String> sources = new HashMap<>();
 		Map<String, String> exactSources = new HashMap<>();
 		Map<String, RediSearchIndexInfo.Field> fields = indexInfo.map(RediSearchIndexInfo::getFields).orElse(List.of())
@@ -172,15 +176,28 @@ public class RediSearchTranslator {
 		// Steps run in the order they're added: GROUPBY leaves only the groups, SORTBY keeps the first LIMIT of the
 		// filtered rows, and LIMIT counts the filtered rows
 		filters.values().forEach(args::filter);
+		for (RediSearchAggregation metric : countingValues) {
+			args.apply(metric.valueExpression(), metric.getValueField());
+			args.apply(metric.hasValueExpression(), metric.getHasValueField());
+		}
 		groupBy.ifPresent(args::groupBy);
 		// The keys and results that needn't be integers, as mantissas and exponents
 		Map<String, Type> exactNumbers = new HashMap<>();
 		if (groupBy.isPresent()) {
+			Map<String, RediSearchAggregation> metrics = table.getMetricAggregations().stream()
+					.collect(toMap(RediSearchAggregation::getAlias, identity()));
 			for (int i = 0; i < columns.size(); i++) {
 				RediSearchColumnHandle column = columns.get(i);
-				if (RediSearchExactNumbers.isFloatingPoint(column.getType())) {
+				Type type = column.getType();
+				RediSearchAggregation metric = metrics.get(column.getName());
+				if (metric != null && metric.isCountingValues()
+						&& RediSearchAggregation.AVG.equals(metric.getFunctionName())) {
+					// The reader divides the sum, a double of any column's type, by the count
+					type = DOUBLE;
+				}
+				if (RediSearchExactNumbers.isFloatingPoint(type)) {
 					RediSearchExactNumbers.apply(args, column.getName(), i);
-					exactNumbers.put(column.getName(), column.getType());
+					exactNumbers.put(column.getName(), type);
 				}
 			}
 		}

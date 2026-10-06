@@ -194,6 +194,11 @@ public class TestQueryBuilder {
 				Domain.create(ValueSet.ofRanges(range(DateType.DATE, day, true, day + 1000, true)), false))).isFalse();
 		assertThat(RediSearchQueryBuilder.isSupported(declared("day", DateType.DATE, RediSearchFieldType.TAG),
 				Domain.create(ValueSet.ofRanges(greaterThan(DateType.DATE, day)), false))).isFalse();
+		// No dates between them
+		RediSearchColumnHandle dayColumn = declared("day", DateType.DATE, RediSearchFieldType.TAG);
+		Domain none = Domain.create(ValueSet.ofRanges(range(DateType.DATE, day, false, day + 1, false)), false);
+		assertThat(RediSearchQueryBuilder.isSupported(dayColumn, none)).isFalse();
+		assertThat(RediSearchQueryBuilder.isExact(dayColumn, none)).isFalse();
 		RediSearchColumnHandle uuid = declared("u", UuidType.UUID, RediSearchFieldType.TAG);
 		Domain uuidValue = Domain.singleValue(UuidType.UUID,
 				UuidType.javaUuidToTrinoUuid(java.util.UUID.fromString("12151FD2-7586-11E9-8F9E-2A86E4085A59")));
@@ -368,6 +373,46 @@ public class TestQueryBuilder {
 				.containsExactly("Wheat", "2", null);
 		// A global aggregation over no documents counts 0
 		assertThat(reader.emptyAggregation()).containsExactly(null, "0", null);
+	}
+
+	@Test
+	public void testSumsAndAveragesCountValues() {
+		RediSearchAggregation sum = new RediSearchAggregation(RediSearchAggregation.SUM, DoubleType.DOUBLE,
+				Optional.of(numeric("abv", DoubleType.DOUBLE)), "s", true);
+		RediSearchAggregation avg = new RediSearchAggregation(RediSearchAggregation.AVG, RealType.REAL,
+				Optional.of(numeric("ibu", RealType.REAL)), "a", true);
+		RediSearchColumnHandle style = filterable("style", RediSearchFieldType.TAG);
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers",
+				TupleDomain.all(), OptionalLong.empty(),
+				List.of(new RediSearchAggregationTerm("style", createUnboundedVarcharType())), List.of(sum, avg),
+				List.of());
+		RediSearchColumnHandle s = new RediSearchColumnHandle("s", DoubleType.DOUBLE, RediSearchFieldType.NUMERIC, false,
+				false, Optional.empty());
+		RediSearchColumnHandle a = new RediSearchColumnHandle("a", RealType.REAL, RediSearchFieldType.NUMERIC, false,
+				false, Optional.empty());
+		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
+				List.of(style, s, a), Optional.of(hashIndex()));
+		// Every document adds a number to each sum, and the count of its values. The average's sum is read as a double.
+		assertThat(commandString(aggregation)).isEqualTo("LOAD 6 __key abv ibu style s a "
+				+ "APPLY case(exists(@abv), @abv, 0) AS __value_s APPLY exists(@abv) AS __has_s "
+				+ "APPLY case(exists(@ibu), @ibu, 0) AS __value_a APPLY exists(@ibu) AS __has_a "
+				+ "GROUPBY 1 @style REDUCE SUM 1 @__value_s AS s REDUCE SUM 1 @__has_s AS __count_s "
+				+ "REDUCE SUM 1 @__value_a AS a REDUCE SUM 1 @__has_a AS __count_a "
+				+ "APPLY floor(log2(abs(@s))) AS __exponent_1 "
+				+ "APPLY abs(@s) * 2 ^ (26 - floor(@__exponent_1 / 2)) * 2 ^ (27 - ceil(@__exponent_1 / 2)) AS __mantissa_1 "
+				+ "APPLY floor(log2(abs(@a))) AS __exponent_2 "
+				+ "APPLY abs(@a) * 2 ^ (26 - floor(@__exponent_2 / 2)) * 2 ^ (27 - ceil(@__exponent_2 / 2)) AS __mantissa_2 "
+				+ "WITHCURSOR COUNT 1000 DIALECT 2");
+		RediSearchRowReader reader = aggregation.getReader();
+		assertThat(reader.read(Map.of("style", value("Wheat"), "s", value("0.5"), "__count_s", value("2"), "a",
+				value("0.5"), "__count_a", value("2")))).containsExactly("Wheat", "0.5", "0.25");
+		// No values, whose sums are 0
+		assertThat(reader.read(Map.of("style", value("None"), "s", value("0"), "__count_s", value("0"), "a",
+				value("0"), "__count_a", value("0")))).containsExactly("None", null, null);
+		// Sums that overflow, which Redis writes as Java doesn't parse them
+		assertThat(reader.read(Map.of("style", value("Big"), "s", value("inf"), "__count_s", value("1"), "a",
+				value("-inf"), "__count_a", value("2")))).containsExactly("Big", "Infinity", "-Infinity");
+		assertThat(reader.emptyAggregation()).containsExactly(null, null, null);
 	}
 
 	@Test

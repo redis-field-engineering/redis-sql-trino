@@ -24,6 +24,8 @@
 package com.redis.trino;
 
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
+import static io.trino.spi.type.RealType.REAL;
+import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 
 import java.io.IOException;
@@ -177,13 +179,53 @@ public class RediSearchRowReader {
 			if (metrics[i] != null && metrics[i].isEmptyResult(value)) {
 				value = null;
 			}
+			Optional<Long> count = Optional.empty();
+			if (metrics[i] != null && metrics[i].isCountingValues()) {
+				// Values are counted as doubles
+				count = Optional.ofNullable(asString(row.get(metrics[i].getCountAlias())))
+						.map(number -> (long) Double.parseDouble(number));
+				if (count.filter(number -> number > 0).isEmpty()) {
+					value = null;
+				}
+			}
 			if (value != null && exactNumbers[i] != null) {
 				value = RediSearchExactNumbers.read(value, asString(row.get(RediSearchExactNumbers.mantissaField(i))),
 						asString(row.get(RediSearchExactNumbers.exponentField(i))), exactNumbers[i]);
 			}
+			if (value != null && count.isPresent()) {
+				value = countedValue(metrics[i], value, count.get());
+			}
 			values[i] = value;
 		}
 		return values;
+	}
+
+	/**
+	 * A sum or average {@link RediSearchAggregation#isCountingValues counting values}, from the sum and the number of
+	 * values, as Trino computes it.
+	 */
+	private static String countedValue(RediSearchAggregation metric, String sum, long count) {
+		if (!RediSearchAggregation.AVG.equals(metric.getFunctionName())) {
+			return javaNumber(sum);
+		}
+		double average = Double.parseDouble(javaNumber(sum)) / count;
+		return metric.getOutputType() == REAL ? Float.toString((float) average) : Double.toString(average);
+	}
+
+	// Redis writes infinities and nan, from values that overflow, as Java doesn't parse them
+	private static String javaNumber(String value) {
+		switch (value.toLowerCase(ENGLISH)) {
+		case "nan":
+		case "-nan":
+			return Double.toString(Double.NaN);
+		case "inf":
+		case "+inf":
+			return Double.toString(Double.POSITIVE_INFINITY);
+		case "-inf":
+			return Double.toString(Double.NEGATIVE_INFINITY);
+		default:
+			return value;
+		}
 	}
 
 	private static String asString(FieldValue field) {

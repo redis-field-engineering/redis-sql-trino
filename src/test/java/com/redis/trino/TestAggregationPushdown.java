@@ -42,14 +42,62 @@ public class TestAggregationPushdown extends AbstractTestQueryFramework {
 		redis.hset("beer:5", Map.of("id", "5", "brewery_id", "264"));
 		redis.hset("beer:6", Map.of("id", "6", "brewery_id", "100"));
 		createNumbers(redisearch);
+		createSplit(redisearch);
 		return RediSearchQueryRunner.createRediSearchQueryRunner(redisearch);
 	}
 
 	/**
+	 * Groups whose documents with and without values are on the same shard of a sharded database, and on different
+	 * ones. A shard's SUM and AVG of no values are nan, which the coordinator adds to the other shards' sums, and its
+	 * AVG divides by the number of documents rather than of values. The sums are exact in any order.
+	 */
+	private static void createSplit(RediSearchServer redisearch) {
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		redis.ftCreate("split", CreateArgs.builder().withPrefix("split:").build(),
+				List.of(TagFieldArgs.builder().name("g").build(), NumericFieldArgs.builder().name("d").build(),
+						NumericFieldArgs.builder().name("e").build()));
+		redisearch.awaitIndexed("split");
+		List<String> keys = redisearch.keysOnShards("split:", 0, 1, 0, 0, 1, 1, 1, 0);
+		// The only value of d on one shard, and a document without it on the other
+		redis.hset(keys.get(0), Map.of("g", "Ale", "d", "0.1234567890123457", "e", "2"));
+		redis.hset(keys.get(1), Map.of("g", "Ale"));
+		// A document without d next to one with it, and one with d but not e on the other shard
+		redis.hset(keys.get(2), Map.of("g", "Mixed", "d", "4.5", "e", "1"));
+		redis.hset(keys.get(3), Map.of("g", "Mixed", "e", "3"));
+		redis.hset(keys.get(4), Map.of("g", "Mixed", "d", "1.5"));
+		// Both on one shard
+		redis.hset(keys.get(5), Map.of("g", "Shared", "d", "4.5"));
+		redis.hset(keys.get(6), Map.of("g", "Shared"));
+		redis.hset(keys.get(7), Map.of("g", "None"));
+	}
+
+	@Test
+	public void testSumsAndAveragesOfGroupsWithoutValues() {
+		assertExact("SELECT g, sum(d), avg(d) FROM split GROUP BY g", "VALUES "
+				+ "(VARCHAR 'Ale', DOUBLE '0.1234567890123457', DOUBLE '0.1234567890123457'), "
+				+ "(VARCHAR 'Mixed', DOUBLE '6', DOUBLE '3'), (VARCHAR 'Shared', DOUBLE '4.5', DOUBLE '4.5'), "
+				+ "(VARCHAR 'None', CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE))");
+		// Two averages, whose counts a sharded database's coordinator gave the same name
+		assertExact("SELECT g, count(*), sum(d), avg(d), avg(e), min(d), max(d) FROM split GROUP BY g", "VALUES "
+				+ "(VARCHAR 'Ale', BIGINT '2', DOUBLE '0.1234567890123457', DOUBLE '0.1234567890123457', DOUBLE '2', "
+				+ "DOUBLE '0.1234567890123457', DOUBLE '0.1234567890123457'), "
+				+ "(VARCHAR 'Mixed', BIGINT '3', DOUBLE '6', DOUBLE '3', DOUBLE '2', DOUBLE '1.5', DOUBLE '4.5'), "
+				+ "(VARCHAR 'Shared', BIGINT '2', DOUBLE '4.5', DOUBLE '4.5', CAST(NULL AS DOUBLE), DOUBLE '4.5', "
+				+ "DOUBLE '4.5'), "
+				+ "(VARCHAR 'None', BIGINT '1', CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE), "
+				+ "CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE))");
+		assertExact("SELECT count(*), sum(e), avg(e) FROM split", "VALUES (BIGINT '8', DOUBLE '6', DOUBLE '2')");
+		assertExact("SELECT count(*), avg(d), avg(e) FROM split WHERE g = 'Mixed'",
+				"VALUES (BIGINT '3', DOUBLE '3', DOUBLE '2')");
+		assertExact("SELECT sum(d), avg(d) FROM split WHERE g = 'Shared'", "VALUES (DOUBLE '4.5', DOUBLE '4.5')");
+		assertExact("SELECT sum(e), avg(e) FROM split WHERE g = 'Shared'",
+				"VALUES (CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE))");
+	}
+
+	/**
 	 * Doubles that Redis, which formats the numbers it computes to 12 significant digits, would round: two that only
-	 * differ after 12 digits, a sum with more, and the largest, smallest normal and a negative one. The document
-	 * without one has its own group: a sharded database's shards return nan as the sum of no values, which the
-	 * coordinator then adds.
+	 * differ after 12 digits, a sum with more, and the largest, smallest normal and a negative one. One document has
+	 * none, in a group of its own.
 	 */
 	static void createNumbers(RediSearchServer redisearch) {
 		RedisCommands<String, String> redis = redisearch.getConnection().sync();

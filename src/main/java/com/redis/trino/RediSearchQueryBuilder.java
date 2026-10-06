@@ -56,6 +56,7 @@ import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.google.common.collect.Iterables;
 import com.google.common.primitives.Primitives;
@@ -189,7 +190,8 @@ public class RediSearchQueryBuilder {
 				days.add(day);
 			}
 		}
-		return Optional.of(days);
+		// Exclusive bounds a day apart hold no dates, which a tag query can't list
+		return days.isEmpty() ? Optional.empty() : Optional.of(days);
 	}
 
 	private static boolean isNumericType(Type type) {
@@ -468,10 +470,15 @@ public class RediSearchQueryBuilder {
 		return tagValue(type, trinoNativeValue);
 	}
 
-	private Reducer reducer(RediSearchAggregation aggregation) {
+	private Stream<Reducer> reducers(RediSearchAggregation aggregation) {
+		if (aggregation.isCountingValues()) {
+			// The sum, and the number of values it adds up
+			return Stream.of(Reducer.sum(property(aggregation.getValueField())).as(aggregation.getAlias()),
+					Reducer.sum(property(aggregation.getHasValueField())).as(aggregation.getCountAlias()));
+		}
 		Optional<RediSearchColumnHandle> column = aggregation.getColumnHandle();
 		String field = column.isPresent() ? column.get().getName() : null;
-		return CONVERTERS.get(aggregation.getFunctionName()).apply(aggregation.getAlias(), field);
+		return Stream.of(CONVERTERS.get(aggregation.getFunctionName()).apply(aggregation.getAlias(), field));
 	}
 
 	public Optional<GroupBy> group(RediSearchTableHandle table) {
@@ -481,7 +488,7 @@ public class RediSearchQueryBuilder {
 		if (terms != null && !terms.isEmpty()) {
 			groupFields = terms.stream().map(RediSearchAggregationTerm::getTerm).collect(Collectors.toList());
 		}
-		List<Reducer> reducers = aggregates.stream().map(this::reducer).collect(Collectors.toList());
+		List<Reducer> reducers = aggregates.stream().flatMap(this::reducers).collect(Collectors.toList());
 		if (reducers.isEmpty()) {
 			return Optional.empty();
 		}

@@ -61,16 +61,28 @@ public class RediSearchAggregation {
 	private final Type outputType;
 	private final Optional<RediSearchColumnHandle> columnHandle;
 	private final String alias;
+	private final boolean countingValues;
 
+	public RediSearchAggregation(String functionName, Type outputType, Optional<RediSearchColumnHandle> columnHandle,
+			String alias) {
+		this(functionName, outputType, columnHandle, alias, false);
+	}
+
+	/**
+	 * @param countingValues whether a sum or average is computed from the sum and the number of the column's values,
+	 *                       which {@link #valueExpression} and {@link #hasValueExpression} return for each document,
+	 *                       rather than by Redis's SUM or AVG of the column
+	 */
 	@JsonCreator
 	public RediSearchAggregation(@JsonProperty("functionName") String functionName,
 			@JsonProperty("outputType") Type outputType,
 			@JsonProperty("columnHandle") Optional<RediSearchColumnHandle> columnHandle,
-			@JsonProperty("alias") String alias) {
+			@JsonProperty("alias") String alias, @JsonProperty("countingValues") boolean countingValues) {
 		this.functionName = functionName;
 		this.outputType = outputType;
 		this.columnHandle = columnHandle;
 		this.alias = alias;
+		this.countingValues = countingValues;
 	}
 
 	@JsonProperty
@@ -94,10 +106,64 @@ public class RediSearchAggregation {
 	}
 
 	/**
+	 * Whether the aggregation is computed from {@link #getAlias()}, the sum of {@link #valueExpression}, and
+	 * {@link #getCountAlias()}, the sum of {@link #hasValueExpression}. Redis's SUM and AVG would return nan for a group
+	 * with no values on one of a sharded database's shards, which its coordinator adds to the other shards' sums, and
+	 * the coordinator divides an average by the number of documents rather than of values.
+	 */
+	@JsonProperty
+	public boolean isCountingValues() {
+		return countingValues;
+	}
+
+	/**
+	 * @return the number of the column's values in the group, for an aggregation {@link #isCountingValues counting
+	 *         values}
+	 */
+	public String getCountAlias() {
+		return "__count_" + alias;
+	}
+
+	/**
+	 * @return the field the APPLY step of {@link #valueExpression} returns, which the sum reduces
+	 */
+	public String getValueField() {
+		return "__value_" + alias;
+	}
+
+	/**
+	 * @return the field the APPLY step of {@link #hasValueExpression} returns, which the count reduces
+	 */
+	public String getHasValueField() {
+		return "__has_" + alias;
+	}
+
+	/**
+	 * The column's value, or 0 for a document without one, so that every document adds a number to the sum. The
+	 * operators and functions of other expressions fail on a missing value; case evaluates only the branch it takes.
+	 */
+	public String valueExpression() {
+		String property = "@" + columnHandle.orElseThrow().getName();
+		return "case(exists(" + property + "), " + property + ", 0)";
+	}
+
+	/**
+	 * 1 for a document with a value, and 0 for one without.
+	 */
+	public String hasValueExpression() {
+		return "exists(@" + columnHandle.orElseThrow().getName() + ")";
+	}
+
+	/**
 	 * Whether this reducer's value means its group had no values to aggregate, which SQL represents as null. Redis
 	 * returns nan for SUM and AVG, and inf and -inf for MIN and MAX, which an index of infinite values would also give.
+	 * An aggregation {@link #isCountingValues counting values} has none when its count is 0, and its sum is never
+	 * empty.
 	 */
 	public boolean isEmptyResult(String value) {
+		if (countingValues) {
+			return false;
+		}
 		switch (functionName) {
 		case SUM:
 		case AVG:
@@ -115,8 +181,12 @@ public class RediSearchAggregation {
 		return NUMERIC_TYPES.contains(type);
 	}
 
+	/**
+	 * @param countValues whether to compute sums and averages {@link #isCountingValues counting values}, which needs
+	 *                    Redis's case function
+	 */
 	public static Optional<RediSearchAggregation> handleAggregation(AggregateFunction function,
-			Map<String, ColumnHandle> assignments, String alias) {
+			Map<String, ColumnHandle> assignments, String alias, boolean countValues) {
 		if (!SUPPORTED_AGGREGATION_FUNCTIONS.contains(function.getFunctionName())) {
 			return Optional.empty();
 		}
@@ -145,8 +215,12 @@ public class RediSearchAggregation {
 		if (parameterColumnHandle.isEmpty()) {
 			return Optional.empty();
 		}
-		return Optional.of(new RediSearchAggregation(function.getFunctionName(), function.getOutputType(),
-				parameterColumnHandle, alias));
+		String functionName = function.getFunctionName();
+		// Expressions can only refer to a field whose name is a property
+		boolean countingValues = countValues && (SUM.equals(functionName) || AVG.equals(functionName))
+				&& RediSearchQueryBuilder.isProperty(parameterColumnHandle.get().getName());
+		return Optional.of(new RediSearchAggregation(functionName, function.getOutputType(), parameterColumnHandle,
+				alias, countingValues));
 	}
 
 	@Override
@@ -159,12 +233,13 @@ public class RediSearchAggregation {
 		}
 		RediSearchAggregation that = (RediSearchAggregation) o;
 		return Objects.equals(functionName, that.functionName) && Objects.equals(outputType, that.outputType)
-				&& Objects.equals(columnHandle, that.columnHandle) && Objects.equals(alias, that.alias);
+				&& Objects.equals(columnHandle, that.columnHandle) && Objects.equals(alias, that.alias)
+				&& countingValues == that.countingValues;
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(functionName, outputType, columnHandle, alias);
+		return Objects.hash(functionName, outputType, columnHandle, alias, countingValues);
 	}
 
 	@Override

@@ -438,6 +438,10 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		if (!table.getTermAggregations().isEmpty() || table.getLimit().isPresent() || !table.getSort().isEmpty()) {
 			return Optional.empty();
 		}
+		// Sums and averages count their values where Redis can, which a sharded database needs to compute them
+		boolean countValues = aggregates.stream().map(AggregateFunction::getFunctionName)
+				.anyMatch(name -> RediSearchAggregation.SUM.equals(name) || RediSearchAggregation.AVG.equals(name))
+				&& rediSearchSession.isCaseSupported(table.getIndex());
 		ImmutableList.Builder<ConnectorExpression> projections = ImmutableList.builder();
 		ImmutableList.Builder<Assignment> resultAssignments = ImmutableList.builder();
 		ImmutableList.Builder<RediSearchAggregation> aggregations = ImmutableList.builder();
@@ -446,7 +450,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			AggregateFunction function = aggregates.get(i);
 			String colName = SYNTHETIC_COLUMN_NAME_PREFIX + i;
 			Optional<RediSearchAggregation> aggregation = RediSearchAggregation.handleAggregation(function, assignments,
-					colName);
+					colName, countValues);
 			if (aggregation.isEmpty()) {
 				return Optional.empty();
 			}
