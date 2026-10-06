@@ -517,6 +517,8 @@ See the https://{project-owner}.github.io/{project-name}/#sql-support[SQL suppor
 
 == Performance
 
+=== October 5 CI timings
+
 These are the query benchmark's timings for commit 68202c8 (October 5, 2026), from the Benchmark job of its pull request (https://github.com/{project-owner}/{project-name}/pull/100[#100]); `master` merged that code as a43401c.
 That job runs on a GitHub Actions `ubuntu-latest` runner, with Trino in the test JVM and Redis in a one-shard database on a single-node Redis Enterprise Software 8.2 container.
 The data is TPC-H `tiny`: 60,175 `lineitem` rows, 15,000 `orders` and 1,500 `customer`.
@@ -583,12 +585,58 @@ The table pools the 40 samples.
 
 In those measurements, queries that Redis filtered, aggregated, sorted or limited finished in about 100 ms or less, because only the matching rows came back to Trino.
 So does a selective join: the keys of the 60 matching customers are added to the orders query, so Redis returns only their orders.
-At that measured commit, summing an expression over `lineitem` returned every row and took about 0.6 s.
-Since #111, supported arithmetic `sum` and `avg` expressions run in Redis; the historical table above does not describe their current execution plan.
+At that measured commit, summing `quantity * extendedprice` over `lineitem` returned every row and took about 0.6 s.
+Since #111, supported arithmetic `sum` and `avg` expressions run in Redis, as measured below; the historical table above does not describe their current execution plan.
 
 Timings vary by up to 2x from one runner to another, so compare builds of the connector within one Benchmark job rather than across runs.
 Don't use them to size a deployment either: Trino and Redis share the runner's CPUs, and a production cluster runs them on separate machines.
 To time the queries yourself, see <<_building_from_source,Building from source>>.
+
+=== Comparison with an early snapshot before v0.4.0
+
+A local benchmark on October 6, 2026 compared https://github.com/{project-owner}/{project-name}/commit/fb799bdaddf0886366b127b9e6ab152998ce9706[`fb799bd`], an early Trino 483 snapshot before v0.4.0, with https://github.com/{project-owner}/{project-name}/commit/0869b8ef4792a1169855e0376463665d5e35f141[`0869b8e`].
+Both builds used Trino 483 and Temurin Java 25.0.4.1 on the same ARM64 Mac with 10 logical CPUs, with Trino in the test JVM and Redis in a `redis:8.4` container.
+They used the same data loader, index schemas and TPC-H `tiny` data described above, with `join_distribution_type=AUTOMATIC`.
+The older build's scan cap was set to 100,000, above every table's row count.
+Connector production code was unchanged; the test harness was adapted to use the same Redis container and queries on both builds.
+
+The builds ran sequentially in the order earlier/current/earlier/current.
+Each query had 5 warmup executions and 20 timed executions per run; the medians below pool 40 samples per build.
+Before timing, representative SELECT results were checked against TPC-H for row counts and sorted values, with numbers rounded to six significant digits.
+The limit and metadata queries were checked for stable result row counts only.
+
+[cols="5,1,1,2"]
+|===
+|Query |Earlier median (ms) |Current median (ms) |Comparison
+
+|`+SELECT sum(quantity * extendedprice) FROM lineitem+`
+|1,080.3 |64.8 |16.7x faster
+
+|`+SELECT count(*) FROM orders o JOIN customer c ON o.custkey = c.custkey WHERE c.nationkey = 3+`
+|313.9 |46.7 |6.7x faster
+
+|`+SELECT orderkey, totalprice FROM orders ORDER BY totalprice DESC LIMIT 10+`
+|281.4 |45.6 |6.2x faster
+
+|`+SELECT sum(sin(quantity) * extendedprice) FROM lineitem+`
+|1,131.2 |688.1 |1.6x faster
+
+|`+SELECT c.mktsegment, count(*) FROM orders o JOIN customer c ON o.custkey = c.custkey GROUP BY c.mktsegment+`
+|318.9 |251.7 |1.3x faster
+
+|`+SELECT * FROM orders WHERE orderkey = 7+`, while two background workers repeatedly run `+SELECT sum(quantity * extendedprice) FROM lineitem+`
+|20.6 |102.0 |4.9x slower
+|===
+
+The arithmetic aggregate, selective join and top-N query benefit from doing more work in Redis and returning fewer rows to Trino.
+The `sin(quantity)` query still reads all 60,175 rows into Trino, so its improvement measures the scan path.
+Simple filters, limits, point lookups, grouping and metadata queries showed no clear improvement: their median changes ranged from about 13% slower to 9% faster, with overlapping interquartile ranges.
+
+The concurrent point lookup is a tradeoff: the background arithmetic aggregates stream rows to Trino in the earlier build, but execute inside Redis in the current build.
+The slowdown is consistent with increased contention in Redis.
+These measurements cover reads and metadata on a single Redis container; writes were excluded because the older snapshot has known write correctness issues, and sharded databases were not tested.
+They do not establish an overall workload speedup or production capacity, and their absolute timings should not be compared with the separate CI run above.
+This comparison predates the subsequent read-ahead and contention changes described below.
 
 === Concurrent scans and aggregations
 
