@@ -411,7 +411,7 @@ Columns created through Trino as BOOLEAN, DATE, UUID or CHAR are queried as TAG 
 On TAG and TEXT fields, the query also matches rows that aren't equal.
 A TEXT query finds the documents containing the value's words.
 A TAG query matches any of the tags Redis splits a value into on the field's `SEPARATOR`, ignoring surrounding whitespace and, unless the field is `CASESENSITIVE`, case.
-On hash indexes, a `FILTER` step then keeps the rows equal to the value. On JSON indexes, and for values with control characters, Trino filters them instead.
+A `FILTER` step then keeps the rows equal to the value; scans of JSON documents keep them in the connector. For values with control characters, Trino filters them instead.
 Trino evaluates `LIKE`, `IS NULL`, `IS NOT NULL`, and comparisons other than `=` and `IN` on VARCHAR columns.
 * `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`, when Redis evaluates the whole `WHERE` clause
 * `sum` and `avg` of arithmetic on DOUBLE columns of hash indexes, such as `sum(quantity * extendedprice)`, which an `APPLY` step computes

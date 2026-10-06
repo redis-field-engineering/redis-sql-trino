@@ -127,7 +127,7 @@ public class RediSearchTranslator {
 		List<RediSearchColumnHandle> columns = readColumns(outputs);
 		boolean computes = columns.size() != outputs.size() || !columns.equals(outputs);
 		String query = queryBuilder.buildQuery(table.getConstraint());
-		Map<String, String> filters = queryBuilder.filters(table.getConstraint());
+		Map<String, List<String>> equalities = RediSearchQueryBuilder.equalities(table.getConstraint());
 		Optional<GroupBy> groupBy = queryBuilder.group(table);
 		// A scan reads the documents' values. Redis returns a NUMERIC field loaded by name formatted as a double, and
 		// rounded to 12 significant digits unless it's an integer; LOAD * on a hash and DIALECT 3 on JSON return the
@@ -137,13 +137,15 @@ public class RediSearchTranslator {
 		boolean scan = groupBy.isEmpty();
 		boolean json = scan && keyType.filter(RediSearchIndexInfo.KeyType.JSON::equals).isPresent();
 		boolean hashScan = scan && keyType.filter(RediSearchIndexInfo.KeyType.HASH::equals).isPresent();
+		// DIALECT 3 loads JSON values as arrays, which FILTER can't compare, so the reader keeps a scan's equal rows
+		Map<String, String> filters = json ? Map.of() : queryBuilder.filters(equalities);
 		// LOAD * returns every field of each hash, so only scans that can't tell a rounded value from an exact one use it
 		boolean loadAll = hashScan && columns.stream().anyMatch(RediSearchTranslator::isRoundedUndetectably);
 		AggregateArgs.Builder args = AggregateArgs.builder().dialect(json ? JSON_DIALECT : DIALECT);
 		// Lettuce writes LOAD before the other steps, so FILTER compares the loaded values
 		Set<String> loads = new LinkedHashSet<>();
 		loads.add(RediSearchBuiltinField.KEY.getName());
-		loads.addAll(filters.keySet());
+		loads.addAll(equalities.keySet());
 		// Sums and averages counting values, whose APPLY steps refer to their columns
 		List<RediSearchAggregation> countingValues = table.getMetricAggregations().stream()
 				.filter(RediSearchAggregation::isCountingValues).toList();
@@ -226,7 +228,7 @@ public class RediSearchTranslator {
 		return new Aggregation(table.getIndex(), query, filters.values(), aggregateArgs, global,
 				new RediSearchRowReader(columns.stream().map(RediSearchColumnHandle::getName).toList(), sources,
 						exactSources, jsonArrays, table.getMetricAggregations(), exactNumbers,
-						computes ? Optional.of(outputs) : Optional.empty()));
+						json ? equalities : Map.of(), computes ? Optional.of(outputs) : Optional.empty()));
 	}
 
 	/**

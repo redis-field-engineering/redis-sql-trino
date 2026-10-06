@@ -278,6 +278,22 @@ public class RediSearchQueryBuilder {
 	}
 
 	/**
+	 * The values that the rows of the TAG and TEXT domains {@link #isExact} accepts are equal to, by field name. A
+	 * FILTER keeps the equal rows ({@link #filters}), or the connector does, when FILTER can't compare the values.
+	 */
+	public static Map<String, List<String>> equalities(TupleDomain<ColumnHandle> tupleDomain) {
+		Map<String, List<String>> equalities = new LinkedHashMap<>();
+		tupleDomain.getDomains().ifPresent(domains -> domains.forEach((columnHandle, domain) -> {
+			RediSearchColumnHandle column = (RediSearchColumnHandle) columnHandle;
+			if (column.getFieldType() != RediSearchFieldType.NUMERIC && !domain.isAll() && isExact(column, domain)) {
+				equalities.put(column.getName(), tagValues(domain.getValues()).orElseThrow().stream()
+						.map(value -> tagValue(column.getType(), value)).toList());
+			}
+		}));
+		return equalities;
+	}
+
+	/**
 	 * FT.AGGREGATE FILTER expressions, by field name, that keep the rows equal to the TAG and TEXT domains that
 	 * {@link #isExact} accepts. Each compares the field's value as a string, e.g.
 	 * {@code exists(@style) && @style == "Wheat"}, so it must come after the field is loaded: on a SORTABLE field,
@@ -285,16 +301,19 @@ public class RediSearchQueryBuilder {
 	 * document without the field instead of leaving it out.
 	 */
 	public Map<String, String> filters(TupleDomain<ColumnHandle> tupleDomain) {
+		return filters(equalities(tupleDomain));
+	}
+
+	/**
+	 * @param equalities the values each field's rows are equal to, from {@link #equalities}
+	 */
+	public Map<String, String> filters(Map<String, List<String>> equalities) {
 		Map<String, String> filters = new LinkedHashMap<>();
-		tupleDomain.getDomains().ifPresent(domains -> domains.forEach((columnHandle, domain) -> {
-			RediSearchColumnHandle column = (RediSearchColumnHandle) columnHandle;
-			if (column.getFieldType() != RediSearchFieldType.NUMERIC && !domain.isAll() && isExact(column, domain)) {
-				String property = property(column.getName());
-				filters.put(column.getName(), "exists(" + property + ") && " + anyOf(tagValues(domain.getValues())
-						.orElseThrow().stream().map(value -> property + " == " + stringLiteral(tagValue(column.getType(), value)))
-						.toList()));
-			}
-		}));
+		equalities.forEach((field, values) -> {
+			String property = property(field);
+			filters.put(field, "exists(" + property + ") && "
+					+ anyOf(values.stream().map(value -> property + " == " + stringLiteral(value)).toList()));
+		});
 		return filters;
 	}
 
