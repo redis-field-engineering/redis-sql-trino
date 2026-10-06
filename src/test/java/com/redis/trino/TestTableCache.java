@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
@@ -62,17 +63,43 @@ public class TestTableCache {
 
 	@Test
 	public void testForgetsDroppedTable() {
-		RediSearchTableCache cache = cache(Duration.ofSeconds(60), tableName -> {
-			if (loads.incrementAndGet() > 1) {
-				throw new TableNotFoundException(tableName);
-			}
-			return table(1);
-		});
+		RediSearchTableCache cache = cache(Duration.ofSeconds(60), notFoundAfterFirstLoad(), tableName -> false);
 		cache.get(BEERS);
 		ticker.increment(61, SECONDS);
 		assertThat(columns(cache.get(BEERS))).isEqualTo(1);
 		reloads.remove(0).run();
 		assertThatThrownBy(() -> cache.get(BEERS)).isInstanceOf(TableNotFoundException.class);
+	}
+
+	@Test
+	public void testKeepsTableNotDescribedButListed() {
+		// The loader reports a timeout as not found too, but Redis still lists the index
+		RediSearchTableCache cache = cache(Duration.ofSeconds(60), notFoundAfterFirstLoad(), tableName -> true);
+		cache.get(BEERS);
+		ticker.increment(61, SECONDS);
+		cache.get(BEERS);
+		reloads.remove(0).run();
+		assertThat(columns(cache.get(BEERS))).isEqualTo(1);
+		// and so does a failure to list the indexes
+		cache = cache(Duration.ofSeconds(60), notFoundAfterFirstLoad(), tableName -> {
+			throw new IllegalStateException("Redis is unavailable");
+		});
+		loads.set(0);
+		reloads.clear();
+		cache.get(BEERS);
+		ticker.increment(61, SECONDS);
+		cache.get(BEERS);
+		reloads.remove(0).run();
+		assertThat(columns(cache.get(BEERS))).isEqualTo(1);
+	}
+
+	private Function<SchemaTableName, RediSearchTable> notFoundAfterFirstLoad() {
+		return tableName -> {
+			if (loads.incrementAndGet() > 1) {
+				throw new TableNotFoundException(tableName);
+			}
+			return table(1);
+		};
 	}
 
 	@Test
@@ -110,7 +137,12 @@ public class TestTableCache {
 	}
 
 	private RediSearchTableCache cache(Duration refresh, Function<SchemaTableName, RediSearchTable> loader) {
-		return new RediSearchTableCache(refresh, loader, reloads::add, ticker);
+		return cache(refresh, loader, tableName -> true);
+	}
+
+	private RediSearchTableCache cache(Duration refresh, Function<SchemaTableName, RediSearchTable> loader,
+			Predicate<SchemaTableName> listed) {
+		return new RediSearchTableCache(refresh, loader, listed, reloads::add, ticker);
 	}
 
 	private static RediSearchTable table(int columns) {

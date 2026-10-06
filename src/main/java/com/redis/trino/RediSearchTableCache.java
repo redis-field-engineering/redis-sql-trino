@@ -30,6 +30,7 @@ import java.time.Duration;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import com.google.common.base.Ticker;
 import com.google.common.cache.CacheLoader;
@@ -57,11 +58,14 @@ final class RediSearchTableCache {
 	/**
 	 * @param refresh  how old a table can be before a read describes it again; 0 caches nothing
 	 * @param loader   describes a table, or throws {@link TableNotFoundException}
+	 * @param listed   whether Redis still lists a table's index, which tells a dropped index from a failure to
+	 *                 describe it, such as a timeout, that the loader also reports as not found
 	 * @param executor describes tables again in the background
 	 */
-	RediSearchTableCache(Duration refresh, Function<SchemaTableName, RediSearchTable> loader, Executor executor,
-			Ticker ticker) {
+	RediSearchTableCache(Duration refresh, Function<SchemaTableName, RediSearchTable> loader,
+			Predicate<SchemaTableName> listed, Executor executor, Ticker ticker) {
 		requireNonNull(loader, "loader is null");
+		requireNonNull(listed, "listed is null");
 		requireNonNull(executor, "executor is null");
 		EvictableCacheBuilder<Object, Object> builder = EvictableCacheBuilder.newBuilder().ticker(ticker);
 		if (refresh.isZero()) {
@@ -81,6 +85,10 @@ final class RediSearchTableCache {
 					try {
 						return loader.apply(tableName);
 					} catch (TableNotFoundException e) {
+						// A failure, such as a timeout, keeps the cached table, and so does a failure to list the indexes
+						if (listed.test(tableName)) {
+							throw e;
+						}
 						// Dropped outside Trino: forgotten, so that the next read doesn't find it either
 						invalidate(tableName);
 						return table;

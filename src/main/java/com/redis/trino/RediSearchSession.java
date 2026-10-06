@@ -186,7 +186,9 @@ public class RediSearchSession {
                 new ThreadFactoryBuilder().setDaemon(true).setNameFormat("redisearch-table-refresh-%s").build());
         tableRefresher.allowCoreThreadTimeOut(true);
         this.tableCache = new RediSearchTableCache(Duration.ofSeconds(config.getTableCacheRefresh()),
-                this::loadTableSchema, tableRefresher, Ticker.systemTicker());
+                this::loadTableSchema,
+                tableName -> listIndexNames().contains(toRemoteTableName(tableName.getTableName())), tableRefresher,
+                Ticker.systemTicker());
     }
 
     private AbstractRedisClient client(RediSearchConfig config) {
