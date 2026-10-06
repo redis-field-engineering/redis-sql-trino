@@ -116,6 +116,10 @@ Temporary users, roles, databases, indexes, and test hashes were removed after t
 Redis Cloud Essentials Flex does not include Search and Query: the tested database had no Search module and none of `FT._LIST`, `FT.INFO`, `FT.SEARCH`, `FT.AGGREGATE`, `FT.CREATE`, `FT.ALTER`, or `FT.DROPINDEX` were registered.
 https://redis.io/docs/latest/operate/rc/databases/create-database/create-flex-database/[Redis documents Search and Query on Flex] as a Cloud Pro Preview feature, unavailable on Essentials.
 *Cloud Pro Flex Preview was not tested.* Its documented limitations also include `FT.AGGREGATE` and NUMERIC fields, both required by this connector.
+An isolated Terraform provisioning attempt using the official Redis Cloud provider 2.19.1 on 2026-10-06 was rejected with `DATABASE_QUERY_PERFORMANCE_FACTOR_SEARCH_IS_REQUIRED` when requesting `query_performance_factor = "Standard"`.
+The attempted configuration used an existing Pro Flex subscription, Redis 8.6, RESP3, a 250 GB dataset, 10% RAM, no replication, TLS, and a single-client-IP allowlist.
+Neither existing Pro Flex database had a Search module, and the provider schema exposed no Search-on-Flex Preview toggle.
+No test database was created; the Preview flag must be enabled separately before runtime compatibility can be measured.
 
 The tested local Flex build loaded Search and advertised its commands, but execution rejected these operations:
 
