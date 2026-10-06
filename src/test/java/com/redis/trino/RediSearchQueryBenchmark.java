@@ -55,7 +55,10 @@ public class RediSearchQueryBenchmark {
 	private static final int BACKGROUND_SCANS = 2;
 
 	private static final Map<String, String> QUERIES = ImmutableMap.<String, String>builder()
-			.put("full_scan", "SELECT sum(quantity * extendedprice) FROM lineitem")
+			// Trino computes max of arithmetic, so Redis returns all 60,175 rows, in cursor batches
+			.put("full_scan", "SELECT max(quantity * extendedprice) FROM lineitem")
+			// Redis computes the arithmetic and the sum in one FT.AGGREGATE
+			.put("sum_arithmetic", "SELECT sum(quantity * extendedprice) FROM lineitem")
 			.put("filter_numeric", "SELECT count(*), sum(extendedprice) FROM lineitem WHERE quantity < 10")
 			.put("filter_tag", "SELECT count(*) FROM lineitem WHERE shipmode = 'AIR'")
 			.put("group_by",
@@ -89,8 +92,12 @@ public class RediSearchQueryBenchmark {
 				results.put("insert", run(queryRunner, session,
 						"CREATE TABLE bench_orders AS SELECT * FROM tpch.tiny.orders",
 						Optional.of("DROP TABLE bench_orders")));
+				// Scans and point lookups take turns on the same connections, and their commands on Redis
 				results.put("point_lookup_during_scans", runDuringScans(queryRunner, session, QUERIES.get("point_lookup"),
 						QUERIES.get("full_scan")));
+				// An aggregation holds up the commands that arrive while Redis computes it
+				results.put("point_lookup_during_aggregations", runDuringScans(queryRunner, session,
+						QUERIES.get("point_lookup"), QUERIES.get("sum_arithmetic")));
 				write(results);
 			}
 		}
