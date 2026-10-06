@@ -194,6 +194,11 @@ public class TestQueryBuilder {
 				Domain.create(ValueSet.ofRanges(range(DateType.DATE, day, true, day + 1000, true)), false))).isFalse();
 		assertThat(RediSearchQueryBuilder.isSupported(declared("day", DateType.DATE, RediSearchFieldType.TAG),
 				Domain.create(ValueSet.ofRanges(greaterThan(DateType.DATE, day)), false))).isFalse();
+		// No dates between them
+		RediSearchColumnHandle dayColumn = declared("day", DateType.DATE, RediSearchFieldType.TAG);
+		Domain none = Domain.create(ValueSet.ofRanges(range(DateType.DATE, day, false, day + 1, false)), false);
+		assertThat(RediSearchQueryBuilder.isSupported(dayColumn, none)).isFalse();
+		assertThat(RediSearchQueryBuilder.isExact(dayColumn, none)).isFalse();
 		RediSearchColumnHandle uuid = declared("u", UuidType.UUID, RediSearchFieldType.TAG);
 		Domain uuidValue = Domain.singleValue(UuidType.UUID,
 				UuidType.javaUuidToTrinoUuid(java.util.UUID.fromString("12151FD2-7586-11E9-8F9E-2A86E4085A59")));

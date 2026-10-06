@@ -189,7 +189,8 @@ public class RediSearchQueryBuilder {
 				days.add(day);
 			}
 		}
-		return Optional.of(days);
+		// Exclusive bounds a day apart hold no dates, which a tag query can't list
+		return days.isEmpty() ? Optional.empty() : Optional.of(days);
 	}
 
 	private static boolean isNumericType(Type type) {
