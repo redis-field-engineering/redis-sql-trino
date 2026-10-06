@@ -61,6 +61,10 @@ redisearch.uri=redis://localhost:6379
 |Number of Redis connections each Trino node's scans take turns on, so that one scan's batches don't hold up other queries' commands.
 |`4`
 
+|`redisearch.aggregation-pushdown.enabled`
+|Compute supported aggregations in Redis. Set to `false` to compute them in Trino from cursor batches when large aggregations interfere with latency-sensitive queries. This transfers more rows and can make aggregations substantially slower. Filters still push down.
+|`true`
+
 |`redisearch.table-cache-refresh`
 |Seconds after which the connector describes a cached index again (`FT.INFO`, its saved column types and a few documents), in the background: queries keep planning with the cached schema meanwhile. An index no query reads for ten times as long is dropped from the cache, and the next query waits for it. Fields added and indexes dropped outside Trino can take this long to show. `0` disables the cache.
 |`60`
@@ -294,7 +298,7 @@ Trino keeps the equal rows itself, instead of a `FILTER`, when a value has a con
 Redis can't match a missing field or compare strings, so Trino evaluates `IS NULL`, `IS NOT NULL`, a condition combined with `OR \... IS NULL`, and `<>`, `<`, `>` and `BETWEEN` on VARCHAR columns.
 +
 Trino also evaluates `LIKE`. A Redis wildcard query matches single words of a TEXT field, ignores case on a TAG field without `CASESENSITIVE`, and leaves out documents once it has matched `MAXEXPANSIONS` (200 by default) distinct values.
-* `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, and `min` and `max` on TIMESTAMP(3) and TIMESTAMP(3) WITH TIME ZONE columns, with or without `GROUP BY`, as `FT.AGGREGATE` with `GROUPBY` and `REDUCE`.
+* With `redisearch.aggregation-pushdown.enabled=true` (the default), `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, and `min` and `max` on TIMESTAMP(3) and TIMESTAMP(3) WITH TIME ZONE columns, with or without `GROUP BY`, as `FT.AGGREGATE` with `GROUPBY` and `REDUCE`.
 If any aggregate in a query can't be pushed down, such as `count(DISTINCT \...)` or `count(column)`, or Trino filters the rows itself, Trino computes all of them.
 `count(column)` skips nulls, but Redis's `COUNT` counts documents, so only `count(*)` is pushed down.
 `sum` and `avg` add up each document's value, or 0 for a document without one (`APPLY "case(exists(@x), @x, 0)"`), and count the values (`APPLY "exists(@x)"`); the connector returns null for a group with no values and divides each average itself.

@@ -300,6 +300,12 @@ Time a set of representative queries against TPC-H data in Redis (not part of th
 Results are written to `target/benchmark/mine.csv`. Compare two runs with `.github/scripts/compare-benchmarks.py --base <csv>... --head <csv>...`.
 Pull requests that change the connector run the same comparison against their base branch; see the Benchmark job summary.
 
+To compare tuning combinations, add `-Dbenchmark.focus=true` for full scans, arithmetic sums, and lookups alone and under both types of load.
+Use `-Dbenchmark.scan-connections=4`, `-Dbenchmark.cursor-count=1000`, `-Dbenchmark.query-performance-factor=2` (Enterprise), and `-Dbenchmark.aggregation-pushdown=false` to select a configuration.
+The default query performance factor is `0` (no explicit server tuning), and pushdown defaults to `true`.
+Each CSV has a matching `.properties` file recording its configuration, read-ahead depth, background-client count, warmups and sample count.
+Use distinct labels and repeat baseline and candidate runs on the same machine.
+
 == Documentation
 
 {name} documentation is available at https://{project-owner}.github.io/{project-name}
@@ -575,13 +581,50 @@ The table pools the 40 samples.
 |1 |33 |46
 |===
 
-Queries that Redis filters, aggregates, sorts or limits finish in about 100 ms or less, because only the matching rows come back to Trino.
+In those measurements, queries that Redis filtered, aggregated, sorted or limited finished in about 100 ms or less, because only the matching rows came back to Trino.
 So does a selective join: the keys of the 60 matching customers are added to the orders query, so Redis returns only their orders.
-Summing an expression over `lineitem`, which Redis can't compute, returns every row and takes about 0.6 s.
+At that measured commit, summing an expression over `lineitem` returned every row and took about 0.6 s.
+Since #111, supported arithmetic `sum` and `avg` expressions run in Redis; the historical table above does not describe their current execution plan.
 
 Timings vary by up to 2x from one runner to another, so compare builds of the connector within one Benchmark job rather than across runs.
 Don't use them to size a deployment either: Trino and Redis share the runner's CPUs, and a production cluster runs them on separate machines.
 To time the queries yourself, see <<_building_from_source,Building from source>>.
+
+=== Concurrent scans and aggregations
+
+Scans prefetch one cursor batch while Trino processes the previous batch.
+Reading two batches ahead improved scan throughput but delayed lookups sharing a connection; #117 restored one-batch read-ahead.
+The benchmark now distinguishes a real scan (`max(quantity * extendedprice)`, computed by Trino) from a pushed-down aggregation (`sum(quantity * extendedprice)`, computed by Redis).
+
+A global aggregation must consume all matching documents before returning its result.
+`WITHCURSOR COUNT` batches the output; it does not split that global computation into separate commands.
+Without query workers, long-running aggregations can delay other Redis commands even when the queries use different connections.
+Increasing `redisearch.scan-connections` does not eliminate that server-side contention.
+
+For mixed analytical and latency-sensitive workloads, evaluate https://redis.io/docs/latest/operate/oss_and_stack/stack-with-enterprise/search/query-performance-factor/[Redis Software query performance factor].
+A local issue #115 experiment with Software 8.2.0-78.18 (Redis/Search 8.6) found that the 2x factor configured three query workers and reduced lookup latency during two concurrent aggregations.
+The 4x factor configured six workers but did not improve that experiment further.
+For an initial 2x evaluation on Redis Software 8.x, set the database's REST API `query_performance_factor` field to:
+
+[source,json]
+----
+{"active": true, "scaling_factor": 2}
+----
+Worker counts consume CPU capacity and can add overhead to individual queries, so measure your own workloads before choosing a factor.
+Redis Open Source exposes https://redis.io/docs/latest/develop/ai/search-and-query/administration/configuration/#search-workers[`search-workers`]; the Enterprise measurements do not establish an optimal value for an Open Source deployment.
+
+When query workers are unavailable, or their overhead is unsuitable, disable aggregation pushdown in the catalog:
+
+[source,properties]
+----
+redisearch.aggregation-pushdown.enabled=false
+----
+
+Trino then computes aggregates from cursor batches, while Redis still applies supported filters.
+Disabling pushdown transfers more rows and can make aggregations substantially slower, but lets Redis process cursor batches between other commands.
+Aggregation pushdown remains enabled by default.
+Keep `redisearch.scan-connections=4` and `redisearch.cursor-count=1000` as the starting point and compare configurations with the benchmark rather than assuming more connections or smaller batches will help.
+See link:benchmarks/issue-115/README.adoc[the experiment report] for the configurations, timing variability, reproduction command and raw samples.
 
 == Support
 

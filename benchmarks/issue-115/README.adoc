@@ -1,0 +1,48 @@
+= Issue #115 tuning experiments
+
+Measured October 6, 2026 against the issue #115 fix on base commit `4d2841e`.
+Local ARM64 Java 25 and Redis Enterprise Software `8.2.0-78.18` ARM64, whose database loaded Redis/Search 8.6.
+Docker allocated 10 CPUs and about 8 GiB of RAM. TPC-H tiny: 60,175 lineitem rows and 15,000 orders. Two background clients.
+All runs are sequential, with fresh databases and Trino runners. They are exploratory measurements, not production sizing results.
+The sweep uses 3 warmups and 15 timed samples per workload. The repeated baseline and 2x candidate use 5 warmups and 30 samples; the 2,000-row and pushdown-off runs use 5 warmups and 15 samples.
+Other containers were observed consuming several CPUs during the later runs. Baseline latency changed substantially, so do not treat cross-run ratios as controlled speedup estimates.
+
+The 2x factor configured `search-workers 3`; the 4x factor configured `search-workers 6`, verified in the database configuration.
+Keep the existing one-batch read-ahead default. The two-batch experiment was restored after measuring it; it is not a new connector setting.
+
+[cols="3,1,1,1,1,1,1,1,1,1,1"]
+|===
+|Run |Factor |Connections |Batch rows |Ahead |Scan ms |SUM ms |Lookup ms |Lookup / scans ms |Lookup / SUM ms |Lookup / SUM p90 ms
+|baseline-1 |0 |4 |1000 |1 |1272.8 |64.5 |14.8 |24.1 |105.0 |114.1
+|qpf2 |2 |4 |1000 |1 |1287.9 |75.1 |15.0 |28.2 |42.3 |49.8
+|qpf4 |4 |4 |1000 |1 |1302.2 |80.1 |16.1 |26.2 |50.4 |61.9
+|cursor250 |0 |4 |250 |1 |4080.7 |68.9 |16.8 |34.5 |112.1 |141.3
+|connections8 |0 |8 |1000 |1 |1317.5 |69.6 |14.5 |60.4 |110.3 |127.5
+|qpf2-cursor250 |2 |4 |250 |1 |4077.8 |79.1 |16.2 |36.7 |53.1 |93.3
+|qpf4-cursor250 |4 |4 |250 |1 |3935.1 |96.4 |21.9 |37.2 |60.6 |121.0
+|qpf2-ahead2 |2 |4 |1000 |2 |961.7 |159.4 |56.5 |199.0 |67.0 |140.2
+|baseline-2 |0 |4 |1000 |1 |1446.3 |80.3 |19.7 |67.9 |245.4 |396.1
+|qpf2-repeat |2 |4 |1000 |1 |1351.8 |83.0 |17.1 |34.9 |44.5 |55.7
+|qpf2-cursor2000 |2 |4 |2000 |1 |1032.0 |85.0 |18.0 |46.8 |53.0 |59.6
+|pushdown-off |0 |4 |1000 |1 |1360.7 |1323.4 |18.3 |46.3 |35.0 |51.8
+|===
+
+Pushdown is enabled except in `pushdown-off`. With pushdown off, `sum_arithmetic` is a SQL aggregation computed in Trino from cursor batches, so its background workload is no longer a server-side global aggregation.
+
+The preferred starting configuration for mixed workloads is factor 2x, four connections, 1,000-row batches and one read ahead. The candidate returned similar aggregation-load lookup medians in its initial and repeated runs. Six workers, eight connections and smaller batches did not show a useful advantage here. The 2,000-row batches improved scans at the expense of lookup latency under scans.
+
+Use `redisearch.aggregation-pushdown.enabled=false` when workers cannot be enabled and interleaving commands is more important than individual aggregation latency and transfer volume.
+
+Reproduce:
+[source,console]
+----
+./mvnw test -Dtest=RediSearchQueryBenchmark -Dair.check.skip-all=true -Dbenchmark.focus=true -Dbenchmark.warmup=5 -Dbenchmark.iterations=30 -Dbenchmark.label=candidate -Dbenchmark.query-performance-factor=2 -Dbenchmark.scan-connections=4 -Dbenchmark.cursor-count=1000
+----
+
+For the baseline, use a different label and `-Dbenchmark.query-performance-factor=0`. For the fallback, also add `-Dbenchmark.aggregation-pushdown=false`. Repeat in alternating order on a quiet host.
+
+`results.csv` preserves every timed sample, per-run median/p90, row counts, and scenario settings. The benchmark also writes a `.properties` sidecar for newly reproduced runs. All measured queries returned the same row counts; dedicated regression tests check result values and query plans with pushdown disabled.
+
+Validation: 34 targeted tests passed with the 2x query performance factor, covering config defaults/mapping, enabled and disabled aggregation plans/results, and single-shard/sharded cursor behavior. The 14 config and disabled-pushdown tests passed again with ordinary server defaults and no worker tuning.
+
+References: https://github.com/redis-field-engineering/redis-sql-trino/issues/115[issue #115] and https://redis.io/docs/latest/operate/oss_and_stack/stack-with-enterprise/search/query-performance-factor/[query performance factor documentation].

@@ -42,6 +42,10 @@ import io.trino.testing.MaterializedResult;
  * ./mvnw test -Dtest=RediSearchQueryBenchmark -Dair.check.skip-all=true -Dbenchmark.label=head
  * </pre>
  *
+ * Tuning options: benchmark.query-performance-factor (0, 2, 4, ...), benchmark.scan-connections (4),
+ * benchmark.cursor-count (1000), benchmark.aggregation-pushdown (true), benchmark.background-clients (2),
+ * and benchmark.focus (false, or true for the issue #115 workloads only).
+ *
  * Results are written to target/benchmark/&lt;label&gt;.csv; compare two runs with
  * .github/scripts/compare-benchmarks.py.
  */
@@ -52,12 +56,12 @@ public class RediSearchQueryBenchmark {
 	private static final int WARMUP = Integer.getInteger("benchmark.warmup", 5);
 	private static final int ITERATIONS = Integer.getInteger("benchmark.iterations", 20);
 	private static final String LABEL = System.getProperty("benchmark.label", "results");
-	private static final int BACKGROUND_SCANS = 2;
+	private static final int BACKGROUND_SCANS = Integer.getInteger("benchmark.background-clients", 2);
 
 	private static final Map<String, String> QUERIES = ImmutableMap.<String, String>builder()
 			// Trino computes max of arithmetic, so Redis returns all 60,175 rows, in cursor batches
 			.put("full_scan", "SELECT max(quantity * extendedprice) FROM lineitem")
-			// Redis computes the arithmetic and the sum in one FT.AGGREGATE
+			// With pushdown enabled, Redis computes the arithmetic and sum in one FT.AGGREGATE
 			.put("sum_arithmetic", "SELECT sum(quantity * extendedprice) FROM lineitem")
 			.put("filter_numeric", "SELECT count(*), sum(extendedprice) FROM lineitem WHERE quantity < 10")
 			.put("filter_tag", "SELECT count(*) FROM lineitem WHERE shipmode = 'AIR'")
@@ -80,22 +84,31 @@ public class RediSearchQueryBenchmark {
 		try (RediSearchServer server = new RediSearchServer()) {
 			server.getConnection().sync().flushall();
 			try (DistributedQueryRunner queryRunner = RediSearchQueryRunner.createRediSearchQueryRunner(server,
-					CUSTOMER, LINE_ITEM, NATION, ORDERS, REGION)) {
+					List.of(CUSTOMER, LINE_ITEM, NATION, ORDERS, REGION), Map.of(),
+					Map.of("redisearch.scan-connections", System.getProperty("benchmark.scan-connections", "4"),
+							"redisearch.cursor-count", System.getProperty("benchmark.cursor-count", "1000"),
+							"redisearch.aggregation-pushdown.enabled",
+							System.getProperty("benchmark.aggregation-pushdown", "true")))) {
 				// Trino's default, which the test query runner replaces with partitioning every join
 				Session session = Session.builder(queryRunner.getDefaultSession())
 						.setSystemProperty("join_distribution_type", "AUTOMATIC").build();
 				Map<String, Result> results = new LinkedHashMap<>();
 				for (Map.Entry<String, String> query : QUERIES.entrySet()) {
-					results.put(query.getKey(), run(queryRunner, session, query.getValue(), Optional.empty()));
+					if (!Boolean.getBoolean("benchmark.focus")
+							|| List.of("full_scan", "sum_arithmetic", "point_lookup").contains(query.getKey())) {
+						results.put(query.getKey(), run(queryRunner, session, query.getValue(), Optional.empty()));
+					}
 				}
 				// Writes 15,000 hashes, which DROP TABLE deletes before the next run
-				results.put("insert", run(queryRunner, session,
-						"CREATE TABLE bench_orders AS SELECT * FROM tpch.tiny.orders",
-						Optional.of("DROP TABLE bench_orders")));
+				if (!Boolean.getBoolean("benchmark.focus")) {
+					results.put("insert", run(queryRunner, session,
+							"CREATE TABLE bench_orders AS SELECT * FROM tpch.tiny.orders",
+							Optional.of("DROP TABLE bench_orders")));
+				}
 				// Scans and point lookups take turns on the same connections, and their commands on Redis
 				results.put("point_lookup_during_scans", runDuringScans(queryRunner, session, QUERIES.get("point_lookup"),
 						QUERIES.get("full_scan")));
-				// An aggregation holds up the commands that arrive while Redis computes it
+				// Lookups while two SQL aggregations run; pushdown and worker tuning determine the contention
 				results.put("point_lookup_during_aggregations", runDuringScans(queryRunner, session,
 						QUERIES.get("point_lookup"), QUERIES.get("sum_arithmetic")));
 				write(results);
@@ -164,6 +177,16 @@ public class RediSearchQueryBenchmark {
 		Path file = Path.of("target", "benchmark", LABEL + ".csv");
 		Files.createDirectories(file.getParent());
 		Files.write(file, lines, UTF_8);
+		Files.write(file.resolveSibling(LABEL + ".properties"), List.of(
+				"redis-enterprise-image=" + RedisEnterprise.IMAGE,
+				"query-performance-factor=" + System.getProperty("benchmark.query-performance-factor", "0"),
+				"scan-connections=" + System.getProperty("benchmark.scan-connections", "4"),
+				"cursor-count=" + System.getProperty("benchmark.cursor-count", "1000"),
+				"reads-ahead=" + RediSearchPageSource.READS_AHEAD,
+				"aggregation-pushdown=" + System.getProperty("benchmark.aggregation-pushdown", "true"),
+				"background-clients=" + BACKGROUND_SCANS,
+				"warmup=" + WARMUP, "iterations=" + ITERATIONS,
+				"focus=" + Boolean.getBoolean("benchmark.focus")), UTF_8);
 		log.info("Benchmark results written to %s:%s", file.toAbsolutePath(), summary);
 	}
 
