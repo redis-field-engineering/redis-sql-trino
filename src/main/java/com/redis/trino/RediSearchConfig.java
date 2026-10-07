@@ -77,6 +77,7 @@ public class RediSearchConfig {
     private boolean caseInsensitiveNames;
 
     private long cursorCount = DEFAULT_CURSOR_COUNT;
+    private long queryTimeoutMillis;
 
     private long tableCacheRefresh = DEFAULT_TABLE_CACHE_REFRESH.toSeconds();
     private long scanConnections = DEFAULT_SCAN_CONNECTIONS;
@@ -103,6 +104,18 @@ public class RediSearchConfig {
     @Config("redisearch.cursor-count")
     public RediSearchConfig setCursorCount(long cursorCount) {
         this.cursorCount = cursorCount;
+        return this;
+    }
+
+    @Min(0)
+    public long getQueryTimeoutMillis() {
+        return queryTimeoutMillis;
+    }
+
+    @Config("redisearch.query-timeout-ms")
+    @ConfigDescription("Redis aggregation timeout in milliseconds; zero uses the server default")
+    public RediSearchConfig setQueryTimeoutMillis(long queryTimeoutMillis) {
+        this.queryTimeoutMillis = queryTimeoutMillis;
         return this;
     }
 

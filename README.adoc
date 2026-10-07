@@ -380,6 +380,10 @@ Rows to the client
 ----
 
 Redis returns the matching documents in batches of `redisearch.cursor-count` rows (default 1000). The connector reads each batch while Trino processes the one before it.
+
+Set `redisearch.query-timeout-ms` to override Redis's aggregation query timeout in milliseconds.
+The default value, `0`, leaves the server timeout unchanged. Redis Cloud may reject `CONFIG SET search-timeout`, while accepting a per-query `TIMEOUT`.
+For long analytical queries, set an appropriate timeout and configure `search-on-timeout=fail` on the database so a timeout cannot return partial results as a successful query. Trino's query timeout still applies independently.
 Each table scan is a single split, so one Trino worker reads the whole index.
 Redis rounds NUMERIC fields loaded by name to 12 significant digits, so a scan that reads DOUBLE or DECIMAL columns loads hashes with `LOAD *` and JSON documents with `DIALECT 3`, which return the values as stored.
 `LOAD *` returns every field of each hash, so BIGINT columns are loaded by name: Redis returns an integer in full, and only a value of 2^53 or more may be rounded, which the connector reads again with `HGET`.
