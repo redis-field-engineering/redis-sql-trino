@@ -23,6 +23,8 @@
  */
 package com.redis.trino;
 
+import static io.trino.spi.type.BigintType.BIGINT;
+
 import java.util.Objects;
 import java.util.Optional;
 
@@ -63,6 +65,11 @@ public class RediSearchAggregationTerm {
 		// Redis groups a NUMERIC field by its double value and returns it formatted as one, which a DECIMAL column
 		// may not be able to hold exactly
 		if (column.getType() instanceof DecimalType) {
+			return Optional.empty();
+		}
+		// NUMERIC groups use doubles: adjacent BIGINTs beyond 2^53 can collapse into one group. Reading the
+		// stored hash value afterward cannot recover either the original groups or their counts.
+		if (column.getType().equals(BIGINT) && column.getFieldType() == RediSearchFieldType.NUMERIC) {
 			return Optional.empty();
 		}
 		// A floating-point key is also returned as a mantissa and exponent, by expressions that refer to it as @name

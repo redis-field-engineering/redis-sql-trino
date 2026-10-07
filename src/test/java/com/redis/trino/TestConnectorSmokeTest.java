@@ -24,6 +24,7 @@ import io.lettuce.core.search.arguments.NumericFieldArgs;
 import io.lettuce.core.search.arguments.TagFieldArgs;
 import io.lettuce.core.search.arguments.TextFieldArgs;
 import io.trino.Session;
+import io.trino.sql.planner.plan.AggregationNode;
 import io.trino.testing.BaseConnectorSmokeTest;
 import io.trino.testing.QueryRunner;
 import io.trino.testing.QueryRunner.MaterializedResultWithPlan;
@@ -194,6 +195,26 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 				.build();
 		assertThat(computeActual(automatic, "EXPLAIN (TYPE DISTRIBUTED) SELECT count(*) FROM orders o JOIN customer c "
 				+ "ON o.custkey = c.custkey").getOnlyValue().toString()).contains("distribution = REPLICATED");
+	}
+
+	@Test
+	public void testExactBigintGrouping() {
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		redis.ftCreate("exact_group_ids", CreateArgs.builder().withPrefix("exact_group_ids:").build(),
+				List.of(NumericFieldArgs.builder().name("id").build()));
+		redis.set("__trino:columns:exact_group_ids", "{\"id\":\"bigint\"}");
+		redisearch.awaitIndexed("exact_group_ids");
+		redis.hset("exact_group_ids:1", Map.of("id", "9007199254740992"));
+		redis.hset("exact_group_ids:2", Map.of("id", "9007199254740993"));
+		redis.hset("exact_group_ids:3", Map.of("id", "9007199254740992"));
+		redis.hset("exact_group_ids:4", Map.of("id", "-9007199254740992"));
+		redis.hset("exact_group_ids:5", Map.of("id", "-9007199254740993"));
+		assertThat(query("SELECT id, count(*) FROM exact_group_ids GROUP BY id"))
+				.isNotFullyPushedDown(AggregationNode.class)
+				.matches("VALUES (BIGINT '9007199254740992', BIGINT '2'), "
+						+ "(BIGINT '9007199254740993', BIGINT '1'), "
+						+ "(BIGINT '-9007199254740992', BIGINT '1'), "
+						+ "(BIGINT '-9007199254740993', BIGINT '1')");
 	}
 
 	private long physicalInputPositions(MaterializedResultWithPlan result) {
