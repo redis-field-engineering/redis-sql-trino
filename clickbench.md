@@ -2,13 +2,24 @@
 
 > **Historical baseline, superseded on 2026-10-07.** The timings and product comparisons below measure connector `83d05fc44627ccb9971a40e44e67a78f702bf2e6`. They predate merged safe integer-widening aggregation pushdown [#131](https://github.com/redis-field-engineering/redis-sql-trino/pull/131) and per-query scan metrics [#132](https://github.com/redis-field-engineering/redis-sql-trino/pull/132). A fresh 43-query, three-attempt sweep is running at `4aa71cea12abe7e2f1dc93a8f276418292edd915`, using the same full dataset, hardware, settings and timeouts. Do not interpret these older comparisons as the patched connector's performance.
 
-The patched Cloud query-3 `EXPLAIN` pushes SUM, COUNT and AVG into Redis and removes Trino's aggregation stages. The deployed artifact SHA-256 is `d055a151b6cca28dc9ccce4ba7a1beed92be98e69a10d2d6af9647dbe72c81bb`; 47 focused regression tests passed. Full SQL count remains 99,997,497. Actual patched timings and correctness checks are pending.
+The patched Cloud query-3 `EXPLAIN` pushes SUM, COUNT and AVG into Redis and removes Trino's aggregation stages. The deployed artifact SHA-256 is `d055a151b6cca28dc9ccce4ba7a1beed92be98e69a10d2d6af9647dbe72c81bb`; 47 focused regression tests passed. Full SQL count remains 99,997,497. The first four patched queries now have 12 completed, independently validated attempts; the full sweep is still running.
 
 The first four ClickBench queries returned correct results on the full
 99,997,497-row dataset, with three completed attempts per query. Performance
 varies sharply: counts and a single average take seconds, while the mixed
 aggregation takes about eight minutes. This is a preliminary Redis Cloud +
 Trino measurement, not a completed 43-query benchmark or an overall product ranking.
+
+## Patched query-3 result (partial rerun)
+
+The mixed aggregation `SUM(AdvEngineID), COUNT(*), AVG(ResolutionWidth)` now pushes into Redis instead of streaming the full dataset through Trino. On the same loaded data and hardware:
+
+| Connector revision | Try 1 (s) | Try 2 (s) | Try 3 (s) | Best warm time (s) |
+|---|---:|---:|---:|---:|
+| Historical `83d05fc` | 494.379892 | 466.242832 | 480.790212 | 466.242832 |
+| Patched `4aa71ce` | 9.705052 | 8.664592 | 8.639648 | 8.639648 |
+
+This is **53.97× faster** using the best of attempts 2 and 3, consistent with the earlier comparison convention. All three patched outputs match the independent full-data DuckDB reference and the original result checksum `01ddc5e9381079f340bce69ad8b6745b379c862191a001f5a68aea1f624c92bf`. This improvement applies to query 3; the complete 43-query rerun and default-versus-OSS-Cluster-API comparison remain pending. The historical tables below are retained as the original baseline.
 
 ## Run configuration
 
