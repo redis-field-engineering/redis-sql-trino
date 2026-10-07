@@ -28,6 +28,18 @@ public class TestResp2AggregationPushdown extends AbstractTestQueryFramework {
 	}
 
 	@Test
+	public void testWidenedAverageStaysInTrino() {
+		assertUpdate("CREATE TABLE resp2_widening (id varchar, s smallint)");
+		try {
+			assertUpdate("INSERT INTO resp2_widening VALUES ('a', 2), ('b', -4), ('c', NULL)", 3);
+			assertThat(query("SELECT avg(s), count(*) FROM resp2_widening"))
+					.isNotFullyPushedDown(AggregationNode.class).matches("VALUES (DOUBLE '-1', BIGINT '3')");
+		} finally {
+			assertUpdate("DROP TABLE resp2_widening");
+		}
+	}
+
+	@Test
 	public void testDoublesAggregatedByTrino() {
 		assertAggregatedByTrino("SELECT sum(d), max(d) FROM numbers WHERE style = 'Wheat'",
 				"VALUES (DOUBLE '0.1234567890123456' + DOUBLE '229577310901.21', DOUBLE '229577310901.21')");

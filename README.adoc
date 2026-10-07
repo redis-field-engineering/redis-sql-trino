@@ -504,6 +504,11 @@ A `FILTER` step then keeps the rows equal to the value; scans of JSON documents 
 Trino evaluates `LIKE`, `IS NULL`, `IS NOT NULL`, and comparisons other than `=` and `IN` on VARCHAR columns.
 * `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`, when Redis evaluates the whole `WHERE` clause
 * `sum` and `avg` of arithmetic on DOUBLE columns of hash indexes, such as `sum(quantity * extendedprice)`, which an `APPLY` step computes
+* Value-preserving widening casts between TINYINT, SMALLINT, INTEGER and BIGINT on indexed NUMERIC fields of hash indexes.
+The cast retains the original integer field, without converting scan values to doubles, so `sum(smallint_column)` and `avg(smallint_column)` can aggregate in Redis despite Trino's implicit BIGINT casts.
+For these integer sums, the index document count times the largest magnitude of the source type must remain below 2^53; unknown or excessive counts keep aggregation in Trino.
+A separate runtime count guards against index growth after planning; an unsafe count fails explicitly and requires refreshing table metadata before retrying.
+This bound includes intermediate sums before positive and negative values cancel. Narrowing casts and integer arithmetic remain in Trino.
 * `LIMIT`, when Redis evaluates the whole `WHERE` clause
 * `ORDER BY ... LIMIT` on hash indexes, when Redis evaluates the whole `WHERE` clause and every sort key is an indexed NUMERIC column of type DOUBLE, REAL, INTEGER, SMALLINT or TINYINT, ordered `NULLS LAST` (the default). Redis sorts documents without a value last and returns only the first rows, which Trino then sorts.
 * Join keys: in a join, the keys that the other side collects (its dynamic filter) are added to the query of a scan that Redis evaluates them in, under the same rules as `WHERE`. More than 256 keys become the range they span. A scan waits for them for up to `redisearch.dynamic-filtering.wait-timeout` (default 20s).

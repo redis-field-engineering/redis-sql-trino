@@ -89,6 +89,7 @@ public final class RediSearchExpression {
 			Operator.DIVIDE);
 
 	// Exact as doubles below 2^53, and Redis parses larger ones as Java casts them, to the nearest double
+	private static final List<Type> WIDENING_TYPES = List.of(TINYINT, SMALLINT, INTEGER, BIGINT);
 	private static final Set<Type> INTEGER_TYPES = Set.of(BIGINT, INTEGER, SMALLINT, TINYINT);
 
 	private final Optional<String> column;
@@ -122,6 +123,26 @@ public final class RediSearchExpression {
 	static RediSearchExpression operation(Operator operator, RediSearchExpression left, RediSearchExpression right) {
 		return new RediSearchExpression(Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(operator),
 				List.of(left, right));
+	}
+
+	// A widening cast changes the SQL type, not the stored integer or its Redis field.
+	static boolean isIntegerWidening(Type source, Type target) {
+		int from = WIDENING_TYPES.indexOf(source);
+		return from >= 0 && WIDENING_TYPES.indexOf(target) > from;
+	}
+
+	static Optional<RediSearchColumnHandle> integerWidening(ConnectorExpression expression,
+			Map<String, ColumnHandle> assignments) {
+		if (!(expression instanceof Call call) || !call.getFunctionName().equals(CAST_FUNCTION_NAME)
+				|| call.getArguments().size() != 1 || !(call.getArguments().get(0) instanceof Variable variable)
+				|| !(assignments.get(variable.getName()) instanceof RediSearchColumnHandle source)
+				|| !isOperand(source) || !source.getType().equals(variable.getType())) {
+			return Optional.empty();
+		}
+		if (!isIntegerWidening(source.getType(), expression.getType())) {
+			return Optional.empty();
+		}
+		return Optional.of(RediSearchColumnHandle.integerWidening(source, expression.getType()));
 	}
 
 	/**

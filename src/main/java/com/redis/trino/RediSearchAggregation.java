@@ -37,8 +37,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import io.trino.spi.connector.AggregateFunction;
@@ -136,6 +138,29 @@ public class RediSearchAggregation {
 	 */
 	public String getHasValueField() {
 		return "__has_" + alias;
+	}
+
+	/**
+	 * A conservative bound on every partial sum, including sums before negative values cancel.
+	 */
+	@JsonIgnore
+	public OptionalLong getIntegerSumRowLimit() {
+		if (!SUM.equals(functionName) || columnHandle.filter(RediSearchColumnHandle::isIntegerWidening).isEmpty()) {
+			return OptionalLong.empty();
+		}
+		Type source = columnHandle.orElseThrow().getExpression().orElseThrow().getColumnType().orElseThrow();
+		long magnitude = source.equals(TINYINT) ? 128 : source.equals(SMALLINT) ? 32768 : 2147483648L;
+		return OptionalLong.of(((1L << 53) - 1) / magnitude);
+	}
+
+	public boolean isIntegerSumSafe(OptionalLong documents) {
+		OptionalLong limit = getIntegerSumRowLimit();
+		return limit.isEmpty() || (documents.isPresent() && documents.getAsLong() >= 0
+				&& documents.getAsLong() <= limit.getAsLong());
+	}
+
+	public String integerSumCountAlias() {
+		return "__precision_count_" + alias;
 	}
 
 	/**
