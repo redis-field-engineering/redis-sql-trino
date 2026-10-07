@@ -1,0 +1,74 @@
+= Redis Cloud Pro API comparison: issue #126
+
+The default API comparison is blocked by Redis Cloud provisioning failures.
+Changing only `redisearch.cluster` against an OSS-enabled endpoint does not measure the default API: a plain client can receive `MOVED`, even when `PING` and Search index discovery work.
+The https://redis.io/docs/latest/operate/rc/databases/configuration/clustering/#oss-cluster-api[Redis Cloud clustering documentation] requires a cluster-aware client for an OSS-enabled database.
+
+== Verified evidence
+
+On October 7, 2026 at 21:26 UTC, read-only API checks confirmed subscription `3442270`, database `14676669` (`clickbench-ram`) was active with `supportOSSClusterApi=true`, `useExternalEndpointForOSSClusterApi=false`, RESP3, 1,000 GB, no replication, `noeviction`, and AOF every second.
+See link:cloud-status-2026-10-07.json[the sanitized database and task snapshot].
+
+All four tasks still reported `processing-error`, `PROVISION_FAILURE`, `500 INTERNAL_SERVER_ERROR`, and `Cluster provision general failure occurred`:
+
+[cols="2,3",options="header"]
+|===
+|Task |Attempt
+|`67f4e4bf-6f7b-4e5a-aad1-6f7321b4ac4f` |Update existing database with `supportOSSClusterApi=false`
+|`705f141b-1ed5-43d4-b15a-7ce51e039234` |Update with both OSS and external-endpoint flags false
+|`cafa4b60-db35-4517-affe-5c0ca93fcfa6` |Create a separate 1 GB default API database using RESP3
+|`d21370e0-e600-4975-a40a-21600d90cb86` |Create a separate 1 GB default API database using RESP2
+|===
+
+The task descriptions above come from https://github.com/redis-field-engineering/redis-sql-trino/issues/126[issue #126]; the snapshot independently verifies their error states.
+The two small creation probes test provisioning, not full-scale latency or hardware equivalence.
+Their failure means a separate database has not yet provided a working route around the update failure.
+The RESP2 failure also means this has not been isolated to RESP3.
+
+The https://redis.io/docs/latest/operate/rc/api/api-reference/openapi.json[official OpenAPI schema] exposes `supportOSSClusterApi` and `useExternalEndpointForOSSClusterApi` in both `DatabaseCreateRequest` and `DatabaseUpdateRequest`.
+It says the external-endpoint flag can be enabled only with OSS Cluster API enabled.
+The API therefore exposes both creation and update paths; these observed failures do not prove a creation-only restriction or identify the underlying control-plane cause.
+Redis Cloud support needs to investigate the subscription and task IDs before another full-size default-mode deployment is attempted.
+
+A subsequent update request with `dryRun=true`, `supportOSSClusterApi=false`, and `useExternalEndpointForOSSClusterApi=false` completed successfully at 21:30 UTC (task `bcde7066-9593-47e3-ab5f-dc5ba9f93ad7`).
+The current schema explicitly defines `dryRun=true` as a read-only deployment plan that does not update resources.
+The plan reported 40 large shards on three `r8g.16xlarge` instances; a subsequent database GET confirmed the OSS flag remained true and the database active.
+See link:dry-run-status-2026-10-07.json[the sanitized post-plan snapshot].
+This narrows the evidence to a failure during real provisioning; a successful read-only plan does not demonstrate that the API mode can be changed successfully.
+
+== Refresh the evidence
+
+Set `REDIS_CLOUD_API_KEY` and `REDIS_CLOUD_API_SECRET_KEY` in the environment through your credential store.
+The following command performs only GET requests, records selected configuration and task error fields, and omits passwords, endpoints, and credential values:
+
+[source,shell]
+----
+python3 benchmarks/issue-126/cloud-api-status.py 3442270 14676669 \
+  --client-mode default \
+  --task 67f4e4bf-6f7b-4e5a-aad1-6f7321b4ac4f \
+  --task 705f141b-1ed5-43d4-b15a-7ce51e039234 \
+  --task cafa4b60-db35-4517-affe-5c0ca93fcfa6 \
+  --task d21370e0-e600-4975-a40a-21600d90cb86 \
+  --output /tmp/redis-default-api-status.json
+----
+
+Exit code `0` means the database is active and its explicit OSS flag matches the requested client mode; `1` means a mismatch, missing flag, or inactive database; `2` means the check could not be completed.
+Use `--client-mode oss` for the cluster-aware catalog.
+Passing this configuration check does not establish data-plane connectivity, correctness, or benchmark readiness.
+
+== Procedure after provisioning is repaired
+
+. Keep the running OSS baseline intact until its measurements finish. Do not change its API mode, connector revision, cache protocol, or timeout settings during the sweep.
+. Prefer a sequential, in-place comparison on the same database after the baseline completes and Redis Cloud confirms the change is supported for this deployment. Submit the mode change, wait for the asynchronous task to succeed, then independently GET the database and require `status=active` and the intended OSS flag. A successful HTTP submission alone is insufficient.
+. If Redis Cloud requires separate databases, provision the default-mode database only after a small probe succeeds. Match dataset, schema, indexes, memory, shard count, Redis version, RESP version, persistence, replication, eviction policy, query performance factor, host sizes, disk settings, AWS VPC, region, and physical availability zone. Record actual placement; equal requested sizes alone do not establish equal hardware.
+. For default mode, require `supportOSSClusterApi=false` and `redisearch.cluster=false`. For OSS mode, require `supportOSSClusterApi=true` and `redisearch.cluster=true`. Record the external-endpoint setting and use the same private-network path. Do not use client-mode switching as a replacement for server-mode verification.
+. On the runner, verify writes and reads of keys in multiple slots, table metadata creation, Search queries, cursor reads, and the unchanged SQL through the selected catalog. `PING` alone is insufficient. Require the source, indexed-document, and SQL counts to be exactly `99,997,497`, with no indexing in progress or failed indexing records, before measuring.
+. Pin the same connector revision for an API-mode comparison. Keep the #129 optimized-revision comparison separate from the API-mode comparison. Run Q1-Q4 and then all 43 queries with three attempts each, raw outputs, checksums, independent full-data reference results, and the recorded cache protocol. Preserve explicit timeout failures; do not accept partial results.
+. Publish default-versus-OSS conclusions only after both modes pass the configuration, data-plane, count, and correctness gates. Until then, label the measured entry OSS Cluster API only and keep #126 open.
+
+== Support handoff
+
+Provide Redis Cloud support with the subscription/database IDs, four failed task IDs, timestamps, sanitized snapshot, and the minimal update/creation request bodies recorded in #126.
+Include the successful dry-run task and explain that actual provisioning still failed for the same intended mode.
+Ask whether this dedicated Redis 8.6 deployment supports disabling OSS Cluster API in place, why both update and fresh creation fail, and which supported configuration should be used for a default-mode probe.
+Record the support response and a successful task plus database GET before treating the blocker as resolved.
