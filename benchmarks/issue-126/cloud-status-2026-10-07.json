@@ -1,0 +1,85 @@
+{
+  "checkedAt": "2026-10-07T21:26:38.440501+00:00",
+  "results": [
+    {
+      "path": "/subscriptions/3442270/databases/14676669",
+      "result": {
+        "databaseId": 14676669,
+        "name": "clickbench-ram",
+        "redisVersion": "8.6",
+        "respVersion": "resp3",
+        "status": "active",
+        "memoryLimitInGb": 1000.0,
+        "supportOSSClusterApi": true,
+        "useExternalEndpointForOSSClusterApi": false,
+        "dataPersistence": "aof-every-1-second",
+        "replication": false,
+        "dataEvictionPolicy": "noeviction"
+      }
+    },
+    {
+      "path": "/tasks/67f4e4bf-6f7b-4e5a-aad1-6f7321b4ac4f",
+      "result": {
+        "taskId": "67f4e4bf-6f7b-4e5a-aad1-6f7321b4ac4f",
+        "status": "processing-error",
+        "description": "Task request failed during processing. See error information for failure details.",
+        "timestamp": "2026-10-07T18:59:27.23380286Z",
+        "response": {
+          "error": {
+            "type": "PROVISION_FAILURE",
+            "status": "500 INTERNAL_SERVER_ERROR",
+            "description": "Cluster provision general failure occurred"
+          }
+        }
+      }
+    },
+    {
+      "path": "/tasks/705f141b-1ed5-43d4-b15a-7ce51e039234",
+      "result": {
+        "taskId": "705f141b-1ed5-43d4-b15a-7ce51e039234",
+        "status": "processing-error",
+        "description": "Task request failed during processing. See error information for failure details.",
+        "timestamp": "2026-10-07T19:21:00.464079368Z",
+        "response": {
+          "error": {
+            "type": "PROVISION_FAILURE",
+            "status": "500 INTERNAL_SERVER_ERROR",
+            "description": "Cluster provision general failure occurred"
+          }
+        }
+      }
+    },
+    {
+      "path": "/tasks/cafa4b60-db35-4517-affe-5c0ca93fcfa6",
+      "result": {
+        "taskId": "cafa4b60-db35-4517-affe-5c0ca93fcfa6",
+        "status": "processing-error",
+        "description": "Task request failed during processing. See error information for failure details.",
+        "timestamp": "2026-10-07T19:30:47.707074513Z",
+        "response": {
+          "error": {
+            "type": "PROVISION_FAILURE",
+            "status": "500 INTERNAL_SERVER_ERROR",
+            "description": "Cluster provision general failure occurred"
+          }
+        }
+      }
+    },
+    {
+      "path": "/tasks/d21370e0-e600-4975-a40a-21600d90cb86",
+      "result": {
+        "taskId": "d21370e0-e600-4975-a40a-21600d90cb86",
+        "status": "processing-error",
+        "description": "Task request failed during processing. See error information for failure details.",
+        "timestamp": "2026-10-07T20:35:45.066801857Z",
+        "response": {
+          "error": {
+            "type": "PROVISION_FAILURE",
+            "status": "500 INTERNAL_SERVER_ERROR",
+            "description": "Cluster provision general failure occurred"
+          }
+        }
+      }
+    }
+  ]
+}

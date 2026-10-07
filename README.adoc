@@ -306,6 +306,8 @@ The default query performance factor is `0` (no explicit server tuning), and pus
 Each CSV has a matching `.properties` file recording its configuration, read-ahead depth, background-client count, warmups and sample count.
 Use distinct labels and repeat baseline and candidate runs on the same machine.
 
+For Redis Cloud Pro default-versus-OSS API comparisons, see link:benchmarks/issue-126/README.adoc[the configuration checks, provisioning evidence, and comparison procedure].
+
 == Documentation
 
 {name} documentation is available at https://{project-owner}.github.io/{project-name}
