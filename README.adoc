@@ -314,6 +314,8 @@ These timings are cumulative and can overlap with Trino processing; they do not 
 Cursor request counts include prefetched requests that race cursor exhaustion, and metrics are collected per query rather than across a shared connection.
 DEBUG logging from `com.redis.trino.RediSearchMetadata` reports unsupported aggregates, integer SUM row-bound rejection, and RESP2 floating-point fallback.
 
+For Redis Cloud Pro default-versus-OSS API comparisons, see link:benchmarks/issue-126/README.adoc[the configuration checks, provisioning evidence, and comparison procedure].
+
 == Documentation
 
 {name} documentation is available at https://{project-owner}.github.io/{project-name}

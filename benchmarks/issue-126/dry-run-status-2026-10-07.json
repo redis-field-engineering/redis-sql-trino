@@ -1,0 +1,28 @@
+{
+  "checkedAt": "2026-10-07T21:30:07.736910+00:00",
+  "subscriptionId": 3442270,
+  "database": {
+    "databaseId": 14676669,
+    "name": "clickbench-ram",
+    "status": "active",
+    "redisVersion": "8.6",
+    "respVersion": "resp3",
+    "supportOSSClusterApi": true,
+    "useExternalEndpointForOSSClusterApi": false,
+    "memoryLimitInGb": 1000.0,
+    "datasetSizeInGb": 1000.0,
+    "replication": false,
+    "dataPersistence": "aof-every-1-second",
+    "dataEvictionPolicy": "noeviction"
+  },
+  "clientMode": "oss",
+  "serverClientModeMatches": true,
+  "tasks": [
+    {
+      "taskId": "bcde7066-9593-47e3-ab5f-dc5ba9f93ad7",
+      "status": "processing-completed",
+      "timestamp": "2026-10-07T21:30:02.118484817Z",
+      "error": {}
+    }
+  ]
+}
