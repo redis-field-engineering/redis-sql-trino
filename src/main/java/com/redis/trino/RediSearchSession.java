@@ -621,20 +621,20 @@ public class RediSearchSession {
     }
 
     public AggregateResult aggregate(Connection scan, RediSearchTableHandle table, List<RediSearchColumnHandle> columns,
-            RediSearchReadStats stats) {
+            ExactHashReader exactReader, RediSearchReadStats stats) {
         Optional<RediSearchIndexInfo> indexInfo = stats.redisRequest(() -> indexInfo(scan.sync, table.getIndex()));
         indexInfo.ifPresent(info -> verifyIndexed(table.getIndex(), info));
         Aggregation aggregation = translator.aggregate(table, columns, indexInfo);
         log.debug("Running %s", aggregation);
         stats.aggregateRequests.increment();
-        AggregateResult result = result(scan, aggregation.getReader(), Optional.empty(),
+        AggregateResult result = result(exactReader, aggregation.getReader(), Optional.empty(),
                 stats.redisRequest(() -> scan.sync.ftAggregate(aggregation.getIndex(), aggregation.getQuery(), aggregation.getArgs())), stats);
         // A batch can come back empty while the cursor still has rows, so the aggregation is only empty once the
         // cursor is exhausted
         while (result.getRows().isEmpty() && result.getCursor().isPresent()) {
             Cursor cursor = result.getCursor().get();
             stats.cursorRequests.increment();
-            result = result(scan, result.getReader(), Optional.of(cursor),
+            result = result(exactReader, result.getReader(), Optional.of(cursor),
                     stats.redisRequest(() -> cursorCommands(scan, cursor).read(table, cursor)), stats);
         }
         if (result.getRows().isEmpty() && aggregation.isGlobal()) {
@@ -676,7 +676,7 @@ public class RediSearchSession {
     /**
      * @param cursor the cursor the reply was read from, if any
      */
-    public AggregateResult result(Connection scan, RediSearchRowReader reader, Optional<Cursor> cursor,
+    public AggregateResult result(ExactHashReader exactReader, RediSearchRowReader reader, Optional<Cursor> cursor,
             AggregationReply<String> reply, RediSearchReadStats stats) {
         long conversionStart = System.nanoTime();
         List<String[]> rows = new ArrayList<>();
@@ -690,10 +690,10 @@ public class RediSearchSession {
                 String[] row = reader.read(result.getFields());
                 for (int position : reader.getExactPositions()) {
                     if (row[position] != null && RediSearchRowReader.isPossiblyRounded(row[position])) {
-                        // Pipelined, and rare: only values of 2^53 or more
+                        // Recover the stored integer whenever the indexed double may have rounded it.
                         String key = result.getFields().get(RediSearchBuiltinField.KEY.getName()).asString();
                         stats.exactHashReads.increment();
-                        exactReads.add(scan.async.hget(key, reader.getExactField(position)).toCompletableFuture()
+                        exactReads.add(exactReader.read(key, reader.getExactField(position))
                                 .thenAccept(value -> row[position] = value));
                     }
                 }
@@ -702,8 +702,10 @@ public class RediSearchSession {
         }
         stats.conversionNanos.add(System.nanoTime() - conversionStart);
         if (!exactReads.isEmpty()) {
+            stats.exactHashReadBatches.increment();
             long waitStart = System.nanoTime();
             try {
+                exactReader.flush();
                 CompletableFuture.allOf(exactReads.toArray(CompletableFuture[]::new)).join();
             } catch (CompletionException e) {
                 throwIfUnchecked(e.getCause());
@@ -716,12 +718,15 @@ public class RediSearchSession {
         conversionStart = System.nanoTime();
         rows.replaceAll(reader::project);
         stats.conversionNanos.add(System.nanoTime() - conversionStart);
-        // Cursor ID 0 means there are no more rows
+        return new AggregateResult(rows, nextCursor(reply, cursor), reader);
+    }
+
+    static Optional<Cursor> nextCursor(AggregationReply<String> reply, Optional<Cursor> previous) {
+        // Cursor ID 0 means there are no more rows. The cursor stays on the node that created it.
         Optional<Cursor> next = reply.getCursor().filter(c -> c.getCursorId() != 0);
-        // The cursor stays on the node that created it
         next.filter(c -> c.getNodeId().isEmpty())
-                .ifPresent(c -> cursor.flatMap(Cursor::getNodeId).ifPresent(c::setNodeId));
-        return new AggregateResult(rows, next, reader);
+                .ifPresent(c -> previous.flatMap(Cursor::getNodeId).ifPresent(c::setNodeId));
+        return next;
     }
 
     /**
@@ -845,6 +850,43 @@ public class RediSearchSession {
             log.warn(e, "Could not delete cursor %s of index %s", cursor.getCursorId(), tableHandle.getIndex());
             return null;
         });
+    }
+
+    /**
+     * A scan's private, lazily opened connection for exact hash reads. Shared scan connections must keep automatic
+     * flushing enabled: buffering on them could strand another query's commands. This connection sends all of a
+     * cursor batch's HGETs in one flush, instead of scheduling a network flush for each large integer.
+     */
+    public final class ExactHashReader implements AutoCloseable {
+        private Connection reads;
+
+        private ExactHashReader() {}
+
+        CompletableFuture<String> read(String key, String field) {
+            if (reads == null) {
+                reads = connect();
+                reads.connection.setAutoFlushCommands(false);
+            }
+            return reads.async.hget(key, field).toCompletableFuture();
+        }
+
+        void flush() {
+            if (reads != null) {
+                reads.connection.flushCommands();
+            }
+        }
+
+        @Override
+        public void close() {
+            if (reads != null) {
+                reads.connection.close();
+                reads = null;
+            }
+        }
+    }
+
+    public ExactHashReader exactHashReader() {
+        return new ExactHashReader();
     }
 
     /**

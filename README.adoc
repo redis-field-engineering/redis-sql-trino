@@ -306,9 +306,12 @@ The default query performance factor is `0` (no explicit server tuning), and pus
 Each CSV has a matching `.properties` file recording its configuration, read-ahead depth, background-client count, warmups and sample count.
 Use distinct labels and repeat baseline and candidate runs on the same machine.
 
-The scan operator exposes connector metrics in Trino query statistics: `redis.aggregate.requests`, `redis.cursor.requests`, `redis.rows.received`, and `redis.exact-hash-reads`.
+The scan operator exposes connector metrics in Trino query statistics: `redis.aggregate.requests`, `redis.cursor.requests`, `redis.rows.received`, `redis.exact-hash-reads`, and `redis.exact-hash-read-batches`.
 `redis.rows.received` counts rows returned by Redis before connector filtering; a pushed global aggregation normally returns one row, while a fallback scan returns the matching documents.
 Trino's physical input positions and bytes report the rows and pages delivered to Trino.
+Exact BIGINT hash reads are buffered per cursor batch on a scan's private connection, opened only when needed and closed with the scan.
+The next cursor request overlaps the current batch's exact-value reads; `redis.exact-hash-read-batches` counts batches requiring those reads.
+For the Q5 investigation and repeatable measurements, see link:benchmarks/issue-133/README.adoc[the exact BIGINT scan report].
 `redis.request-wall-time` measures FT.INFO, FT.AGGREGATE, and cursor request latency, including network, queuing, and client protocol decoding; `redis.exact-hash-read-wait-time` measures time waiting for pipelined exact-value reads; `redis.row-conversion-time` measures connector row reconstruction and projection, excluding that wait and Trino page encoding.
 These timings are cumulative and can overlap with Trino processing; they do not isolate Redis server CPU time. Use `FT.PROFILE` separately for server execution detail.
 Cursor request counts include prefetched requests that race cursor exhaustion, and metrics are collected per query rather than across a shared connection.
