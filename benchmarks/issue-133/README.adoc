@@ -1,0 +1,63 @@
+= Exact BIGINT fallback scan: issue #133
+
+The unchanged Q5 SQL is `SELECT COUNT(DISTINCT UserID) FROM hits;`.
+This change accelerates its exact scan fallback: Trino still computes DISTINCT over the recovered BIGINT values.
+It buffers a cursor batch's HGETs on a private connection and overlaps the next cursor request with the current batch's exact-value reads.
+The private connection opens only when an integer may have rounded and closes with the page source, including limited/cancelled scans.
+Shared scan connections keep automatic flushing enabled, and cursor read-ahead remains bounded at one batch.
+
+NUMERIC grouping and DISTINCT pushdown remain unsupported for BIGINTs that may round.
+On the test server, projected NUMERIC `LOAD id AS raw` still rounded `9007199254740993` to `9007199254740992`.
+`LOAD *` preserves the hash text but transfers every field, which is unsuitable for the 105-column ClickBench scan.
+A future string/TAG distinct implementation must prove SQL integer identity, NULL exclusion and distributed merging before replacing this fallback.
+The patch does not add approximate counts or sum shard-local distinct counts.
+
+== Validation and measurements
+
+The cursor tests cover adjacent integers beyond 2^53, both signs, signed extrema, zero, missing fields, equivalent decimal/scientific spellings, duplicate IDs across two shards, multiple exact columns, multiple cursor batches and early termination.
+The SQL DISTINCT result is checked against the explicit expected set; the raw projection checks the exact-read counters.
+
+`hash-read-measurements.json` records a separate local command microbenchmark using Redis Enterprise 8.2.0-78.18 in Docker on macOS ARM.
+Each sample issues 100,000 HGETs in batches of 1,000 over 10,000 keys storing `9007199254740993`.
+Attempt zero is warmup; the following three attempts alternate buffered/unbuffered order.
+Median HGET time falls from 943.84 to 850.87 ms without sharding (9.9%) and from 680.08 to 565.95 ms with the two-shard OSS API (16.8%).
+There is sample noise: one sharded buffered attempt was slower. These are command-throughput measurements, not full Q5 timings.
+
+The end-to-end local Q5 comparison is recorded in `sql-measurements.json`.
+It scans 100,000 distinct adjacent large BIGINTs on two shards, with cursor count 1,000 and four scan connections.
+The reference result is exactly 100,000 in every attempt.
+After one warmup, baseline times are 1,759.59 / 1,750.05 / 1,848.64 ms and candidate times are 1,638.11 / 1,555.29 / 1,723.14 ms.
+Median time decreases from 1,759.59 to 1,638.11 ms (6.9%). This local comparison does not establish the required full-data speedup.
+The report pins the baseline commit and SHA-256 of each changed candidate production source file.
+
+[source,shell]
+----
+./mvnw test -Dtest=RediSearchExactDistinctBenchmark -Dbenchmark.label=candidate
+./mvnw test -Dtest=TestExactHashReadBenchmark -Dredisearch.benchmark.exact-reads=true
+./mvnw test -Dtest=TestCursorReads,TestShardedCursorReads,TestQueryBuilder
+python3 -m unittest discover -s benchmarks/issue-133 -p 'test_*.py'
+----
+
+== Full ClickBench acceptance remains pending
+
+Read-only Cloud snapshots on base revision `4aa71cea12abe7e2f1dc93a8f276418292edd915` showed two Q5 failures at 20 minutes: 90,989,000 and 89,396,000 input positions, respectively.
+The third attempt was cancelled and the existing runner moved to Q6.
+No candidate connector was deployed into that run, and no full-data result or 1,200-second success is claimed here.
+The Q5 coordinator restarted before the completed per-scan counters could be collected; missing counters must not be interpreted as zero.
+A completed full-data Q6 baseline was captured read-only in `q6-baseline-metrics.json`: 99,997,497 rows, 99,997 cursor requests, zero exact HGETs, 387.47 s cumulative request time and 6.69 min elapsed.
+This validates the collector against the live API and demonstrates that Q6 follows a different path. It is not a candidate Q6 measurement.
+
+Pin a single candidate revision and artifact SHA for the next sweep. Run unchanged Q5 three times with the same full dataset, hardware and 1,200-second limit, and compare every result with the existing independent DuckDB reference.
+Capture final query info before restarting Trino, including failed attempts:
+
+[source,shell]
+----
+python3 benchmarks/issue-133/capture-query-metrics.py --server http://127.0.0.1:18080 > q5-metrics.json
+# Select Q6 independently; do not infer its performance from Q5's BIGINT repair path.
+python3 benchmarks/issue-133/capture-query-metrics.py --sql 'SELECT COUNT(DISTINCT SearchPhrase) FROM hits;' > q6-metrics.json
+----
+
+The collector selects the exact SQL (excluding EXPLAIN), or an explicit `--query-id`, and reads connector metrics from query-level operator summaries without counting stage/task copies again.
+An empty `scanMetrics` array means the API has no counters at that snapshot; retry after completion while the query is retained.
+`redis.exact-hash-read-batches` counts batches requiring repairs. Existing HGET counts and request/wait/conversion timings remain available.
+Request and exact-read wait timings can now overlap, so their sum is cumulative work rather than elapsed query time.

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.stream.IntStream;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -95,6 +96,40 @@ public class TestCursorReads extends AbstractTestQueryFramework {
 			assertThat(count(metrics, "redis.exact-hash-reads")).isEqualTo(1);
 		} finally {
 			assertUpdate("DROP TABLE metric_bigints");
+		}
+	}
+
+	@Test
+	public void testExactDistinctAcrossBatchesAndShards() {
+		assertUpdate("CREATE TABLE exact_distinct (id bigint, other bigint, marker varchar)");
+		try {
+			// Adjacent values sharing an indexed double, both signs, extrema, zero and missing values. Each value
+			// is repeated across cursor batches and (with the cluster deployment) both shards.
+			List<String> values = java.util.Arrays.asList("9007199254740992", "9007199254740993", "9007199254740994",
+					"-9007199254740992", "-9007199254740993", "-9223372036854775808", "9223372036854775807", "0", null);
+			List<String> keys = redisearch.keysOnShards("exact_distinct:", IntStream.range(0, 227).map(i -> i % 2).toArray());
+			for (int i = 0; i < keys.size(); i++) {
+				Map<String, String> fields = new java.util.HashMap<>(Map.of("marker", "row", "other", "9223372036854775807"));
+				String value = i < 225 ? values.get(i % values.size())
+						: (i == 225 ? "9007199254740993.0" : "9.007199254740993e15");
+				if (value != null) {
+					fields.put("id", value);
+				}
+				redisearch.getConnection().sync().hset(keys.get(i), fields);
+			}
+			assertThat(query("SELECT count(DISTINCT id), count(id), min(id), max(id), count(DISTINCT other) FROM exact_distinct"))
+					.matches("VALUES (BIGINT '8', BIGINT '202', BIGINT '-9223372036854775808', BIGINT '9223372036854775807', BIGINT '1')");
+			Metrics metrics = connectorMetrics("SELECT id, other FROM exact_distinct");
+			assertThat(count(metrics, "redis.rows.received")).isEqualTo(227);
+			assertThat(count(metrics, "redis.exact-hash-reads")).isEqualTo(404);
+			assertThat(count(metrics, "redis.exact-hash-read-batches")).isPositive()
+					.isLessThan(count(metrics, "redis.exact-hash-reads"));
+			assertThat(query("SELECT count(*) FROM (SELECT id FROM exact_distinct WHERE id % 2 = 0 LIMIT 3)"))
+					.matches("VALUES BIGINT '3'");
+			// A limited scan closes its private reader without changing flushing on connections used by other scans.
+			assertThat(query("SELECT count(DISTINCT id) FROM many")).matches("VALUES BIGINT '100'");
+		} finally {
+			assertUpdate("DROP TABLE exact_distinct");
 		}
 	}
 

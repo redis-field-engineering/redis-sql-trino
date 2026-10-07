@@ -1,0 +1,78 @@
+{
+  "baselineRevision": "4aa71cea12abe7e2f1dc93a8f276418292edd915",
+  "candidateSourceSha256": {
+    "src/main/java/com/redis/trino/RediSearchPageSource.java": "66ef064350b34ec799157b2ab1cef8d689753fc4fd9df63cf731de7b2d0f02be",
+    "src/main/java/com/redis/trino/RediSearchSession.java": "0aef9fa5949616bacb325d982574764d49449402d19b343f8687ea528307ccfe",
+    "src/main/java/com/redis/trino/RediSearchReadStats.java": "ddcc00738db4e4299b15a5c8ebf6f2a7763951d11f02fa83ed2823a827341eb9"
+  },
+  "environment": "Local macOS ARM; Docker Redis Enterprise 8.2.0-78.18 two-shard OSS Cluster API; Trino 483; JDK 25",
+  "sql": "SELECT COUNT(DISTINCT UserID) FROM hits;",
+  "rows": 100000,
+  "firstId": "9007199254740992",
+  "cursorCount": 1000,
+  "scanConnections": 4,
+  "warmupAttempt": 0,
+  "samples": [
+    {
+      "label": "baseline",
+      "attempt": 0,
+      "milliseconds": 2908.57,
+      "result": 100000,
+      "metricsText": "{redis.exact-hash-reads=LongCount{total=100000}, redis.request-wall-time={duration=467.16ms}, redis.exact-hash-read-wait-time={duration=1.25s}, redis.aggregate.requests=LongCount{total=1}, redis.cursor.requests=LongCount{total=100}, redis.row-conversion-time={duration=193.45ms}, redis.rows.received=LongCount{total=100000}}"
+    },
+    {
+      "label": "baseline",
+      "attempt": 1,
+      "milliseconds": 1759.59,
+      "result": 100000,
+      "metricsText": "{redis.exact-hash-reads=LongCount{total=100000}, redis.request-wall-time={duration=311.54ms}, redis.exact-hash-read-wait-time={duration=1.23s}, redis.aggregate.requests=LongCount{total=1}, redis.cursor.requests=LongCount{total=100}, redis.row-conversion-time={duration=90.70ms}, redis.rows.received=LongCount{total=100000}}"
+    },
+    {
+      "label": "baseline",
+      "attempt": 2,
+      "milliseconds": 1750.05,
+      "result": 100000,
+      "metricsText": "{redis.exact-hash-reads=LongCount{total=100000}, redis.request-wall-time={duration=331.28ms}, redis.exact-hash-read-wait-time={duration=1.22s}, redis.aggregate.requests=LongCount{total=1}, redis.cursor.requests=LongCount{total=100}, redis.row-conversion-time={duration=98.14ms}, redis.rows.received=LongCount{total=100000}}"
+    },
+    {
+      "label": "baseline",
+      "attempt": 3,
+      "milliseconds": 1848.64,
+      "result": 100000,
+      "metricsText": "{redis.exact-hash-reads=LongCount{total=100000}, redis.request-wall-time={duration=362.97ms}, redis.exact-hash-read-wait-time={duration=1.20s}, redis.aggregate.requests=LongCount{total=1}, redis.cursor.requests=LongCount{total=100}, redis.row-conversion-time={duration=110.18ms}, redis.rows.received=LongCount{total=100000}}"
+    },
+    {
+      "label": "candidate",
+      "attempt": 0,
+      "milliseconds": 2503.21,
+      "result": 100000,
+      "metricsText": "{redis.exact-hash-read-wait-time={duration=1.30s}, redis.row-conversion-time={duration=131.02ms}, redis.exact-hash-reads=LongCount{total=100000}, redis.request-wall-time={duration=1.50s}, redis.exact-hash-read-batches=LongCount{total=100}, redis.rows.received=LongCount{total=100000}, redis.aggregate.requests=LongCount{total=1}, redis.cursor.requests=LongCount{total=100}}"
+    },
+    {
+      "label": "candidate",
+      "attempt": 1,
+      "milliseconds": 1638.11,
+      "result": 100000,
+      "metricsText": "{redis.exact-hash-read-wait-time={duration=1.28s}, redis.row-conversion-time={duration=94.52ms}, redis.exact-hash-reads=LongCount{total=100000}, redis.request-wall-time={duration=1.44s}, redis.exact-hash-read-batches=LongCount{total=100}, redis.rows.received=LongCount{total=100000}, redis.aggregate.requests=LongCount{total=1}, redis.cursor.requests=LongCount{total=100}}"
+    },
+    {
+      "label": "candidate",
+      "attempt": 2,
+      "milliseconds": 1555.29,
+      "result": 100000,
+      "metricsText": "{redis.exact-hash-read-wait-time={duration=1.27s}, redis.row-conversion-time={duration=84.16ms}, redis.exact-hash-reads=LongCount{total=100000}, redis.request-wall-time={duration=1.42s}, redis.exact-hash-read-batches=LongCount{total=100}, redis.rows.received=LongCount{total=100000}, redis.aggregate.requests=LongCount{total=1}, redis.cursor.requests=LongCount{total=100}}"
+    },
+    {
+      "label": "candidate",
+      "attempt": 3,
+      "milliseconds": 1723.14,
+      "result": 100000,
+      "metricsText": "{redis.exact-hash-read-wait-time={duration=1.32s}, redis.row-conversion-time={duration=99.03ms}, redis.exact-hash-reads=LongCount{total=100000}, redis.request-wall-time={duration=1.40s}, redis.exact-hash-read-batches=LongCount{total=100}, redis.rows.received=LongCount{total=100000}, redis.aggregate.requests=LongCount{total=1}, redis.cursor.requests=LongCount{total=100}}"
+    }
+  ],
+  "medianMilliseconds": {
+    "baseline": 1759.59,
+    "candidate": 1638.11
+  },
+  "medianReductionPercent": 6.90388101773709
+}

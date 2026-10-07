@@ -1,0 +1,58 @@
+{
+  "capturedUtc": "2026-10-07T22:51:23.462727+00:00",
+  "queries": [
+    {
+      "queryId": "20261007_224237_00000_7rb4v",
+      "state": "FINISHED",
+      "queryStats": {
+        "elapsedTime": "6.69m",
+        "executionTime": "6.68m",
+        "totalCpuTime": "24.45s",
+        "physicalInputPositions": 99997497,
+        "physicalInputReadTime": "6.46m",
+        "physicalInputDataSize": "1239623827B",
+        "peakUserMemoryReservation": "575179680B"
+      },
+      "scanMetrics": [
+        {
+          "stageId": 2,
+          "operatorType": "TableScanOperator",
+          "physicalInputPositions": 99997497,
+          "connectorMetrics": {
+            "redis.rows.received": {
+              "@class": "io.trino.plugin.base.metrics.LongCount",
+              "total": 99997497
+            },
+            "redis.exact-hash-reads": {
+              "@class": "io.trino.plugin.base.metrics.LongCount",
+              "total": 0
+            },
+            "redis.row-conversion-time": {
+              "@class": "io.trino.plugin.base.metrics.DurationTiming",
+              "duration": "7061010057.00ns"
+            },
+            "redis.cursor.requests": {
+              "@class": "io.trino.plugin.base.metrics.LongCount",
+              "total": 99997
+            },
+            "redis.aggregate.requests": {
+              "@class": "io.trino.plugin.base.metrics.LongCount",
+              "total": 1
+            },
+            "redis.exact-hash-read-wait-time": {
+              "@class": "io.trino.plugin.base.metrics.DurationTiming",
+              "duration": "0.00ns"
+            },
+            "redis.request-wall-time": {
+              "@class": "io.trino.plugin.base.metrics.DurationTiming",
+              "duration": "387467628789.00ns"
+            }
+          }
+        }
+      ],
+      "error": null
+    }
+  ],
+  "connectorRevision": "4aa71cea12abe7e2f1dc93a8f276418292edd915",
+  "description": "Read-only snapshot of the existing full-data Q6 baseline, not the candidate or a Q5 measurement"
+}

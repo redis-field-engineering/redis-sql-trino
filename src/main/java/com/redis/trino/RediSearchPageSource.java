@@ -65,6 +65,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 
 	private final RediSearchSession session;
 	private final RediSearchSession.Connection connection;
+	private final RediSearchSession.ExactHashReader exactReader;
 	private final RediSearchTableHandle table;
 	private final ValueWriter[] writers;
 	private final PageBuilder pageBuilder;
@@ -82,11 +83,18 @@ public class RediSearchPageSource implements ConnectorPageSource {
 			List<RediSearchColumnHandle> columns) {
 		this.session = session;
 		this.connection = session.scanConnection();
+		this.exactReader = session.exactHashReader();
 		this.table = table;
 		List<Type> columnTypes = columns.stream().map(RediSearchColumnHandle::getType).toList();
 		this.writers = columnTypes.stream().map(RediSearchPageSourceResultWriter::writer).toArray(ValueWriter[]::new);
 		this.pageBuilder = new PageBuilder(columnTypes);
-		RediSearchSession.AggregateResult first = session.aggregate(connection, table, columns, stats);
+		RediSearchSession.AggregateResult first;
+		try {
+			first = session.aggregate(connection, table, columns, exactReader, stats);
+		} catch (RuntimeException | Error e) {
+			exactReader.close();
+			throw e;
+		}
 		this.reader = first.getReader();
 		start(first);
 	}
@@ -104,9 +112,15 @@ public class RediSearchPageSource implements ConnectorPageSource {
 			reads.clear();
 			return;
 		}
-		while (reads.size() < READS_AHEAD) {
-			reads.add(session.cursorReadAsync(connection, table, cursor.get(), stats));
-		}
+		readAhead(cursor);
+	}
+
+	private void readAhead(Optional<Cursor> current) {
+		current.ifPresent(next -> {
+			while (reads.size() < READS_AHEAD) {
+				reads.add(session.cursorReadAsync(connection, table, next, stats));
+			}
+		});
 	}
 
 	@Override
@@ -153,7 +167,11 @@ public class RediSearchPageSource implements ConnectorPageSource {
 					break;
 				}
 				reads.remove();
-				start(session.result(connection, reader, cursor, join(next), stats));
+				AggregationReply<String> reply = join(next);
+				// Start the next cursor read before waiting for this batch's exact hash values. Those HGETs use
+				// a private connection, so their wait can overlap the cursor request without delaying its commands.
+				readAhead(RediSearchSession.nextCursor(reply, cursor));
+				start(session.result(exactReader, reader, cursor, reply, stats));
 				continue;
 			}
 			String[] row = rows.next();
@@ -204,5 +222,6 @@ public class RediSearchPageSource implements ConnectorPageSource {
 			reads.clear();
 		}
 		cursor = Optional.empty();
+		exactReader.close();
 	}
 }

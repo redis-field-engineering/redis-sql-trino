@@ -1,0 +1,123 @@
+{
+  "description": "HGET-only microbenchmark; not SQL Q5 or full-data acceptance",
+  "redis": "Enterprise 8.2.0-78.18 Docker on local macOS ARM",
+  "rowsPerAttempt": 100000,
+  "keys": 10000,
+  "cursorBatchSize": 1000,
+  "value": "9007199254740993",
+  "warmupAttempt": 0,
+  "samples": [
+    {
+      "deployment": "NON_SHARDED",
+      "attempt": 0,
+      "buffered": false,
+      "rows": 100000,
+      "milliseconds": 1100.62
+    },
+    {
+      "deployment": "NON_SHARDED",
+      "attempt": 0,
+      "buffered": true,
+      "rows": 100000,
+      "milliseconds": 519.34
+    },
+    {
+      "deployment": "NON_SHARDED",
+      "attempt": 1,
+      "buffered": true,
+      "rows": 100000,
+      "milliseconds": 691.84
+    },
+    {
+      "deployment": "NON_SHARDED",
+      "attempt": 1,
+      "buffered": false,
+      "rows": 100000,
+      "milliseconds": 870.12
+    },
+    {
+      "deployment": "NON_SHARDED",
+      "attempt": 2,
+      "buffered": false,
+      "rows": 100000,
+      "milliseconds": 1060.45
+    },
+    {
+      "deployment": "NON_SHARDED",
+      "attempt": 2,
+      "buffered": true,
+      "rows": 100000,
+      "milliseconds": 906.15
+    },
+    {
+      "deployment": "NON_SHARDED",
+      "attempt": 3,
+      "buffered": true,
+      "rows": 100000,
+      "milliseconds": 850.87
+    },
+    {
+      "deployment": "NON_SHARDED",
+      "attempt": 3,
+      "buffered": false,
+      "rows": 100000,
+      "milliseconds": 943.84
+    },
+    {
+      "deployment": "SHARDED",
+      "attempt": 0,
+      "buffered": false,
+      "rows": 100000,
+      "milliseconds": 961.17
+    },
+    {
+      "deployment": "SHARDED",
+      "attempt": 0,
+      "buffered": true,
+      "rows": 100000,
+      "milliseconds": 600.37
+    },
+    {
+      "deployment": "SHARDED",
+      "attempt": 1,
+      "buffered": true,
+      "rows": 100000,
+      "milliseconds": 565.95
+    },
+    {
+      "deployment": "SHARDED",
+      "attempt": 1,
+      "buffered": false,
+      "rows": 100000,
+      "milliseconds": 680.08
+    },
+    {
+      "deployment": "SHARDED",
+      "attempt": 2,
+      "buffered": false,
+      "rows": 100000,
+      "milliseconds": 678.86
+    },
+    {
+      "deployment": "SHARDED",
+      "attempt": 2,
+      "buffered": true,
+      "rows": 100000,
+      "milliseconds": 535.93
+    },
+    {
+      "deployment": "SHARDED",
+      "attempt": 3,
+      "buffered": true,
+      "rows": 100000,
+      "milliseconds": 811.13
+    },
+    {
+      "deployment": "SHARDED",
+      "attempt": 3,
+      "buffered": false,
+      "rows": 100000,
+      "milliseconds": 783.87
+    }
+  ]
+}
