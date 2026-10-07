@@ -433,7 +433,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	/**
 	 * Pushes arithmetic on DOUBLE NUMERIC columns of hash indexes, such as {@code quantity * extendedprice}, down as
 	 * columns of their own ({@link RediSearchExpression}), so that a sum or average of it is pushed down too: an APPLY
-	 * step computes it before GROUPBY. A scan computes it in the connector. Other projections stay with Trino.
+	 * step computes it before GROUPBY. A scan computes it in the connector. Value-preserving integer widening also
+	 * pushes down, retaining the original integer field. Other projections stay with Trino.
 	 */
 	@Override
 	public Optional<ProjectionApplicationResult<ConnectorTableHandle>> applyProjection(ConnectorSession session,
@@ -454,7 +455,9 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			Optional<RediSearchExpression> expression = projection instanceof Call
 					? RediSearchExpression.translate(projection, assignments)
 					: Optional.empty();
-			if (expression.isEmpty()) {
+			Optional<RediSearchColumnHandle> projected = RediSearchExpression.integerWidening(projection, assignments)
+					.or(() -> expression.map(RediSearchColumnHandle::expression));
+			if (projected.isEmpty()) {
 				newProjections.add(projection);
 				for (Variable variable : ConnectorExpressions.extractVariables(projection)) {
 					newAssignments.putIfAbsent(variable.getName(),
@@ -462,7 +465,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 				}
 				continue;
 			}
-			RediSearchColumnHandle column = RediSearchColumnHandle.expression(expression.get());
+			RediSearchColumnHandle column = projected.get();
 			String variable = variables.computeIfAbsent(column, unused -> {
 				String name = "expr_" + variables.size();
 				while (assignments.containsKey(name) || newAssignments.containsKey(name)) {
@@ -509,6 +512,11 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			Optional<RediSearchAggregation> aggregation = RediSearchAggregation.handleAggregation(function, assignments,
 					colName, countValues);
 			if (aggregation.isEmpty()) {
+				return Optional.empty();
+			}
+			if (aggregation.get().getIntegerSumRowLimit().isPresent()
+					&& !aggregation.get().isIntegerSumSafe(rediSearchSession.getTable(table.getSchemaTableName())
+					.getIndexInfo().getNumDocs())) {
 				return Optional.empty();
 			}
 			io.trino.spi.type.Type outputType = function.getOutputType();

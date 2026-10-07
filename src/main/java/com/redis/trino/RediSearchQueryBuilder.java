@@ -488,7 +488,12 @@ public class RediSearchQueryBuilder {
 		if (terms != null && !terms.isEmpty()) {
 			groupFields = terms.stream().map(RediSearchAggregationTerm::getTerm).collect(Collectors.toList());
 		}
-		List<Reducer> reducers = aggregates.stream().flatMap(this::reducers).collect(Collectors.toList());
+		List<Reducer> reducers = aggregates.stream().flatMap(aggregation -> {
+			Stream<Reducer> values = reducers(aggregation);
+			return aggregation.getIntegerSumRowLimit().isPresent()
+					? Stream.concat(values, Stream.of(Reducer.count().as(aggregation.integerSumCountAlias())))
+					: values;
+		}).collect(Collectors.toList());
 		if (reducers.isEmpty()) {
 			return Optional.empty();
 		}

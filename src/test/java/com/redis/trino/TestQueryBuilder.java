@@ -6,6 +6,7 @@ import static io.trino.spi.predicate.Range.greaterThan;
 import static io.trino.spi.predicate.Range.lessThan;
 import static io.trino.spi.predicate.Range.range;
 import static io.trino.spi.type.BigintType.BIGINT;
+import static io.trino.spi.type.SmallintType.SMALLINT;
 import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -558,6 +559,24 @@ public class TestQueryBuilder {
 
 	private static FieldValue value(String value) {
 		return FieldValue.of(value.getBytes(StandardCharsets.UTF_8));
+	}
+
+	@Test
+	public void testIntegerSumChecksActualRowsAfterPlanning() {
+		RediSearchColumnHandle widened = RediSearchColumnHandle.integerWidening(numeric("s", SMALLINT), BIGINT);
+		RediSearchAggregation sum = new RediSearchAggregation(RediSearchAggregation.SUM, BIGINT,
+				Optional.of(widened), "total", true);
+		RediSearchRowReader reader = new RediSearchRowReader(List.of("total"), Map.of(), Map.of(), Set.of(),
+				List.of(sum), Map.of());
+		long limit = sum.getIntegerSumRowLimit().orElseThrow();
+		Map<String, FieldValue> row = new HashMap<>(Map.of("total", value("0"), sum.getCountAlias(), value("1"),
+				sum.integerSumCountAlias(), value(Long.toString(limit))));
+		assertThat(reader.read(row)).containsExactly("0");
+		// A small final sum doesn't prove that large intermediate sums were exact before cancellation.
+		row.put(sum.integerSumCountAlias(), value(Long.toString(limit + 1)));
+		assertThatThrownBy(() -> reader.read(row)).hasMessageContaining("no longer exact after index growth");
+		row.remove(sum.integerSumCountAlias());
+		assertThatThrownBy(() -> reader.read(row)).hasMessageContaining("no longer exact after index growth");
 	}
 
 	private static String commandString(RediSearchTranslator.Aggregation aggregation) {

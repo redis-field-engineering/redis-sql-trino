@@ -73,6 +73,28 @@ public class TestAggregationPushdown extends AbstractTestQueryFramework {
 	}
 
 	@Test
+	public void testIntegerWideningAggregates() {
+		assertUpdate("CREATE TABLE widening (g varchar, s smallint, t tinyint, i integer)");
+		try {
+			assertUpdate("INSERT INTO widening VALUES ('a', 2, 1, 2147483647), ('a', 4, 3, -2147483648), "
+					+ "('a', NULL, NULL, NULL), ('b', -2, -1, 7), ('b', NULL, 2, NULL), ('none', NULL, NULL, NULL)", 6);
+			// Trino inserts integer widening casts into both SUM(s) and AVG(t), as in ClickBench Q3.
+			assertExact("SELECT sum(s), count(*), avg(t) FROM widening", "VALUES (BIGINT '4', BIGINT '6', DOUBLE '1.25')");
+			assertExact("SELECT sum(CAST(i AS BIGINT)) FROM widening", "VALUES BIGINT '6'");
+			assertExact("SELECT g, sum(s), count(*), avg(t) FROM widening GROUP BY g", "VALUES "
+					+ "(VARCHAR 'a', BIGINT '6', BIGINT '3', DOUBLE '2'), "
+					+ "(VARCHAR 'b', BIGINT '-2', BIGINT '2', DOUBLE '0.5'), "
+					+ "(VARCHAR 'none', CAST(NULL AS BIGINT), BIGINT '1', CAST(NULL AS DOUBLE))");
+			assertThat(query("SELECT CAST(s AS BIGINT) FROM widening"))
+					.isFullyPushedDown().matches("VALUES BIGINT '2', BIGINT '4', CAST(NULL AS BIGINT), BIGINT '-2', CAST(NULL AS BIGINT), CAST(NULL AS BIGINT)");
+			assertExact("SELECT sum(s), count(*), avg(t) FROM widening WHERE g = 'absent'",
+					"VALUES (CAST(NULL AS BIGINT), BIGINT '0', CAST(NULL AS DOUBLE))");
+		} finally {
+			assertUpdate("DROP TABLE widening");
+		}
+	}
+
+	@Test
 	public void testSumsAndAveragesOfGroupsWithoutValues() {
 		assertExact("SELECT g, sum(d), avg(d) FROM split GROUP BY g", "VALUES "
 				+ "(VARCHAR 'Ale', DOUBLE '0.1234567890123457', DOUBLE '0.1234567890123457'), "

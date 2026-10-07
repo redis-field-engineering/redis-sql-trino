@@ -24,9 +24,9 @@
 package com.redis.trino;
 
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
+import static io.trino.spi.StandardErrorCode.NUMERIC_VALUE_OUT_OF_RANGE;
 import static io.trino.spi.type.RealType.REAL;
 import static java.util.Locale.ENGLISH;
-import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static java.util.Objects.requireNonNull;
 import static java.util.function.Function.identity;
 
@@ -35,6 +35,7 @@ import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.stream.IntStream;
 
@@ -46,6 +47,7 @@ import com.google.common.collect.ImmutableSet;
 
 import io.lettuce.core.search.FieldValue;
 import io.trino.spi.type.Type;
+import io.trino.spi.TrinoException;
 
 /**
  * Reads the values of an FT.AGGREGATE row in column order, from the fields the scan loaded them as. Other fields, such
@@ -140,7 +142,9 @@ public class RediSearchRowReader {
 		String[] values = new String[columns.size()];
 		for (int i = 0; i < values.length; i++) {
 			RediSearchColumnHandle column = columns.get(i);
-			values[i] = column.getExpression().isPresent()
+			values[i] = column.isIntegerWidening()
+					? row[positions.get(column.getExpression().orElseThrow().getColumn().orElseThrow())]
+					: column.getExpression().isPresent()
 					? column.getExpression().get().evaluate(name -> row[positions.get(name)])
 					: row[positions.get(column.getName())];
 		}
@@ -197,6 +201,13 @@ public class RediSearchRowReader {
 	public String[] read(Map<String, FieldValue> row) {
 		String[] values = new String[fields.length];
 		for (int i = 0; i < fields.length; i++) {
+			if (metrics[i] != null && metrics[i].getIntegerSumRowLimit().isPresent()) {
+				String count = asString(row.get(metrics[i].integerSumCountAlias()));
+				if (count == null || !metrics[i].isIntegerSumSafe(OptionalLong.of(Long.parseLong(count)))) {
+					throw new TrinoException(NUMERIC_VALUE_OUT_OF_RANGE,
+							"Integer SUM pushdown is no longer exact after index growth; refresh table metadata and retry");
+				}
+			}
 			FieldValue field = row.get(fields[i]);
 			if (field == null || field.isNull()) {
 				continue;

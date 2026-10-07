@@ -31,6 +31,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import io.trino.spi.connector.ColumnHandle;
@@ -82,6 +83,19 @@ public class RediSearchColumnHandle implements ColumnHandle {
 	public static RediSearchColumnHandle expression(RediSearchExpression expression) {
 		return new RediSearchColumnHandle("__expr" + expression.toRedis(), DOUBLE, RediSearchFieldType.NUMERIC, false,
 				false, Optional.empty(), false, Optional.of(expression));
+	}
+
+	static RediSearchColumnHandle integerWidening(RediSearchColumnHandle source, Type target) {
+		return new RediSearchColumnHandle("__widen_" + source.getName() + "_" + target, target,
+				RediSearchFieldType.NUMERIC, false, false, Optional.empty(), false,
+				Optional.of(RediSearchExpression.column(source.getName(), source.getType())));
+	}
+
+	@JsonIgnore
+	public boolean isIntegerWidening() {
+		return expression.flatMap(RediSearchExpression::getColumn).isPresent()
+				&& expression.flatMap(RediSearchExpression::getColumnType)
+						.filter(source -> RediSearchExpression.isIntegerWidening(source, type)).isPresent();
 	}
 
 	@JsonProperty

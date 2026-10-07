@@ -8,6 +8,9 @@ import static io.trino.spi.expression.StandardFunctions.NEGATE_FUNCTION_NAME;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.RealType.REAL;
+import static io.trino.spi.type.SmallintType.SMALLINT;
+import static io.trino.spi.type.IntegerType.INTEGER;
+import static io.trino.spi.type.TinyintType.TINYINT;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -15,6 +18,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
@@ -32,6 +37,34 @@ public class TestExpression {
 			new RediSearchColumnHandle("style", VARCHAR, RediSearchFieldType.TAG, false, true, Optional.empty()), "h",
 			numeric("brewery-id", DOUBLE), "u",
 			new RediSearchColumnHandle("unindexed", DOUBLE, RediSearchFieldType.NUMERIC, false, false, Optional.empty()));
+
+	@Test
+	public void testIntegerWideningAndSumBounds() {
+		for (Type source : List.of(TINYINT, SMALLINT, INTEGER)) {
+			Map<String, ColumnHandle> assignments = Map.of("v", numeric("value", source));
+			RediSearchColumnHandle widened = RediSearchExpression.integerWidening(
+					call(CAST_FUNCTION_NAME, BIGINT, new Variable("v", source)), assignments).orElseThrow();
+			assertThat(widened.getType()).isEqualTo(BIGINT);
+			assertThat(widened.getExpression().orElseThrow().getColumns()).containsExactly(Map.entry("value", source));
+			RediSearchRowReader reader = new RediSearchRowReader(List.of("value"), Map.of(), Map.of(), Set.of(),
+					List.of(), Map.of(), Map.of(), Optional.of(List.of(widened)));
+			assertThat(reader.project(new String[] { "-128" })).containsExactly("-128");
+			assertThat(reader.project(new String[] { null })).containsExactly((String) null);
+			RediSearchAggregation sum = new RediSearchAggregation(RediSearchAggregation.SUM, BIGINT,
+					Optional.of(widened), "sum", true);
+			long limit = sum.getIntegerSumRowLimit().orElseThrow();
+			assertThat(sum.isIntegerSumSafe(OptionalLong.of(limit))).isTrue();
+			assertThat(sum.isIntegerSumSafe(OptionalLong.of(limit + 1))).isFalse();
+			assertThat(sum.isIntegerSumSafe(OptionalLong.empty())).isFalse();
+			assertThat(sum.isIntegerSumSafe(OptionalLong.of(-1))).isFalse();
+		}
+		Map<String, ColumnHandle> assignments = Map.of("s", numeric("small", SMALLINT), "b", numeric("big", BIGINT),
+				"r", numeric("real", REAL));
+		assertThat(RediSearchExpression.integerWidening(call(CAST_FUNCTION_NAME, TINYINT, new Variable("s", SMALLINT)), assignments)).isEmpty();
+		assertThat(RediSearchExpression.integerWidening(call(CAST_FUNCTION_NAME, BIGINT, new Variable("r", REAL)), assignments)).isEmpty();
+		assertThat(RediSearchExpression.integerWidening(call(CAST_FUNCTION_NAME, DOUBLE, new Variable("b", BIGINT)), assignments)).isEmpty();
+		assertThat(RediSearchExpression.integerWidening(call(CAST_FUNCTION_NAME, BIGINT, new Variable("b", BIGINT)), assignments)).isEmpty();
+	}
 
 	@Test
 	public void testTranslate() {
