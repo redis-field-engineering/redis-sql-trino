@@ -142,6 +142,9 @@ public class RediSearchTranslator {
 		// LOAD * returns every field of each hash, so only scans that can't tell a rounded value from an exact one use it
 		boolean loadAll = hashScan && columns.stream().anyMatch(RediSearchTranslator::isRoundedUndetectably);
 		AggregateArgs.Builder args = AggregateArgs.builder().dialect(json ? JSON_DIALECT : DIALECT);
+		if (config.getQueryTimeoutMillis() > 0) {
+			args.timeout(java.time.Duration.ofMillis(config.getQueryTimeoutMillis()));
+		}
 		// Lettuce writes LOAD before the other steps, so FILTER compares the loaded values
 		Set<String> loads = new LinkedHashSet<>();
 		loads.add(RediSearchBuiltinField.KEY.getName());
