@@ -20,6 +20,10 @@ import io.lettuce.core.search.arguments.CreateArgs;
 import io.lettuce.core.search.arguments.NumericFieldArgs;
 import io.trino.testing.AbstractTestQueryFramework;
 import io.trino.testing.QueryRunner;
+import io.trino.operator.OperatorStats;
+import io.trino.plugin.base.metrics.DurationTiming;
+import io.trino.plugin.base.metrics.LongCount;
+import io.trino.spi.metrics.Metrics;
 
 /**
  * Scans read the batches of a cursor ahead, and delete the cursor when Trino stops before the last one.
@@ -61,6 +65,48 @@ public class TestCursorReads extends AbstractTestQueryFramework {
 		// Trino computes count(DISTINCT ...), and so all of them, over the 15 batches
 		assertThat(query("SELECT count(id), count(DISTINCT id), min(id), max(id) FROM many"))
 				.matches("VALUES (BIGINT '100', BIGINT '100', DOUBLE '1', DOUBLE '100')");
+	}
+
+	@Test
+	public void testScanAndAggregationMetrics() {
+		Metrics scan = connectorMetrics("SELECT count(DISTINCT id) FROM many");
+		assertThat(count(scan, "redis.aggregate.requests")).isEqualTo(1);
+		assertThat(count(scan, "redis.cursor.requests")).isPositive();
+		assertThat(count(scan, "redis.rows.received")).isEqualTo(100);
+		assertThat(count(scan, "redis.exact-hash-reads")).isZero();
+		assertThat(((DurationTiming) scan.getMetrics().get("redis.request-wall-time")).getDuration())
+				.isGreaterThan(Duration.ZERO);
+		assertThat(((DurationTiming) scan.getMetrics().get("redis.row-conversion-time")).getDuration())
+				.isGreaterThan(Duration.ZERO);
+		Metrics aggregate = connectorMetrics("SELECT count(*) FROM many");
+		assertThat(count(aggregate, "redis.rows.received")).isEqualTo(1);
+		assertThat(count(aggregate, "redis.aggregate.requests")).isEqualTo(1);
+	}
+
+	@Test
+	public void testExactHashReadMetrics() {
+		assertUpdate("CREATE TABLE metric_bigints (id bigint, marker varchar)");
+		try {
+			assertUpdate("INSERT INTO metric_bigints VALUES (9007199254740993, 'large'), (7, 'small'), (NULL, 'missing')", 3);
+			assertThat(query("SELECT id FROM metric_bigints"))
+					.matches("VALUES BIGINT '9007199254740993', BIGINT '7', CAST(NULL AS BIGINT)");
+			Metrics metrics = connectorMetrics("SELECT id FROM metric_bigints");
+			assertThat(count(metrics, "redis.rows.received")).isEqualTo(3);
+			assertThat(count(metrics, "redis.exact-hash-reads")).isEqualTo(1);
+		} finally {
+			assertUpdate("DROP TABLE metric_bigints");
+		}
+	}
+
+	private Metrics connectorMetrics(String sql) {
+		QueryRunner.MaterializedResultWithPlan result = getDistributedQueryRunner().executeWithPlan(getSession(), sql);
+		return getDistributedQueryRunner().getCoordinator().getQueryManager().getFullQueryInfo(result.queryId())
+				.getQueryStats().getOperatorSummaries().stream().map(OperatorStats::getConnectorMetrics)
+				.reduce(Metrics.EMPTY, Metrics::mergeWith);
+	}
+
+	private static long count(Metrics metrics, String name) {
+		return ((LongCount) metrics.getMetrics().get(name)).getTotal();
 	}
 
 	@Test

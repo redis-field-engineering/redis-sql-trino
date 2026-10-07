@@ -44,6 +44,7 @@ import io.trino.spi.PageBuilder;
 import io.trino.spi.block.BlockBuilder;
 import io.trino.spi.connector.ConnectorPageSource;
 import io.trino.spi.connector.SourcePage;
+import io.trino.spi.metrics.Metrics;
 import io.trino.spi.type.Type;
 
 /**
@@ -68,6 +69,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	private final ValueWriter[] writers;
 	private final PageBuilder pageBuilder;
 	private final RediSearchRowReader reader;
+	private final RediSearchReadStats stats = new RediSearchReadStats();
 	private Iterator<String[]> rows;
 	// The cursor the batches are read from, until one exhausts it
 	private Optional<Cursor> cursor;
@@ -84,7 +86,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 		List<Type> columnTypes = columns.stream().map(RediSearchColumnHandle::getType).toList();
 		this.writers = columnTypes.stream().map(RediSearchPageSourceResultWriter::writer).toArray(ValueWriter[]::new);
 		this.pageBuilder = new PageBuilder(columnTypes);
-		RediSearchSession.AggregateResult first = session.aggregate(connection, table, columns);
+		RediSearchSession.AggregateResult first = session.aggregate(connection, table, columns, stats);
 		this.reader = first.getReader();
 		start(first);
 	}
@@ -103,7 +105,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 			return;
 		}
 		while (reads.size() < READS_AHEAD) {
-			reads.add(session.cursorReadAsync(connection, table, cursor.get()));
+			reads.add(session.cursorReadAsync(connection, table, cursor.get(), stats));
 		}
 	}
 
@@ -114,7 +116,12 @@ public class RediSearchPageSource implements ConnectorPageSource {
 
 	@Override
 	public long getReadTimeNanos() {
-		return 0;
+		return stats.readTimeNanos();
+	}
+
+	@Override
+	public Metrics getMetrics() {
+		return stats.metrics();
 	}
 
 	@Override
@@ -146,7 +153,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 					break;
 				}
 				reads.remove();
-				start(session.result(connection, reader, cursor, join(next)));
+				start(session.result(connection, reader, cursor, join(next), stats));
 				continue;
 			}
 			String[] row = rows.next();

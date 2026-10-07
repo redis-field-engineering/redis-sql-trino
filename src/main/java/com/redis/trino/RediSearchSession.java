@@ -620,18 +620,22 @@ public class RediSearchSession {
         }
     }
 
-    public AggregateResult aggregate(Connection scan, RediSearchTableHandle table, List<RediSearchColumnHandle> columns) {
-        Optional<RediSearchIndexInfo> indexInfo = indexInfo(scan.sync, table.getIndex());
+    public AggregateResult aggregate(Connection scan, RediSearchTableHandle table, List<RediSearchColumnHandle> columns,
+            RediSearchReadStats stats) {
+        Optional<RediSearchIndexInfo> indexInfo = stats.redisRequest(() -> indexInfo(scan.sync, table.getIndex()));
         indexInfo.ifPresent(info -> verifyIndexed(table.getIndex(), info));
         Aggregation aggregation = translator.aggregate(table, columns, indexInfo);
         log.debug("Running %s", aggregation);
+        stats.aggregateRequests.increment();
         AggregateResult result = result(scan, aggregation.getReader(), Optional.empty(),
-                scan.sync.ftAggregate(aggregation.getIndex(), aggregation.getQuery(), aggregation.getArgs()));
+                stats.redisRequest(() -> scan.sync.ftAggregate(aggregation.getIndex(), aggregation.getQuery(), aggregation.getArgs())), stats);
         // A batch can come back empty while the cursor still has rows, so the aggregation is only empty once the
         // cursor is exhausted
         while (result.getRows().isEmpty() && result.getCursor().isPresent()) {
             Cursor cursor = result.getCursor().get();
-            result = result(scan, result.getReader(), Optional.of(cursor), cursorCommands(scan, cursor).read(table, cursor));
+            stats.cursorRequests.increment();
+            result = result(scan, result.getReader(), Optional.of(cursor),
+                    stats.redisRequest(() -> cursorCommands(scan, cursor).read(table, cursor)), stats);
         }
         if (result.getRows().isEmpty() && aggregation.isGlobal()) {
             // A global aggregation over no documents still returns one row. With GROUP BY terms there are no groups,
@@ -657,18 +661,28 @@ public class RediSearchSession {
      * thread rather than the connection's, which {@link #result} may wait on.
      */
     public CompletableFuture<AggregationReply<String>> cursorReadAsync(Connection scan, RediSearchTableHandle table,
-            Cursor cursor) {
-        return cursorCommands(scan, cursor).readAsync(table, cursor);
+            Cursor cursor, RediSearchReadStats stats) {
+        stats.cursorRequests.increment();
+        long start = System.nanoTime();
+        try {
+            return cursorCommands(scan, cursor).readAsync(table, cursor)
+                    .whenComplete((reply, failure) -> stats.requestNanos.add(System.nanoTime() - start));
+        } catch (RuntimeException e) {
+            stats.requestNanos.add(System.nanoTime() - start);
+            throw e;
+        }
     }
 
     /**
      * @param cursor the cursor the reply was read from, if any
      */
     public AggregateResult result(Connection scan, RediSearchRowReader reader, Optional<Cursor> cursor,
-            AggregationReply<String> reply) {
+            AggregationReply<String> reply, RediSearchReadStats stats) {
+        long conversionStart = System.nanoTime();
         List<String[]> rows = new ArrayList<>();
         List<CompletableFuture<?>> exactReads = new ArrayList<>();
         for (SearchReply<String> searchReply : reply.getReplies()) {
+            stats.receivedRows.add(searchReply.getResults().size());
             for (SearchReply.SearchResult<String> result : searchReply.getResults()) {
                 if (!reader.matches(result.getFields())) {
                     continue;
@@ -678,6 +692,7 @@ public class RediSearchSession {
                     if (row[position] != null && RediSearchRowReader.isPossiblyRounded(row[position])) {
                         // Pipelined, and rare: only values of 2^53 or more
                         String key = result.getFields().get(RediSearchBuiltinField.KEY.getName()).asString();
+                        stats.exactHashReads.increment();
                         exactReads.add(scan.async.hget(key, reader.getExactField(position)).toCompletableFuture()
                                 .thenAccept(value -> row[position] = value));
                     }
@@ -685,16 +700,22 @@ public class RediSearchSession {
                 rows.add(row);
             }
         }
+        stats.conversionNanos.add(System.nanoTime() - conversionStart);
         if (!exactReads.isEmpty()) {
+            long waitStart = System.nanoTime();
             try {
                 CompletableFuture.allOf(exactReads.toArray(CompletableFuture[]::new)).join();
             } catch (CompletionException e) {
                 throwIfUnchecked(e.getCause());
                 throw e;
+            } finally {
+                stats.exactWaitNanos.add(System.nanoTime() - waitStart);
             }
         }
         // Once the values are exact
+        conversionStart = System.nanoTime();
         rows.replaceAll(reader::project);
+        stats.conversionNanos.add(System.nanoTime() - conversionStart);
         // Cursor ID 0 means there are no more rows
         Optional<Cursor> next = reply.getCursor().filter(c -> c.getCursorId() != 0);
         // The cursor stays on the node that created it
