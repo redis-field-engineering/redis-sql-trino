@@ -15,6 +15,9 @@ import io.lettuce.core.search.arguments.NumericFieldArgs;
 import io.lettuce.core.search.arguments.TagFieldArgs;
 import io.trino.sql.planner.plan.AggregationNode;
 import io.trino.sql.planner.plan.FilterNode;
+import io.trino.operator.OperatorStats;
+import io.trino.plugin.base.metrics.LongCount;
+import io.trino.spi.metrics.Metrics;
 import io.trino.testing.AbstractTestQueryFramework;
 import io.trino.testing.QueryRunner;
 
@@ -80,6 +83,14 @@ public class TestAggregationPushdown extends AbstractTestQueryFramework {
 					+ "('a', NULL, NULL, NULL), ('b', -2, -1, 7), ('b', NULL, 2, NULL), ('none', NULL, NULL, NULL)", 6);
 			// Trino inserts integer widening casts into both SUM(s) and AVG(t), as in ClickBench Q3.
 			assertExact("SELECT sum(s), count(*), avg(t) FROM widening", "VALUES (BIGINT '4', BIGINT '6', DOUBLE '1.25')");
+			QueryRunner.MaterializedResultWithPlan mixed = getDistributedQueryRunner().executeWithPlan(getSession(),
+					"SELECT sum(s), count(*), avg(t) FROM widening");
+			Metrics metrics = getDistributedQueryRunner().getCoordinator().getQueryManager().getFullQueryInfo(mixed.queryId())
+					.getQueryStats().getOperatorSummaries().stream().map(OperatorStats::getConnectorMetrics)
+					.reduce(Metrics.EMPTY, Metrics::mergeWith);
+			// All six documents were aggregated in Redis: Trino received one aggregate row and no exact hash reads.
+			assertThat(((LongCount) metrics.getMetrics().get("redis.rows.received")).getTotal()).isEqualTo(1);
+			assertThat(((LongCount) metrics.getMetrics().get("redis.exact-hash-reads")).getTotal()).isZero();
 			assertExact("SELECT sum(CAST(i AS BIGINT)) FROM widening", "VALUES BIGINT '6'");
 			assertExact("SELECT g, sum(s), count(*), avg(t) FROM widening GROUP BY g", "VALUES "
 					+ "(VARCHAR 'a', BIGINT '6', BIGINT '3', DOUBLE '2'), "

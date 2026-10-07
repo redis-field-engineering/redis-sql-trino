@@ -512,12 +512,16 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			Optional<RediSearchAggregation> aggregation = RediSearchAggregation.handleAggregation(function, assignments,
 					colName, countValues);
 			if (aggregation.isEmpty()) {
+				log.debug("Rejecting aggregation pushdown: unsupported aggregate %s", function);
 				return Optional.empty();
 			}
-			if (aggregation.get().getIntegerSumRowLimit().isPresent()
-					&& !aggregation.get().isIntegerSumSafe(rediSearchSession.getTable(table.getSchemaTableName())
-					.getIndexInfo().getNumDocs())) {
-				return Optional.empty();
+			if (aggregation.get().getIntegerSumRowLimit().isPresent()) {
+				OptionalLong documents = rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo().getNumDocs();
+				if (!aggregation.get().isIntegerSumSafe(documents)) {
+					log.debug("Rejecting integer SUM pushdown: index %s has document count %s, safe row limit %s",
+							table.getIndex(), documents, aggregation.get().getIntegerSumRowLimit());
+					return Optional.empty();
+				}
 			}
 			io.trino.spi.type.Type outputType = function.getOutputType();
 			// Not a field Redis can filter on: the query runs before GROUPBY, so Trino evaluates HAVING
@@ -547,6 +551,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 						.anyMatch(RediSearchExactNumbers::isFloatingPoint)
 						|| termList.stream().map(RediSearchAggregationTerm::getType)
 								.anyMatch(RediSearchExactNumbers::isFloatingPoint))) {
+			log.debug("Rejecting aggregation pushdown: RESP2 cannot preserve floating-point results or grouping keys");
 			return Optional.empty();
 		}
 		RediSearchTableHandle tableHandle = table.withAggregations(termList, aggregationList);
