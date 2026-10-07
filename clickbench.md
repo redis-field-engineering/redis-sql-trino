@@ -1,5 +1,9 @@
 # Redis Cloud ClickBench: initial results and comparisons
 
+> **Historical baseline, superseded on 2026-10-07.** The timings and product comparisons below measure connector `83d05fc44627ccb9971a40e44e67a78f702bf2e6`. They predate merged safe integer-widening aggregation pushdown [#131](https://github.com/redis-field-engineering/redis-sql-trino/pull/131) and per-query scan metrics [#132](https://github.com/redis-field-engineering/redis-sql-trino/pull/132). A fresh 43-query, three-attempt sweep is running at `4aa71cea12abe7e2f1dc93a8f276418292edd915`, using the same full dataset, hardware, settings and timeouts. Do not interpret these older comparisons as the patched connector's performance.
+
+The patched Cloud query-3 `EXPLAIN` pushes SUM, COUNT and AVG into Redis and removes Trino's aggregation stages. The deployed artifact SHA-256 is `d055a151b6cca28dc9ccce4ba7a1beed92be98e69a10d2d6af9647dbe72c81bb`; 47 focused regression tests passed. Full SQL count remains 99,997,497. Actual patched timings and correctness checks are pending.
+
 The first four ClickBench queries returned correct results on the full
 99,997,497-row dataset, with three completed attempts per query. Performance
 varies sharply: counts and a single average take seconds, while the mixed
