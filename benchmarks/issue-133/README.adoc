@@ -85,4 +85,4 @@ Full Q3 also passed all three independent reference checks in 7.771 / 7.627 / 7.
 Its best observed time is about 61.6 times faster than the 466.243-second baseline.
 The first attempt delivers one aggregate row (27 bytes), one aggregate request, zero cursor reads and zero exact HGETs.
 Full Q6 independently passes in 403.568 / 409.556 / 397.626 seconds; all three results match the reference.
-The remaining full-query regression sweep is in progress on final connector `74a7d87`, which includes the additional failure-handling fixes.
+The user requested 5 million rows for further PR testing. The additional 100M sweep was stopped with its active attempt cancelled; the final-artifact regression sweep uses a separate `hits_5m` sample.

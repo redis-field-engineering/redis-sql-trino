@@ -126,5 +126,16 @@ python3 -m unittest discover -s benchmarks/issue-135-136 -p 'test_*.py'
 `original-cloud-event-summary.json` retains only the original benchmark database's configuration lifecycle events returned by the Cloud system-log API; access rules and unrelated environments are omitted.
 They establish activation on October 7 and deletion on October 8 (UTC), but do not contain Query Engine coordinator/shard failure diagnostics.
 They cannot establish the precise original incident cause or prove that a healthy recreated database recovered that deleted database.
-A paired fixed/bare LOAD replay on the recreated database is queued after the full benchmark sweep, with health checks through the existing and fresh connections and no restart/retry.
+A paired fixed/bare LOAD replay on the recreated database is queued after the 5M PR benchmark sweep, with health checks through the existing and fresh connections and no restart/retry.
 Those diagnostic responses must remain separate from benchmark timings.
+
+== PR validation dataset
+
+Further PR acceptance uses the first 5,000,000 physical ClickBench Parquet rows, retaining all 105 columns and ordinal keys to preserve duplicates.
+It runs in a separate `hits_5m` index; query semantics are unchanged apart from the table name.
+The sample SHA-256 is `78aecd305590b48cc3524ea93010eb0806a415de828478d261617383cd3a2eaf`, independently reproduced on the runner and reference host.
+DuckDB references cover all 43 queries, including exact BIGINTs and valid SQL ordering ties.
+This smaller sample is PR regression testing, not a full-data ClickBench submission.
+
+At the user's request, the additional 100M final-artifact sweep was stopped; its active Q5 attempt was cancelled and is not reported as a success.
+The completed full-data Q3/Q5/Q6 checks on the earlier merged artifact remain separate in `../issue-133/cloud-2026-10-08-full-merged/`.
