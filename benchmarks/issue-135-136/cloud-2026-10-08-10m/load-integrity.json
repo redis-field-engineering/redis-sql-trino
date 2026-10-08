@@ -1,0 +1,1 @@
+{"rows": 10000000, "source": "first 10000000 physical Parquet rows", "table": "hits_10m", "columns": 105, "indexing_failures": 0}

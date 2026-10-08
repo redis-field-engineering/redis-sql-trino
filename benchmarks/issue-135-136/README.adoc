@@ -10,7 +10,8 @@ A 105-column SQL regression now exercises Q24's full-row projection, residual LI
 It includes DATE, exact DOUBLE and adjacent BIGINT values above 2^53.
 On Redis Enterprise Software 8.2.0-78.18, the minimal unchanged `SELECT params, id FROM reserved_params` projection passed without sharding but disconnected the sharded coordinator and failed with `ERRCLUSTER Uninitialized cluster state, could not perform command` before this fix.
 The sharded projection passes with explicit field references, including an adjacent BIGINT above 2^53 and a missing Params value.
-The original Cloud response was a PARAMS parser error rather than this local ERRCLUSTER response; Cloud rerun and coordinator diagnostics remain necessary before attributing the entire Q24-Q43 incident to this trigger.
+The original Cloud response was a PARAMS parser error rather than this local ERRCLUSTER response.
+The recreated Cloud candidate passes Q24 and Q25-Q43 as recorded below; a paired Cloud baseline replay and coordinator diagnostics remain necessary before attributing the original entire Q24-Q43 incident to this trigger.
 
 == Connector changes
 
@@ -23,9 +24,48 @@ Copy only the JSON array into a command file for direct replay.
 The exact server response `shards topology update is either transient or has failed` is classified as the external Trino error `REDISEARCH_SHARD_TOPOLOGY_UNAVAILABLE`.
 Both initial aggregate requests and asynchronous cursor reads preserve the original exception as their cause and retain request timing.
 Parser errors, command timeouts and unrelated exceptions keep their existing classification.
-There is no automatic retry: a cursor read may consume a batch even when its reply is lost, so retrying it could silently omit rows.
+There is no automatic cursor-read retry: a cursor read may consume a batch even when its reply is lost, so retrying it could silently omit rows.
+Lettuce's default reconnect behavior can replay a consumed cursor read.
+The real TCP lost-reply regression demonstrates that its replay filter alone does not cover the pending-command queue.
+Connections therefore reject commands during disconnection, and a cursor replay filter also rejects failed-write replays.
+A disconnected cursor read fails with the external error `REDISEARCH_CURSOR_REPLY_LOST`; subsequent complete queries can use the reconnected connection.
+In-flight exact hash reads also fail rather than being replayed after a disconnect; their query must be rerun in full.
 A failed read removed from the page source's queue no longer prevents cursor cleanup.
 Cleanup waits asynchronously for in-flight reads and skips deletion when a successful reply proves the cursor was exhausted.
+Only idempotent cursor deletion retries: at most three attempts, with 250 ms between attempts, on the cursor's original owning node.
+Other server errors are not retried, and failure after the bound is logged.
+
+== Redis Cloud 8.6.2 sample validation
+
+`cloud-2026-10-08-10m/` retains the candidate's complete CSVs, checksums, SQL, plans, scan metrics, fresh-connection health responses and independent DuckDB references/correctness checks.
+It pins connector `799a51da21f6912f79023be99568a81630ce865a` and JAR SHA-256 `60f6f5130e602f348c3e98a280d9942a86b2c1f16f63339986182e6512812a04`.
+The recreated environment is Redis Cloud Pro 8.6.2, RESP3, OSS Cluster API, 1,000 GB all RAM and 40 shards on three r8g.16xlarge hosts, with a co-located r7a.4xlarge / Trino 483 runner in physical AZ `use1-az6`.
+Data volumes have 16,000 IOPS and 1,000 MiB/s; cursor count is 1,000, scan connections four, and all query/command/aggregation limits remain 1,200 seconds.
+
+All 26 attempts (Q1-Q6 and Q24-Q43, one per query) finished and matched independent 10M DuckDB references, including verified SQL ties.
+Every fresh direct health probe before and after a query returned the correct 10,000,000-document count.
+There was no Redis/Trino restart or automatic query retry during the diagnostic.
+
+[cols="1,1",options="header"]
+|===
+|Query |Completed SQL wall time (seconds)
+|Q3 |0.754
+|Q5 |42.434
+|Q6 |40.000
+|Q24 |1,071.730
+|Q25 |50.218
+|Q43 |2.566
+|===
+
+Q24 returns all 105 columns with correct exact BIGINT/date/timestamp/filter/order/limit results.
+Its captured Redis command loads 106 explicit fields (105 columns plus `@__key`); LIKE and ordering remain in Trino.
+It scans all 10M rows, transfers 8,125,107,721 logical input bytes and performs 48,884,538 exact HGETs across 10,000 cursor reads.
+This correct result is close to the timeout and does not establish good full-data Q24 performance.
+Replaying the captured command on a fresh direct RESP3 connection succeeds; that probe's partial cursor is deleted and its timing is not reported as successful SQL time.
+
+The 10M run precedes the additional connection-recovery change above; the LOAD fix and exact readers are unchanged by that change.
+The full-data sweep will use one separately pinned final artifact.
+The original Cloud incident's precise coordinator failure/recovery cause is still unverified; successful queries on a recreated database do not prove recovery of the deleted original database.
 
 == Direct connection probe
 
@@ -71,7 +111,7 @@ Q3's merged widening pushdown and the merged Q5 buffered exact-read fallback are
 
 [source,shell]
 ----
-./mvnw test -Dtest=TestQueryErrors,TestQueryBuilder,TestExpression,TestCursorReads,TestShardedCursorReads,TestAggregationPushdown,TestShardedAggregationPushdown,TestResp2AggregationPushdown
+./mvnw test -Dtest=TestCursorReplay,TestQueryErrors,TestQueryBuilder,TestExpression,TestCursorReads,TestShardedCursorReads,TestAggregationPushdown,TestShardedAggregationPushdown,TestResp2AggregationPushdown
 python3 -m unittest discover -s benchmarks/issue-133 -p 'test_*.py'
 python3 -m unittest discover -s benchmarks/issue-135-136 -p 'test_*.py'
 ----

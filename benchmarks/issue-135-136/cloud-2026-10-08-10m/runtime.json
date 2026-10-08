@@ -1,0 +1,13 @@
+{
+  "server": {
+    "redis_version": "8.6.2",
+    "redis_build_id": 0,
+    "redis_mode": "standalone",
+    "arch_bits": 64
+  },
+  "clientsByLibraryAndProtocol": {
+    "Lettuce / RESP3": 4,
+    "redis-py / RESP3": 1
+  },
+  "capturePhase": "During the 10M load, before benchmark queries"
+}

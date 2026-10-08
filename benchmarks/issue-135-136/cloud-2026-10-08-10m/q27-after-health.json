@@ -1,0 +1,17 @@
+{
+  "reply": {
+    "attributes": [],
+    "format": "STRING",
+    "results": [
+      {
+        "extra_attributes": {
+          "documents": "10000000"
+        },
+        "values": []
+      }
+    ],
+    "total_results": 1,
+    "warning": []
+  },
+  "error": null
+}

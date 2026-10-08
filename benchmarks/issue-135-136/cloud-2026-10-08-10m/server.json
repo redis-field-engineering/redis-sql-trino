@@ -1,0 +1,5 @@
+{
+  "redisVersion": "8.6.2",
+  "searchOnTimeout": "{'search-on-timeout': 'fail'}",
+  "sourceRows": 10000000
+}
