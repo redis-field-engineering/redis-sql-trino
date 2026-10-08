@@ -59,7 +59,19 @@ redisearch.uri=redis://localhost:6379
 
 |`redisearch.scan-connections`
 |Number of Redis connections each Trino node's scans take turns on, so that one scan's batches don't hold up other queries' commands.
-|`4`
+|`8`
+
+|`redisearch.scan-splits`
+|`0` selects splits automatically from size, estimated CPU capacity and partition balance. `1` forces a single split; `2` to `64` explicitly bounds parallel scans with configured cut points. The connection pool also caps the count. Global operations remain single-split.
+|`0`
+
+|`redisearch.scan-partition-field`
+|Optional indexed NUMERIC field alias used to partition scans. Automatic mode can discover a HASH field when unset. Missing, NOINDEX, unsupported or unsafe field names fall back to one split.
+|Unset
+
+|`redisearch.scan-partition-boundaries`
+|Optional comma-separated strictly increasing finite numeric cut points; automatic mode can discover them for HASH indexes. Prefer a stable, evenly distributed field. Missing values stay in the first partition; JSON arrays spanning cut points appear once.
+|Empty
 
 |`redisearch.aggregation-pushdown.enabled`
 |Compute supported aggregations in Redis. Set to `false` to compute them in Trino from cursor batches when large aggregations interfere with latency-sensitive queries. This transfers more rows and can make aggregations substantially slower. Filters still push down.
@@ -134,6 +146,62 @@ The RediSearch connector provides additional security options to support Redis s
 |===
 
 [[sql-support]]
+=== Parallel document scans
+
+The connector uses Lettuce for Redis communication. Lettuce supports multiple CPU cores through Netty I/O event loops and computation thread pools.
+Its default pool sizes follow the available CPU count, with a minimum of two threads, unless configured otherwise.
+See https://redis.github.io/lettuce/advanced-usage/client-resources/[Lettuce client resources] for the threading settings.
+A physical connection processes its network events on one event loop; additional client threads do not automatically partition a query or create more Trino sources.
+
+[cols="1,2",options="header"]
+|===
+|Layer |Work it parallelizes
+|Lettuce |Redis network I/O and protocol decoding across connections.
+|Trino connector |Independent scan splits, each with a cursor, processed by separate Trino drivers/workers.
+|Redis Query Engine |Server-side query computation through query workers.
+|===
+
+The connector's existing connection pool supports concurrency between scans.
+Multiple splits let a single document scan use several connections and Trino source pipelines.
+Tune Redis query workers independently and measure the combined configuration; client-side parallelism alone does not determine server-side query concurrency.
+
+Automatic split selection is the default (`redisearch.scan-splits=0`).
+The planner targets at least 250,000 matching rows per split and selects the largest count allowed by the estimated CPU capacity (active Trino workers times coordinator CPU count), the connection pool (eight by default), and a hard ceiling of 64.
+Small tables and selective filters use one split. A filter's match count is checked before choosing parallelism.
+For HASH indexes, the planner examines up to three indexed NUMERIC fields, obtains their MIN/MAX in one bounded statistics query, and checks the counts of the proposed ranges.
+A field is rejected if one partition would contain at least 80% of the matching documents; the planner then tries another candidate.
+Discovery results, including unsupported cases, are cached for five minutes (up to 256 entries).
+Statistics queries have a ten-second server timeout and count probes have a one-second timeout; unavailable or partial statistics fall back to one split.
+The first scan can therefore pay a discovery cost; subsequent scans reuse its plan.
+MIN/MAX discovery is a server-side aggregate and can delay concurrent point traffic when Redis query workers are disabled; configured boundaries avoid this discovery work.
+This is a cost heuristic, not a guarantee of the optimal count under every load. Use the benchmark and explicit overrides when tuning a shared deployment.
+JSON arrays support explicit partition fields and cut points; automatic MIN/MAX discovery currently applies to HASH indexes.
+
+Set `redisearch.scan-splits=1` to force one source. To override automatic selection and supply known boundaries:
+
+[source,properties]
+----
+redisearch.scan-splits=4
+redisearch.scan-connections=4
+redisearch.scan-partition-field=ordinal
+redisearch.scan-partition-boundaries=1250000,2500000,3750000
+----
+
+This partitions one document scan into four Trino sources with independent cursors and distinct scan connection slots on each worker.
+The NUMERIC field must already be indexed; the connector does not alter the index. Explicit boundaries skip discovery.
+Choose cut points from the field's distribution; uneven partitions still return complete results but can limit the speedup.
+If fewer splits are allowed, the connector selects evenly spaced cut points from the configured list and merges the other intervals.
+The lowest partition includes values below the first cut and documents without an indexed value; the highest includes every value above the last cut.
+For multi-valued JSON, partitions use differences of nested range matches, so documents matching multiple ranges appear once.
+All partitions preserve static and dynamic filters. Each source rechecks its index schema before querying and fails if the partition field has become unsafe.
+
+Pushed-down LIMIT, ORDER BY/top-N, grouping and reducers always use one split.
+Trino can still compute joins, unsupported expressions and exact DISTINCT from the parallel document sources.
+The normal cursor timeout, failure, exact BIGINT recovery and best-effort deletion behavior applies to each source.
+The pool bounds connections per worker; the split bound applies per query, not to the number of simultaneous queries.
+Configure Trino resource groups to bound overall analytical concurrency when sharing Redis with latency-sensitive traffic.
+Parallel scans do not provide snapshot isolation: keep the partition field stable during a scan, as moving a document across cut points during execution can cause omissions or repetitions.
+
 == SQL support
 
 === Tables and columns

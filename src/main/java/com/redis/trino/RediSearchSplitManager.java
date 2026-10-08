@@ -43,24 +43,39 @@ public class RediSearchSplitManager implements ConnectorSplitManager {
 
 	private final List<HostAddress> addresses;
 	private final RediSearchConfig config;
+	private final RediSearchSession redisSession;
+	private final RediSearchAutoScanPlanner autoPlanner;
 
 	@Inject
-	public RediSearchSplitManager(RediSearchSession session) {
+	public RediSearchSplitManager(RediSearchSession session, io.trino.spi.NodeManager nodeManager) {
+		this.redisSession = session;
 		this.addresses = session.getAddresses();
 		this.config = session.getConfig();
+		this.autoPlanner = new RediSearchAutoScanPlanner(session, () -> Math.max(1, nodeManager.getWorkerNodes().size())
+				* Runtime.getRuntime().availableProcessors());
 	}
 
 	@Override
 	public ConnectorSplitSource getSplits(ConnectorTransactionHandle transaction, ConnectorSession session,
 			ConnectorTableHandle table, Set<ColumnHandle> dynamicFilterColumns, Constraint constraint) {
-		RediSearchSplit split = new RediSearchSplit(addresses);
+		List<RediSearchSplit> splits = List.of(new RediSearchSplit(addresses));
+		RediSearchTableHandle handle = (RediSearchTableHandle) table;
+		if (config.getScanSplits() != 1 && RediSearchScanPartition.isDocumentScan(handle)) {
+			RediSearchIndexInfo info = redisSession.getTable(handle.getSchemaTableName()).getIndexInfo();
+			List<RediSearchScanPartition> partitions = config.getScanSplits() == 0
+					? autoPlanner.plan(handle, info) : RediSearchScanPartition.plan(config, handle, info);
+			if (!partitions.isEmpty()) {
+				splits = partitions.stream().map(partition -> new RediSearchSplit(addresses,
+						java.util.Optional.of(partition))).toList();
+			}
+		}
 		if (!config.isDynamicFilteringEnabled()
 				|| !acceptsDynamicFilter((RediSearchTableHandle) table, dynamicFilterColumns)) {
-			return new FixedSplitSource(split);
+			return new FixedSplitSource(splits);
 		}
 		long waitTimeoutMillis = config.getDynamicFilteringWaitTimeout().toMillis();
 		// Trino holds the split back until the dynamic filters are collected, or the wait times out
-		return new FixedSplitSource(split) {
+		return new FixedSplitSource(splits) {
 			@Override
 			public long getRequestedDynamicFilterWaitTimeoutMillis() {
 				return waitTimeoutMillis;

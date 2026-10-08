@@ -302,6 +302,13 @@ public class RediSearchSession {
      */
     public Connection scanConnection() {
         int index = Math.floorMod(nextScanConnection.getAndIncrement(), scanConnections.length);
+        return scanConnection(index);
+    }
+
+    // A query's partitions use distinct pool slots even when other queries interleave their source creation.
+    public Connection scanConnection(int index) {
+        com.google.common.base.Preconditions.checkArgument(index >= 0 && index < scanConnections.length,
+                "Invalid scan connection slot: %s", index);
         synchronized (scanConnections) {
             if (scanConnections[index] == null) {
                 scanConnections[index] = connect();
@@ -636,9 +643,14 @@ public class RediSearchSession {
 
     public AggregateResult aggregate(Connection scan, RediSearchTableHandle table, List<RediSearchColumnHandle> columns,
             ExactHashReader exactReader, RediSearchReadStats stats) {
+        return aggregate(scan, table, columns, exactReader, stats, Optional.empty());
+    }
+
+    public AggregateResult aggregate(Connection scan, RediSearchTableHandle table, List<RediSearchColumnHandle> columns,
+            ExactHashReader exactReader, RediSearchReadStats stats, Optional<RediSearchScanPartition> partition) {
         Optional<RediSearchIndexInfo> indexInfo = stats.redisRequest(() -> indexInfo(scan.sync, table.getIndex()));
         indexInfo.ifPresent(info -> verifyIndexed(table.getIndex(), info));
-        Aggregation aggregation = translator.aggregate(table, columns, indexInfo);
+        Aggregation aggregation = translator.aggregate(table, columns, indexInfo, partition);
         if (log.isDebugEnabled()) {
             log.debug("Running Redis command tokens: %s", JsonCodec.listJsonCodec(String.class).toJson(aggregation.getCommandArguments()));
         }

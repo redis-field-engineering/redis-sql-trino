@@ -53,7 +53,7 @@ public class TestCursorReads extends AbstractTestQueryFramework {
 
 	private static final Duration TIMEOUT = Duration.ofSeconds(30);
 
-	private RediSearchServer redisearch;
+	protected RediSearchServer redisearch;
 
     protected Deployment deployment() {
 		return Deployment.NON_SHARDED;
@@ -110,6 +110,12 @@ public class TestCursorReads extends AbstractTestQueryFramework {
         }
     }
 
+	protected Map<String, String> scanProperties() {
+		return Map.of("redisearch.cursor-count", "7");
+	}
+
+	protected long scanAggregateRequests() { return 1; }
+
 	@Override
 	protected QueryRunner createQueryRunner() throws Exception {
 		redisearch = closeAfterClass(new RediSearchServer(deployment()));
@@ -120,7 +126,7 @@ public class TestCursorReads extends AbstractTestQueryFramework {
 		redisearch.writeHashes("many:", 100);
 		// Batches of 7 rows
 		return RediSearchQueryRunner.createRediSearchQueryRunner(redisearch, List.of(), Map.of(),
-				Map.of("redisearch.cursor-count", "7"));
+				scanProperties());
 	}
 
 	@Test
@@ -133,7 +139,7 @@ public class TestCursorReads extends AbstractTestQueryFramework {
 	@Test
 	public void testScanAndAggregationMetrics() {
 		Metrics scan = connectorMetrics("SELECT count(DISTINCT id) FROM many");
-		assertThat(count(scan, "redis.aggregate.requests")).isEqualTo(1);
+		assertThat(count(scan, "redis.aggregate.requests")).isEqualTo(scanAggregateRequests());
 		assertThat(count(scan, "redis.cursor.requests")).isPositive();
 		assertThat(count(scan, "redis.rows.received")).isEqualTo(100);
 		assertThat(count(scan, "redis.exact-hash-reads")).isZero();
@@ -240,14 +246,14 @@ public class TestCursorReads extends AbstractTestQueryFramework {
 		}
 	}
 
-	private Metrics connectorMetrics(String sql) {
+	protected Metrics connectorMetrics(String sql) {
 		QueryRunner.MaterializedResultWithPlan result = getDistributedQueryRunner().executeWithPlan(getSession(), sql);
 		return getDistributedQueryRunner().getCoordinator().getQueryManager().getFullQueryInfo(result.queryId())
 				.getQueryStats().getOperatorSummaries().stream().map(OperatorStats::getConnectorMetrics)
 				.reduce(Metrics.EMPTY, Metrics::mergeWith);
 	}
 
-	private static long count(Metrics metrics, String name) {
+	protected static long count(Metrics metrics, String name) {
 		return ((LongCount) metrics.getMetrics().get(name)).getTotal();
 	}
 
@@ -257,19 +263,29 @@ public class TestCursorReads extends AbstractTestQueryFramework {
 		assertThat(query("SELECT count(*) FROM (SELECT id FROM many WHERE id % 2 = 0 LIMIT 3)"))
 				.matches("VALUES BIGINT '3'");
 		if (deployment().isCluster()) {
-			// FT.INFO reports the cursors of the shard it's sent to
-			return;
+			var client = io.lettuce.core.cluster.RedisClusterClient.create(redisearch.getRedisURI());
+			try (var connection = client.connect()) {
+				awaitCursorsDeleted(() -> java.util.stream.StreamSupport.stream(connection.getPartitions().spliterator(), false)
+						.mapToLong(node -> openCursors(connection.getConnection(node.getNodeId()).sync())).sum());
+			} finally {
+				client.shutdown();
 		}
+		} else {
+			awaitCursorsDeleted(() -> openCursors(redisearch.getConnection().sync()));
+		}
+	}
+
+	private void awaitCursorsDeleted(java.util.function.LongSupplier count) throws InterruptedException {
 		long deadline = System.nanoTime() + TIMEOUT.toNanos();
-		while (openCursors() > 0) {
+		while (count.getAsLong() > 0) {
 			assertThat(System.nanoTime()).as("cursors deleted within %s", TIMEOUT).isLessThan(deadline);
 			Thread.sleep(100);
 		}
 	}
 
 	// The index's cursors, which other tests' queries may also have open
-	private long openCursors() {
-		List<Object> info = redisearch.getConnection().sync().dispatch(FT_INFO,
+	private long openCursors(RedisCommands<String, String> commands) {
+		List<Object> info = commands.dispatch(FT_INFO,
 				new NestedMultiOutput<>(StringCodec.UTF8), new CommandArgs<>(StringCodec.UTF8).add("many"));
 		List<?> stats = (List<?>) info.get(info.indexOf("cursor_stats") + 1);
 		return (Long) stats.get(stats.indexOf("index_total") + 1);

@@ -80,7 +80,8 @@ public class RediSearchPageSourceProvider implements ConnectorPageSourceProvider
 			handles.add((RediSearchColumnHandle) handle);
 		}
 		ImmutableList<RediSearchColumnHandle> columnHandles = handles.build();
-		return new RediSearchPageSource(rediSearchSession, tableHandle, columnHandles);
+		return new RediSearchPageSource(rediSearchSession, tableHandle, columnHandles,
+				((RediSearchSplit) split).getPartition());
 	}
 
 	/**
