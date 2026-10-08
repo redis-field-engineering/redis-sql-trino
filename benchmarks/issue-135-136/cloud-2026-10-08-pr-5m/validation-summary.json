@@ -1,0 +1,14 @@
+{
+  "datasetRows": 5000000,
+  "queriesAttempted": 43,
+  "attempts": 129,
+  "complete": true,
+  "allCorrect": true,
+  "healthProbeCount": 257,
+  "healthProbeCoverageComplete": false,
+  "allRecordedHealthProbesPassed": true,
+  "missingHealthProbes": [
+    "q26-2-after-health.json"
+  ],
+  "failedQueries": []
+}

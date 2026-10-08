@@ -86,3 +86,6 @@ Its best observed time is about 61.6 times faster than the 466.243-second baseli
 The first attempt delivers one aggregate row (27 bytes), one aggregate request, zero cursor reads and zero exact HGETs.
 Full Q6 independently passes in 403.568 / 409.556 / 397.626 seconds; all three results match the reference.
 The user requested 5 million rows for further PR testing. The additional 100M sweep was stopped with its active attempt cancelled; the final-artifact regression sweep uses a separate `hits_5m` sample.
+That final-artifact sweep completed all 43 queries three times, with all 129 outputs matching independent DuckDB references.
+On the 5M sample, Q5 completed in 25.841 / 24.649 / 22.400 seconds and Q6 in 19.692 / 21.674 / 18.888 seconds.
+See `../issue-135-136/cloud-2026-10-08-pr-5m/` for the pinned final artifact, complete outputs and the interrupted health-check coverage limitation.

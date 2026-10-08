@@ -1,0 +1,34 @@
+"Trino version: 483
+Fragment 0 [SINGLE]
+    Output layout: [advengineid, syntheticcolumn0]
+    Output partitioning: SINGLE []
+    Output[columnNames = [AdvEngineID, _col1]]
+    │   Layout: [advengineid:smallint, syntheticcolumn0:bigint]
+    │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+    │   AdvEngineID := advengineid
+    │   _col1 := syntheticcolumn0
+    └─ RemoteMerge[sourceFragmentIds = [1]]
+           Layout: [advengineid:smallint, syntheticcolumn0:bigint]
+
+Fragment 1 [ROUND_ROBIN]
+    Output layout: [advengineid, syntheticcolumn0]
+    Output partitioning: SINGLE []
+    LocalMerge[orderBy = [syntheticcolumn0 DESC NULLS LAST]]
+    │   Layout: [advengineid:smallint, syntheticcolumn0:bigint]
+    │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+    └─ PartialSort[orderBy = [syntheticcolumn0 DESC NULLS LAST]]
+       │   Layout: [advengineid:smallint, syntheticcolumn0:bigint]
+       └─ RemoteSource[sourceFragmentIds = [2]]
+              Layout: [advengineid:smallint, syntheticcolumn0:bigint]
+
+Fragment 2 [SOURCE]
+    Output layout: [advengineid, syntheticcolumn0]
+    Output partitioning: ROUND_ROBIN []
+    TableScan[table = redis_cluster:RediSearchTableHandle{schemaTableName=default.hits_5m, index=hits_5m, limit=OptionalLong.empty, sort=[], constraint={RediSearchColumnHandle{name=advengineid, type=smallint, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}=[ SortedRangeSet[type=smallint, ranges=2, {(<min>,0), (0,<max>)}] ]}}]
+        Layout: [advengineid:smallint, syntheticcolumn0:bigint]
+        Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+        syntheticcolumn0 := RediSearchColumnHandle{name=syntheticColumn0, type=bigint, fieldType=NUMERIC, hidden=false, supportsPredicates=false, tagSeparator=Optional.empty, filterable=false}
+        advengineid := RediSearchColumnHandle{name=advengineid, type=smallint, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}
+            :: [(<min>, 0), (0, <max>)]
+
+"

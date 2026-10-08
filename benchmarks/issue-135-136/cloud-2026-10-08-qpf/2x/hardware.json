@@ -1,0 +1,48 @@
+{
+  "managedRedisCloudEstimate": {
+    "shards": 40,
+    "instances": "3 x r8g.16xlarge",
+    "estimatedEbsVolumeGiB": 4794
+  },
+  "activeDatabaseApi": "numberOfShards was null; 40 shards above is the completed estimate, not an observed API field.",
+  "managedRedisHosts": [
+    {
+      "instanceId": "i-02526bb5bf0bf89eb",
+      "instanceType": "r8g.16xlarge",
+      "dataVolumeId": "vol-0c3e8f1659af35fbb",
+      "volumeType": "gp3",
+      "sizeGiB": 1598,
+      "iops": 5992,
+      "throughputMiBps": 250
+    },
+    {
+      "instanceId": "i-0920f9cca3a9e2374",
+      "instanceType": "r8g.16xlarge",
+      "dataVolumeId": "vol-03fe91a4c75c87728",
+      "volumeType": "gp3",
+      "sizeGiB": 1598,
+      "iops": 5992,
+      "throughputMiBps": 250
+    },
+    {
+      "instanceId": "i-0f8ee39cfd068a007",
+      "instanceType": "r8g.16xlarge",
+      "dataVolumeId": "vol-02d9fb58f8f27aa9a",
+      "volumeType": "gp3",
+      "sizeGiB": 1598,
+      "iops": 5992,
+      "throughputMiBps": 250
+    }
+  ],
+  "benchmarkRunner": {
+    "instanceId": "i-051e61ddea442a510",
+    "instanceType": "r7a.4xlarge",
+    "availabilityZone": "us-east-1a",
+    "rootVolumeId": "vol-07ca0569ebc88933d",
+    "rootVolumeType": "gp3",
+    "rootVolumeGiB": 500,
+    "rootVolumeIops": 16000,
+    "rootVolumeThroughputMiBps": 1000
+  },
+  "storageComparison": "Managed Redis host data-volume performance differs from Standard (16,000 IOPS/1,000 MiB/s vs 5,992 IOPS/250 MiB/s). Runner volume is not the Redis data volume. Identifiers and settings were retained before resource cleanup."
+}

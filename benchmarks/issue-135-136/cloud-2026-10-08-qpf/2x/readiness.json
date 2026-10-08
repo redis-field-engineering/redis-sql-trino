@@ -1,0 +1,57 @@
+{
+  "subscriptionId": 3443582,
+  "databaseId": 14679387,
+  "queryPerformanceFactor": "2x",
+  "rows": 5000000,
+  "sourceSha256": "78aecd305590b48cc3524ea93010eb0806a415de828478d261617383cd3a2eaf",
+  "connectorRevision": "74a7d8708fbe07ee96891af89ca132f16e183559",
+  "artifactSha256": "971773ea31dcfae27a0d5ab76329e1c32dd65061d8d4f22d8ff608b20baee94d",
+  "trinoImage": "trinodb/trino@sha256:db58cc93e593a2706553745f276bb119c9810e69918be56ecde088ba7ccb0534",
+  "runnerDisk": "500 GiB gp3 EBS; 16,000 IOPS; 1,000 MiB/s",
+  "loadMemoryBytes": 27322729392,
+  "countRounds": [
+    {
+      "round": 1,
+      "utc": "2026-10-08T22:21:30Z",
+      "direct": {
+        "documents": 5000000,
+        "indexDocs": 5000000,
+        "indexing": 0,
+        "indexFailures": 0,
+        "exact": true
+      },
+      "trino": {
+        "queryId": "20261008_222130_00001_svg8m",
+        "rows": [
+          [
+            5000000
+          ]
+        ],
+        "exact": true,
+        "error": null
+      }
+    },
+    {
+      "round": 2,
+      "utc": "2026-10-08T22:21:47Z",
+      "direct": {
+        "documents": 5000000,
+        "indexDocs": 5000000,
+        "indexing": 0,
+        "indexFailures": 0,
+        "exact": true
+      },
+      "trino": {
+        "queryId": "20261008_222147_00002_svg8m",
+        "rows": [
+          [
+            5000000
+          ]
+        ],
+        "exact": true,
+        "error": null
+      }
+    }
+  ],
+  "loadMemoryScope": "RedisCluster INFO endpoint scope was not established; this is a load-time observation, not a post-cohort database-wide snapshot"
+}

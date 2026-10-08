@@ -1,0 +1,47 @@
+{
+  "observedUtc": "2026-10-08T22:15:10.184255+00:00",
+  "queryPerformanceFactor": "Standard",
+  "scope": "Existing benchmark database contains earlier full and 10M cohorts as well as the 5M query table",
+  "indexes": [
+    {
+      "name": "hits",
+      "num_docs": 99997497,
+      "indexing": 0,
+      "percent_indexed": 1.0,
+      "total_index_memory_sz_mb": 73641.17529296875,
+      "inverted_sz_mb": 41905.962646484375,
+      "sortable_values_size_mb": 0.0,
+      "doc_table_size_mb": 7828.420715332031,
+      "key_table_size_mb": 4693.182899475098
+    },
+    {
+      "name": "hits_10m",
+      "num_docs": 10000000,
+      "indexing": 0,
+      "percent_indexed": 1.0,
+      "total_index_memory_sz_mb": 8176.459518432617,
+      "inverted_sz_mb": 4525.9987869262695,
+      "sortable_values_size_mb": 0.0,
+      "doc_table_size_mb": 870.1821212768555,
+      "key_table_size_mb": 469.33145904541016
+    },
+    {
+      "name": "hits_5m",
+      "num_docs": 5000000,
+      "indexing": 0,
+      "percent_indexed": 1.0,
+      "total_index_memory_sz_mb": 4373.40828704834,
+      "inverted_sz_mb": 2357.7314643859863,
+      "sortable_values_size_mb": 0.0,
+      "doc_table_size_mb": 424.83696937561035,
+      "key_table_size_mb": 234.67424774169922
+    }
+  ],
+  "memoryInfo": {
+    "used_memory": 567397857800,
+    "used_memory_dataset": null,
+    "used_memory_rss": 567397857800,
+    "maxmemory": null
+  },
+  "memoryScope": "Endpoint INFO; may represent one Redis process rather than total database memory"
+}

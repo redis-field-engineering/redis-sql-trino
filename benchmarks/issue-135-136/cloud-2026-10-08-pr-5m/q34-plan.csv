@@ -1,0 +1,40 @@
+"Trino version: 483
+Fragment 0 [SINGLE]
+    Output layout: [url, syntheticcolumn0]
+    Output partitioning: SINGLE []
+    Output[columnNames = [URL, c]]
+    │   Layout: [url:varchar, syntheticcolumn0:bigint]
+    │   Estimates: {rows: 10 (640B), cpu: 0, memory: 0B, network: 0B}
+    │   URL := url
+    │   c := syntheticcolumn0
+    └─ TopN[count = 10, orderBy = [syntheticcolumn0 DESC NULLS LAST]]
+       │   Layout: [url:varchar, syntheticcolumn0:bigint]
+       │   Estimates: {rows: 10 (640B), cpu: ?, memory: ?, network: ?}
+       └─ LocalExchange[partitioning = SINGLE]
+          │   Layout: [url:varchar, syntheticcolumn0:bigint]
+          │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+          └─ RemoteSource[sourceFragmentIds = [1]]
+                 Layout: [url:varchar, syntheticcolumn0:bigint]
+
+Fragment 1 [SOURCE]
+    Output layout: [url, syntheticcolumn0]
+    Output partitioning: SINGLE []
+    TopNPartial[count = 10, orderBy = [syntheticcolumn0 DESC NULLS LAST]]
+    │   Layout: [url:varchar, syntheticcolumn0:bigint]
+    └─ LocalExchange[partitioning = SINGLE]
+       │   Layout: [url:varchar, syntheticcolumn0:bigint]
+       │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+       └─ TopNPartial[count = 10, orderBy = [syntheticcolumn0 DESC NULLS LAST]]
+          │   Layout: [url:varchar, syntheticcolumn0:bigint]
+          └─ LocalExchange[partitioning = ROUND_ROBIN]
+             │   Layout: [url:varchar, syntheticcolumn0:bigint]
+             │   Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+             └─ TopNPartial[count = 10, orderBy = [syntheticcolumn0 DESC NULLS LAST]]
+                │   Layout: [url:varchar, syntheticcolumn0:bigint]
+                └─ TableScan[table = redis_cluster:RediSearchTableHandle{schemaTableName=default.hits_5m, index=hits_5m, limit=OptionalLong.empty, sort=[], constraint=ALL}]
+                       Layout: [url:varchar, syntheticcolumn0:bigint]
+                       Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+                       url := RediSearchColumnHandle{name=url, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[], filterable=true}
+                       syntheticcolumn0 := RediSearchColumnHandle{name=syntheticColumn0, type=bigint, fieldType=NUMERIC, hidden=false, supportsPredicates=false, tagSeparator=Optional.empty, filterable=false}
+
+"

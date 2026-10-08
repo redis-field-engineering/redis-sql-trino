@@ -1,0 +1,40 @@
+{
+  "connector_revision": "74a7d8708fbe07ee96891af89ca132f16e183559",
+  "artifact_sha256": "971773ea31dcfae27a0d5ab76329e1c32dd65061d8d4f22d8ff608b20baee94d",
+  "plugin_zip_sha256": "cae604c24252813f564373537220ac0fe1e7736dd538eee9a2ade2fcf079ee26",
+  "trinoVersion": 483,
+  "trinoImage": "trinodb/trino@sha256:db58cc93e593a2706553745f276bb119c9810e69918be56ecde088ba7ccb0534",
+  "sourceDatasetSha256": "78aecd305590b48cc3524ea93010eb0806a415de828478d261617383cd3a2eaf",
+  "sourceRows": 5000000,
+  "cache_protocol": "Redis remains running; Trino restart and runner page-cache clear before each new query block; three attempts without restart within block; Q26 attempt 3 resumed after runner SIGTERM without restarting Trino",
+  "attempts_per_query": 3,
+  "max_query_seconds": 1200,
+  "datasetColumns": 105,
+  "sampleOrigin": "first 5000000 physical ClickBench Parquet rows, preserving ordinal keys and duplicates",
+  "validationPurpose": "PR regression testing on first 5000000 physical rows; not a full-data ClickBench submission",
+  "redisVersion": "8.6.2",
+  "protocol": "RESP3",
+  "apiMode": "OSS Cluster API",
+  "capacityGB": 1000,
+  "allRam": true,
+  "shards": 40,
+  "replication": false,
+  "aof": "every-second",
+  "scanConnections": 4,
+  "cursorCount": 1000,
+  "hardware": {
+    "redisHosts": 3,
+    "redisInstanceType": "r8g.16xlarge",
+    "trinoInstanceType": "r7a.4xlarge",
+    "physicalAz": "use1-az6",
+    "sameVpc": true,
+    "redisDataVolumeIops": 16000,
+    "redisDataVolumeMiBPerSecond": 1000
+  },
+  "rawArchiveSha256": "07da8d549ed938cf3069b7683b401e5e6dc48e290d7b005331a7fc48c05135e3",
+  "status": {
+    "phase": "5m diagnostic completed; independent validation required",
+    "utc": "2026-10-08T21:11:37Z"
+  },
+  "benchmarkArtifactIncludes": "Final connector includes performance, LOAD, cursor replay, synchronous wrapper classification and incomplete-result rejection fixes"
+}

@@ -1,0 +1,86 @@
+[
+  {
+    "query": 3,
+    "file": "q03-2x-1.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 3,
+    "file": "q03-2x-2.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 3,
+    "file": "q03-2x-3.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 5,
+    "file": "q05-2x-1.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 5,
+    "file": "q05-2x-2.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 5,
+    "file": "q05-2x-3.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 6,
+    "file": "q06-2x-1.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 6,
+    "file": "q06-2x-2.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 6,
+    "file": "q06-2x-3.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 30,
+    "file": "q30-2x-1.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 30,
+    "file": "q30-2x-2.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 30,
+    "file": "q30-2x-3.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  }
+]

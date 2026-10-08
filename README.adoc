@@ -671,16 +671,35 @@ A global aggregation must consume all matching documents before returning its re
 Without query workers, long-running aggregations can delay other Redis commands even when the queries use different connections.
 Increasing `redisearch.scan-connections` does not eliminate that server-side contention.
 
+For analytical query performance, start with the connector defaults:
+
+[source,properties]
+----
+redisearch.aggregation-pushdown.enabled=true
+redisearch.scan-splits=0
+redisearch.scan-connections=8
+redisearch.cursor-count=1000
+----
+
+Pushdown usually has the largest effect because supported filters and aggregations return fewer rows to Trino.
+Automatic split selection can divide eligible document scans among multiple Trino sources; the connection pool bounds their client I/O concurrency.
+Keep the cursor count at 1,000 initially, then compare alternatives with the benchmark on the target workload.
+Additional cores can reduce retrieval and conversion time when a scan is partitioned, while global pushed-down operations remain one Redis operation.
+The benefit to an individual query depends on its bottleneck; see the parallel document scan section below for eligibility, discovery costs and measured results.
+The Cloud acceptance and QPF samples in link:benchmarks/issue-135-136/README.adoc[the issue report] pin the earlier single-split build with four connections and do not validate the later automatic planner.
+
 For mixed analytical and latency-sensitive workloads, evaluate https://redis.io/docs/latest/operate/oss_and_stack/stack-with-enterprise/search/query-performance-factor/[Redis Software query performance factor].
 A local issue #115 experiment with Software 8.2.0-78.18 (Redis/Search 8.6) found that the 2x factor configured three query workers and reduced lookup latency during two concurrent aggregations.
 The 4x factor configured six workers but did not improve that experiment further.
-For an initial 2x evaluation on Redis Software 8.x, set the database's REST API `query_performance_factor` field to:
+For an initial 2x evaluation, set Redis Cloud's database `queryPerformanceFactor` field to `2x`.
+On Redis Software 8.x, set the database's REST API `query_performance_factor` field to:
 
 [source,json]
 ----
 {"active": true, "scaling_factor": 2}
 ----
 Worker counts consume CPU capacity and can add overhead to individual queries, so measure your own workloads before choosing a factor.
+The 2x factor allocates additional Redis query capacity; it does not promise half the latency or change the connector's split count.
 Redis Open Source exposes https://redis.io/docs/latest/develop/ai/search-and-query/administration/configuration/#search-workers[`search-workers`]; the Enterprise measurements do not establish an optimal value for an Open Source deployment.
 
 When query workers are unavailable, or their overhead is unsuitable, disable aggregation pushdown in the catalog:

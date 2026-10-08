@@ -11,7 +11,8 @@ It includes DATE, exact DOUBLE and adjacent BIGINT values above 2^53.
 On Redis Enterprise Software 8.2.0-78.18, the minimal unchanged `SELECT params, id FROM reserved_params` projection passed without sharding but disconnected the sharded coordinator and failed with `ERRCLUSTER Uninitialized cluster state, could not perform command` before this fix.
 The sharded projection passes with explicit field references, including an adjacent BIGINT above 2^53 and a missing Params value.
 The original Cloud response was a PARAMS parser error rather than this local ERRCLUSTER response.
-The recreated Cloud candidate passes Q24 and Q25-Q43 as recorded below; a paired Cloud baseline replay and coordinator diagnostics remain necessary before attributing the original entire Q24-Q43 incident to this trigger.
+The recreated Cloud candidate passes Q24 and Q25-Q43 as recorded below.
+The paired Cloud replay later reproduced a connection failure followed by database loading errors with bare LOAD operands; coordinator diagnostics from the deleted original database remain unavailable, so its precise historical cause is not established.
 
 == Connector changes
 
@@ -126,8 +127,15 @@ python3 -m unittest discover -s benchmarks/issue-135-136 -p 'test_*.py'
 `original-cloud-event-summary.json` retains only the original benchmark database's configuration lifecycle events returned by the Cloud system-log API; access rules and unrelated environments are omitted.
 They establish activation on October 7 and deletion on October 8 (UTC), but do not contain Query Engine coordinator/shard failure diagnostics.
 They cannot establish the precise original incident cause or prove that a healthy recreated database recovered that deleted database.
-A paired fixed/bare LOAD replay on the recreated database is queued after the 5M PR benchmark sweep, with health checks through the existing and fresh connections and no restart/retry.
-Those diagnostic responses must remain separate from benchmark timings.
+A paired fixed/bare LOAD replay completed after the 5M PR benchmark sweep, with health checks through existing and fresh connections and no manual restart or command retry.
+The fixed explicit-field command returned a cursor batch, which the probe deleted.
+The otherwise identical bare-field command closed the server connection after about one second.
+Existing and fresh direct/cluster clients then received `Could not send query to cluster`; probes at 30 and 60 seconds received `Redis is loading the dataset in memory`.
+A subsequent valid Trino count probe also failed with LOADING; these failures have no successful benchmark timing.
+Later direct and Trino count checks both returned exactly 5,000,000 in two rounds 26 seconds apart without a manual restart, establishing recovery of this recreated database.
+The count results and Trino query IDs are retained in `cloud-2026-10-08-qpf/qpf-summary.json`.
+The initial HTTP SQL probes contained an invalid terminal semicolon; their parser errors are excluded from recovery evidence.
+The retained command/response sequence reproduces a server failure path here, while the deleted original database's precise historical cause remains unconfirmed.
 
 == PR validation dataset
 
@@ -139,3 +147,35 @@ This smaller sample is PR regression testing, not a full-data ClickBench submiss
 
 At the user's request, the additional 100M final-artifact sweep was stopped; its active Q5 attempt was cancelled and is not reported as a success.
 The completed full-data Q3/Q5/Q6 checks on the earlier merged artifact remain separate in `../issue-133/cloud-2026-10-08-full-merged/`.
+
+`cloud-2026-10-08-pr-5m/` retains all 129 completed SQL outputs (43 queries, three attempts each), plans, metrics and independent DuckDB checks.
+All 129 outputs matched their references, including Q24's 105 columns and valid ordering ties.
+The final connector revision is `74a7d8708fbe07ee96891af89ca132f16e183559`, with JAR SHA-256 `971773ea31dcfae27a0d5ab76329e1c32dd65061d8d4f22d8ff608b20baee94d`.
+This is the final artifact for these issue fixes; it predates PR #143's automatic parallel scans, whose separate validation is in `../issue-142/`.
+All 257 recorded before/after health probes passed; Q26 attempt 2's after-health file is missing because the user-requested stop interrupted that checkpoint.
+The resumed run verified completed output checksums and ran only missing attempts; Q26 attempt 3 continued without restarting Trino.
+This interruption is documented in the manifest and does not count as a query retry or a failed SQL result.
+Q24's three completed wall times were 533.864, 534.231 and 533.682 seconds; this remains a costly full-row scan.
+See `validation-summary.json`, `acceptance.json` and `paired-load-reproduction-summary.json` for the complete results and limitations.
+
+== Query Performance Factor sample
+
+`cloud-2026-10-08-qpf/` retains Q3, Q5, Q6 and Q30 run three times each with Standard and 2x Redis Cloud QPF, using the same pinned single-split connector and 5M-row sample.
+All 24 outputs matched the independent references; exact count health checks passed before each query block and after every attempt.
+Two attempts to update the original database to 2x failed in the Cloud control plane, so the 2x cohort used a separately provisioned database.
+
+[cols="1,1,1",options="header"]
+|===
+|Query |Standard median (s) |2x median (s)
+|Q3 |0.423 |0.499
+|Q5 |24.409 |24.482
+|Q6 |23.580 |21.202
+|Q30 |23.023 |21.655
+|===
+
+These are exploratory observations, not an isolated QPF effect: Standard also held the older 100M and 10M indexes, while the new database held only the 5M index.
+The new database's gp3 data volumes had 5,992 IOPS and 250 MiB/s each, compared with Standard's 16,000 IOPS and 1,000 MiB/s; the hosts and cache histories also differed.
+The sequential sample shows no uniform latency improvement and does not measure concurrent-query throughput or the later parallel-scan implementation.
+It does not justify enabling 2x universally. Keep pushdown and automatic scan partitioning as the current starting configuration, and measure Redis query workers separately on the intended workload.
+See `cloud-2026-10-08-qpf/README.md` for all attempts, environment records and limitations.
+Both temporary Cloud subscriptions and their runners were deleted after retaining the results; `cloud-2026-10-08-qpf/cleanup-summary.json` records the verified cleanup.
