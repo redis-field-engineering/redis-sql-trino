@@ -59,6 +59,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.redis.trino.RediSearchTranslator.Aggregation;
 
+import io.airlift.json.JsonCodec;
 import io.airlift.log.Logger;
 import io.lettuce.core.AbstractRedisClient;
 import io.lettuce.core.ClientOptions;
@@ -625,7 +626,9 @@ public class RediSearchSession {
         Optional<RediSearchIndexInfo> indexInfo = stats.redisRequest(() -> indexInfo(scan.sync, table.getIndex()));
         indexInfo.ifPresent(info -> verifyIndexed(table.getIndex(), info));
         Aggregation aggregation = translator.aggregate(table, columns, indexInfo);
-        log.debug("Running %s", aggregation);
+        if (log.isDebugEnabled()) {
+            log.debug("Running Redis command tokens: %s", JsonCodec.listJsonCodec(String.class).toJson(aggregation.getCommandArguments()));
+        }
         stats.aggregateRequests.increment();
         AggregateResult result = result(exactReader, aggregation.getReader(), Optional.empty(),
                 stats.redisRequest(() -> scan.sync.ftAggregate(aggregation.getIndex(), aggregation.getQuery(), aggregation.getArgs())), stats);
@@ -663,14 +666,7 @@ public class RediSearchSession {
     public CompletableFuture<AggregationReply<String>> cursorReadAsync(Connection scan, RediSearchTableHandle table,
             Cursor cursor, RediSearchReadStats stats) {
         stats.cursorRequests.increment();
-        long start = System.nanoTime();
-        try {
-            return cursorCommands(scan, cursor).readAsync(table, cursor)
-                    .whenComplete((reply, failure) -> stats.requestNanos.add(System.nanoTime() - start));
-        } catch (RuntimeException e) {
-            stats.requestNanos.add(System.nanoTime() - start);
-            throw e;
-        }
+        return stats.redisRequestAsync(() -> cursorCommands(scan, cursor).readAsync(table, cursor));
     }
 
     /**

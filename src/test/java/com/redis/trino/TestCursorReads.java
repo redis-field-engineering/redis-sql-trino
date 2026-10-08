@@ -133,6 +133,51 @@ public class TestCursorReads extends AbstractTestQueryFramework {
 		}
 	}
 
+	@Test
+	public void testParamsFieldProjection() {
+		// The class database owns this table and removes it at teardown, so a cleanup error cannot mask the
+		// parser's original response if this projection makes the coordinator unhealthy.
+		assertUpdate("CREATE TABLE reserved_params (params varchar, id bigint, marker varchar)");
+		assertUpdate("INSERT INTO reserved_params VALUES ('value', 9007199254740993, 'row'), (NULL, 7, 'row')", 2);
+		assertThat(query("SELECT params, id FROM reserved_params"))
+				.matches("VALUES (VARCHAR 'value', BIGINT '9007199254740993'), (CAST(NULL AS VARCHAR), BIGINT '7')");
+	}
+
+	@Test
+	public void testWideFilteredProjection() {
+		// Q24's 105-field shape, including a DOUBLE that requires LOAD * and exact BIGINTs.
+		String extras = IntStream.range(0, 99).mapToObj(i -> "c" + i + " integer")
+				.collect(java.util.stream.Collectors.joining(", "));
+		assertUpdate("CREATE TABLE wide_projection (url varchar, eventtime timestamp(3), userid bigint, score double, eventdate date, params varchar, "
+				+ extras + ")");
+		try {
+			String extraValues = IntStream.range(0, 99).mapToObj(Integer::toString)
+					.collect(java.util.stream.Collectors.joining(", "));
+			String values = IntStream.range(0, 30).mapToObj(i -> "('" + (i % 2 == 0 ? "https://google/" : "other/")
+					+ i + "', TIMESTAMP '2026-10-07 00:00:" + String.format("%02d", i)
+					+ "', " + (9007199254740993L + i) + ", 0.1234567890123456, DATE '2026-10-07', VARCHAR 'value', " + extraValues + ")")
+					.collect(java.util.stream.Collectors.joining(", "));
+			assertUpdate("INSERT INTO wide_projection VALUES " + values, 30);
+			String expected = IntStream.range(0, 10).mapToObj(n -> {
+				int i = n * 2;
+				return "(VARCHAR 'https://google/" + i + "', TIMESTAMP '2026-10-07 00:00:"
+						+ String.format("%02d", i) + ".000', BIGINT '" + (9007199254740993L + i)
+						+ "', DOUBLE '0.1234567890123456', DATE '2026-10-07', VARCHAR 'value', " + extraValues + ")";
+			}).collect(java.util.stream.Collectors.joining(", "));
+			assertThat(query("SELECT * FROM wide_projection WHERE url LIKE '%google%' ORDER BY eventtime LIMIT 10"))
+					.matches("VALUES " + expected);
+			// ClickBench has no DOUBLE columns: loading all its indexed fields by name must also be safe.
+			String names = "url, eventtime, userid, eventdate, params, " + IntStream.range(0, 99)
+					.mapToObj(i -> "c" + i).collect(java.util.stream.Collectors.joining(", "));
+			String aliases = "url, eventtime, userid, score, eventdate, params, " + IntStream.range(0, 99)
+					.mapToObj(i -> "c" + i).collect(java.util.stream.Collectors.joining(", "));
+			assertThat(query("SELECT " + names + " FROM wide_projection WHERE url LIKE '%google%' ORDER BY eventtime LIMIT 10"))
+					.matches("SELECT " + names + " FROM (VALUES " + expected + ") AS expected(" + aliases + ")");
+		} finally {
+			assertUpdate("DROP TABLE wide_projection");
+		}
+	}
+
 	private Metrics connectorMetrics(String sql) {
 		QueryRunner.MaterializedResultWithPlan result = getDistributedQueryRunner().executeWithPlan(getSession(), sql);
 		return getDistributedQueryRunner().getCoordinator().getQueryManager().getFullQueryInfo(result.queryId())

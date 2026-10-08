@@ -28,6 +28,14 @@ public class TestResp2AggregationPushdown extends AbstractTestQueryFramework {
 	}
 
 	@Test
+	public void testParamsProjectionOverResp2() {
+		assertUpdate("CREATE TABLE resp2_params (params varchar, id bigint, marker varchar)");
+		assertUpdate("INSERT INTO resp2_params VALUES ('value', 9007199254740993, 'row'), (NULL, 7, 'row')", 2);
+		assertThat(query("SELECT params, id FROM resp2_params"))
+				.matches("VALUES (VARCHAR 'value', BIGINT '9007199254740993'), (CAST(NULL AS VARCHAR), BIGINT '7')");
+	}
+
+	@Test
 	public void testWidenedAverageStaysInTrino() {
 		assertUpdate("CREATE TABLE resp2_widening (id varchar, s smallint)");
 		try {

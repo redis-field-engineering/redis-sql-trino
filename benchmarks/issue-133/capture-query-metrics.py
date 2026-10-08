@@ -32,6 +32,19 @@ def capture(info):
         "queryStats": {key: stats.get(key) for key in STATS},
         "scanMetrics": scans,
         "error": info.get("errorCode"),
+        "failure": failure_summary(info.get("failureInfo")),
+        "successfulElapsedTime": stats.get("elapsedTime") if info["state"] == "FINISHED" else None,
+    }
+
+
+def failure_summary(failure):
+    if not failure:
+        return None
+    # Keep original server errors and their cause chain, without duplicating large Java stacks.
+    return {
+        "type": failure.get("type"),
+        "message": failure.get("message"),
+        "cause": failure_summary(failure.get("cause")),
     }
 
 
