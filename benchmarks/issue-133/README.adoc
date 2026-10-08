@@ -38,11 +38,11 @@ The report pins the baseline commit and SHA-256 of each changed candidate produc
 python3 -m unittest discover -s benchmarks/issue-133 -p 'test_*.py'
 ----
 
-== Full ClickBench acceptance remains pending
+== Full ClickBench validation
 
 Read-only Cloud snapshots on base revision `4aa71cea12abe7e2f1dc93a8f276418292edd915` showed two Q5 failures at 20 minutes: 90,989,000 and 89,396,000 input positions, respectively.
 The third attempt was cancelled and the existing runner moved to Q6.
-No candidate connector was deployed into that run, and no full-data result or 1,200-second success is claimed here.
+No candidate connector was deployed into that baseline run; those snapshots do not establish candidate performance.
 The Q5 coordinator restarted before the completed per-scan counters could be collected; missing counters must not be interpreted as zero.
 A completed full-data Q6 baseline was captured read-only in `q6-baseline-metrics.json`: 99,997,497 rows, 99,997 cursor requests, zero exact HGETs, 387.47 s cumulative request time and 6.69 min elapsed.
 This validates the collector against the live API and demonstrates that Q6 follows a different path. It is not a candidate Q6 measurement.
@@ -61,3 +61,27 @@ The collector selects the exact SQL (excluding EXPLAIN), or an explicit `--query
 An empty `scanMetrics` array means the API has no counters at that snapshot; retry after completion while the query is retained.
 `redis.exact-hash-read-batches` counts batches requiring repairs. Existing HGET counts and request/wait/conversion timings remain available.
 Request and exact-read wait timings can now overlap, so their sum is cumulative work rather than elapsed query time.
+
+=== Recreated Cloud full-data acceptance, October 8, 2026
+
+`cloud-2026-10-08-full/` retains complete outputs, checksums, independent DuckDB references/correctness, plans, fresh direct health probes and final scan metrics.
+The full dataset contains 99,997,497 documents, verified by SQL COUNT and FT.INFO with zero indexing failures.
+All three unchanged Q5 attempts completed within the original 1,200-second limit: 433.321 / 437.125 / 451.117 seconds.
+Every result is exactly 17,630,976 distinct UserIDs and matches the independent full-data reference.
+The completed three-attempt Q5 acceptance is recorded in `acceptance.json`; it does not imply that the remaining 43-query sweep has finished.
+
+The benchmark pins merged connector `d2e503417c45df8dc9dcb59ed8c6028d37b74f5f` and JAR SHA-256 `a85af0e2bbc8825c52833f39fb6a4d8511a53235e7b15a7a9068677c6d97c90d`.
+It uses Redis Cloud 8.6.2, RESP3, OSS Cluster API, 1,000 GB all RAM and 40 shards, three r8g.16xlarge Redis hosts and a co-located r7a.4xlarge Trino 483 runner.
+Cursor count remains 1,000 and scan connections four; query, command and aggregation limits remain 1,200 seconds.
+Redis stays running; each query block restarts Trino and clears the runner page cache, then runs three attempts without restart.
+The additional synchronous-wrapper and warned-result handling in this follow-up is tested separately; these timings measure the merged performance/LOAD/replay fixes, not that additional failure-handling code.
+
+Q5 attempt one reads all 99,997,497 rows, using one aggregate request, 99,997 cursor reads and 98,061,149 exact HGETs in 99,998 buffered batches.
+It transfers 899,977,473 logical input bytes.
+Cumulative request work is 397.997 seconds, exact-read wait 355.468 seconds, and row conversion 37.772 seconds; overlapping work must not be added to infer elapsed query time.
+Trino still computes exact DISTINCT; no NUMERIC BIGINT grouping, approximate count or shard-local distinct sum is introduced.
+
+Full Q3 also passed all three independent reference checks in 7.771 / 7.627 / 7.575 seconds.
+Its best observed time is about 61.6 times faster than the 466.243-second baseline.
+The first attempt delivers one aggregate row (27 bytes), one aggregate request, zero cursor reads and zero exact HGETs.
+Q6 and the remaining full-query regression sweep are still in progress in this snapshot.

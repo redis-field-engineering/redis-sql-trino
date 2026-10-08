@@ -1,0 +1,49 @@
+{
+  "connector_revision": "d2e503417c45df8dc9dcb59ed8c6028d37b74f5f",
+  "artifact_sha256": "a85af0e2bbc8825c52833f39fb6a4d8511a53235e7b15a7a9068677c6d97c90d",
+  "plugin_zip_sha256": "c5e9dd453131f0e7ee6e06c86fc557eb671c11d8f11862297273020db55667c5",
+  "trinoVersion": 483,
+  "trinoImage": "trinodb/trino@sha256:db58cc93e593a2706553745f276bb119c9810e69918be56ecde088ba7ccb0534",
+  "sourceDatasetSha256": "a390f6cb782f6aaef278c72fc1dd86c4f30bc843ebab3c159e9bd4d45ddb079f",
+  "sourceRows": 99997497,
+  "cache_protocol": "Redis remains running; Trino restart and runner page-cache clear before each query block; three attempts without restart within block",
+  "attempts_per_query": 3,
+  "max_query_seconds": 1200,
+  "redisVersion": "8.6.2",
+  "protocol": "RESP3",
+  "apiMode": "OSS Cluster API",
+  "capacityGB": 1000,
+  "allRam": true,
+  "shards": 40,
+  "replication": false,
+  "aof": "every-second",
+  "scanConnections": 4,
+  "cursorCount": 1000,
+  "hardware": {
+    "redisHosts": 3,
+    "redisInstanceType": "r8g.16xlarge",
+    "trinoInstanceType": "r7a.4xlarge",
+    "physicalAz": "use1-az6",
+    "sameVpc": true,
+    "redisDataVolumeIops": 16000,
+    "redisDataVolumeMiBPerSecond": 1000
+  },
+  "rawArchiveSha256": "34a0b396bd01dc4f19b2a0ec20e88a5224ae2f84b23617f3a90f2918b9271c1b",
+  "status": {
+    "phase": "full query complete",
+    "utc": "2026-10-08T18:45:50Z",
+    "sample": {
+      "query": 5,
+      "mode": "cluster",
+      "try": 3,
+      "seconds": 451.1171806459997,
+      "wall_seconds": 451.1173113270006,
+      "error": null,
+      "rows_in_table": 99997497,
+      "output_sha256": "3ca5c640507ee1eac1ab83be5ac996ac22b783b187ae33bf3ec551b14ac8e281",
+      "connector_revision": "d2e503417c45df8dc9dcb59ed8c6028d37b74f5f",
+      "artifact_sha256": "a85af0e2bbc8825c52833f39fb6a4d8511a53235e7b15a7a9068677c6d97c90d"
+    }
+  },
+  "benchmarkArtifactIncludes": "Merged performance, LOAD and cursor replay fixes; synchronous transport wrapper follow-up is tested separately"
+}

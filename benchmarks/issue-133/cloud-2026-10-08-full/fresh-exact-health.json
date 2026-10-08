@@ -1,0 +1,44 @@
+{
+  "capturedUtc": "2026-10-08T18:44:52.814958+00:00",
+  "redisPyVersion": "6.4.0",
+  "protocol": 3,
+  "probe": {
+    "command": [
+      "FT.AGGREGATE",
+      "hits",
+      "*",
+      "TIMEOUT",
+      "1200000",
+      "GROUPBY",
+      "0",
+      "REDUCE",
+      "COUNT",
+      "0",
+      "AS",
+      "documents",
+      "DIALECT",
+      "2"
+    ],
+    "successfulSeconds": null,
+    "cursorDeleted": false,
+    "reply": {
+      "attributes": [],
+      "format": "STRING",
+      "results": [
+        {
+          "extra_attributes": {
+            "documents": "99997497"
+          },
+          "values": []
+        }
+      ],
+      "total_results": 1,
+      "warning": []
+    },
+    "requestSeconds": 0.24052294600005553,
+    "complete": true,
+    "documents": 99997497,
+    "error": null,
+    "wallSeconds": 0.24053646600077627
+  }
+}
