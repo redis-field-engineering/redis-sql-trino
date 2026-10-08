@@ -1,0 +1,16 @@
+{
+  "server": "Redis Enterprise Software 8.2.0-78.18",
+  "baseline": "fdf7966 (LOAD operands unchanged from baseline; diagnostic/error handling also present)",
+  "sql": "SELECT params, id FROM reserved_params",
+  "nonShardedBareField": "passed",
+  "shardedBareField": "failed: ERRCLUSTER Uninitialized cluster state, could not perform command; coordinator connection disconnected",
+  "shardedExplicitFieldReferences": "passed",
+  "candidateRevision": "799a51da21f6912f79023be99568a81630ce865a",
+  "candidatePackageTests": 53,
+  "candidatePythonTests": 7,
+  "logs": {
+    "redis-params-sharded-repro.log": "ede3274eff53c1f23bb22d51ef8e59d51dd5fef277d3e822e90aba13c2eaa5d9",
+    "redis-field-reference-tests.log": "50171be7ce512d6e1ae50b5e36b97c1f0e2864d47760491009d53be47c3a18b5",
+    "redis-issues-deployment-build.log": "15d1b4fe7ea54d7548017af5538e996040722501bf26f3564641d29f89a57314"
+  }
+}
