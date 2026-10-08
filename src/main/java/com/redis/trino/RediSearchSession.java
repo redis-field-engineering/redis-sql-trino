@@ -643,23 +643,32 @@ public class RediSearchSession {
             log.debug("Running Redis command tokens: %s", JsonCodec.listJsonCodec(String.class).toJson(aggregation.getCommandArguments()));
         }
         stats.aggregateRequests.increment();
-        AggregateResult result = result(exactReader, aggregation.getReader(), Optional.empty(),
-                stats.redisRequest(() -> scan.sync.ftAggregate(aggregation.getIndex(), aggregation.getQuery(), aggregation.getArgs())), stats);
-        // A batch can come back empty while the cursor still has rows, so the aggregation is only empty once the
-        // cursor is exhausted
-        while (result.getRows().isEmpty() && result.getCursor().isPresent()) {
-            Cursor cursor = result.getCursor().get();
-            stats.cursorRequests.increment();
-            result = result(exactReader, result.getReader(), Optional.of(cursor),
-                    stats.redisRequest(() -> cursorCommands(scan, cursor).read(table, cursor)), stats);
+        AggregationReply<String> reply = stats.redisRequest(() -> scan.sync.ftAggregate(
+                aggregation.getIndex(), aggregation.getQuery(), aggregation.getArgs()));
+        Optional<Cursor> liveCursor = nextCursor(reply, Optional.empty());
+        try {
+            AggregateResult result = result(exactReader, aggregation.getReader(), Optional.empty(), reply, stats);
+            // A batch can come back empty while the cursor still has rows, so the aggregation is only empty once the
+            // cursor is exhausted
+            while (result.getRows().isEmpty() && result.getCursor().isPresent()) {
+                Cursor cursor = result.getCursor().get();
+                stats.cursorRequests.increment();
+                reply = stats.redisRequest(() -> cursorCommands(scan, cursor).read(table, cursor));
+                liveCursor = nextCursor(reply, Optional.of(cursor));
+                result = result(exactReader, result.getReader(), Optional.of(cursor), reply, stats);
+            }
+            if (result.getRows().isEmpty() && aggregation.isGlobal()) {
+                // A global aggregation over no documents still returns one row. With GROUP BY terms there are no groups,
+                // so no rows.
+                return new AggregateResult(List.<String[]>of(result.getReader().emptyAggregation()), Optional.empty(),
+                        result.getReader());
+            }
+            return result;
+        } catch (RuntimeException | Error failure) {
+            // The page source does not yet own this cursor if an initial or empty batch fails conversion.
+            liveCursor.ifPresent(cursor -> cursorDeleteAsync(scan, table, cursor));
+            throw failure;
         }
-        if (result.getRows().isEmpty() && aggregation.isGlobal()) {
-            // A global aggregation over no documents still returns one row. With GROUP BY terms there are no groups,
-            // so no rows.
-            return new AggregateResult(List.<String[]>of(result.getReader().emptyAggregation()), Optional.empty(),
-                    result.getReader());
-        }
-        return result;
     }
 
     // While Redis indexes existing documents in the background (e.g. after FT.CREATE on a populated keyspace), queries
@@ -687,6 +696,7 @@ public class RediSearchSession {
      */
     public AggregateResult result(ExactHashReader exactReader, RediSearchRowReader reader, Optional<Cursor> cursor,
             AggregationReply<String> reply, RediSearchReadStats stats) {
+        RediSearchQueryErrors.verifyComplete(reply);
         long conversionStart = System.nanoTime();
         List<String[]> rows = new ArrayList<>();
         List<CompletableFuture<?>> exactReads = new ArrayList<>();

@@ -14,12 +14,27 @@ import org.junit.jupiter.api.Test;
 import io.lettuce.core.RedisCommandExecutionException;
 import io.lettuce.core.RedisCommandTimeoutException;
 import io.lettuce.core.search.AggregationReply;
+import io.lettuce.core.search.SearchReply;
 import io.lettuce.core.search.AggregationReply.Cursor;
 import io.trino.spi.TrinoException;
 
 class TestQueryErrors {
     private static final String RESPONSE = "ERR could not perform command 'ft.aggregate' because "
             + "shards topology update is either transient or has failed";
+
+    @Test
+    void rejectsWarningsBeforeConsumingRowsIncludingEmptyShardReplies() {
+        AggregationReply<String> reply = new AggregationReply<>();
+        reply.getReplies().add(new SearchReply<>());
+        RediSearchQueryErrors.verifyComplete(reply);
+        SearchReply<String> warned = new SearchReply<>();
+        warned.getWarnings().add("Timeout limit was reached");
+        reply.getReplies().add(warned);
+        assertThatThrownBy(() -> RediSearchQueryErrors.verifyComplete(reply))
+                .isInstanceOfSatisfying(TrinoException.class, failure -> assertThat(failure.getErrorCode())
+                        .isEqualTo(RediSearchErrorCode.REDISEARCH_INCOMPLETE_RESULT.toErrorCode()))
+                .hasMessageContaining("Timeout limit was reached");
+    }
 
     @Test
     void classifiesServerTopologyFailureAndPreservesResponse() {

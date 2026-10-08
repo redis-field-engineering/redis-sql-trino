@@ -34,6 +34,9 @@ A failed read removed from the page source's queue no longer prevents cursor cle
 Cleanup waits asynchronously for in-flight reads and skips deletion when a successful reply proves the cursor was exhausted.
 Only idempotent cursor deletion retries: at most three attempts, with 250 ms between attempts, on the cursor's original owning node.
 Other server errors are not retried, and failure after the bound is logged.
+RESP3 query warnings fail with the external error `REDISEARCH_INCOMPLETE_RESULT` before any rows from the warned batch are converted or returned.
+This deliberately rejects all server query warnings, including warnings whose effect cannot be established by the connector.
+An initial warned reply's live cursor is deleted even though the page source has not yet taken ownership; an exhausted cursor is not deleted.
 
 == Redis Cloud 8.6.2 sample validation
 
@@ -64,7 +67,7 @@ This correct result is close to the timeout and does not establish good full-dat
 Replaying the captured command on a fresh direct RESP3 connection succeeds; that probe's partial cursor is deleted and its timing is not reported as successful SQL time.
 
 The 10M run precedes the additional connection-recovery change above; the LOAD fix and exact readers are unchanged by that change.
-The full-data sweep will use one separately pinned final artifact.
+The full-data sweep separately pins merged connector `d2e503417c45df8dc9dcb59ed8c6028d37b74f5f`; the synchronous-wrapper and warned-result follow-up is tested separately.
 The original Cloud incident's precise coordinator failure/recovery cause is still unverified; successful queries on a recreated database do not prove recovery of the deleted original database.
 
 == Direct connection probe
@@ -77,7 +80,7 @@ It does not prove that every cluster routing path is healthy.
 
 [source,shell]
 ----
-python3 benchmarks/issue-135-136/query-engine-probe.py --connection /private/path/connection.json --index hits_10m > fresh-health.json
+python3 benchmarks/issue-135-136/query-engine-probe.py --connection /private/path/connection.json --index hits_10m --expected-count 10000000 > fresh-health.json
 python3 benchmarks/issue-135-136/query-engine-probe.py --connection /private/path/connection.json --command-file /private/path/q24-command.json > fresh-q24.json
 ----
 
@@ -91,6 +94,8 @@ Minimize projection in separate, labelled diagnostic attempts: URL/EventTime onl
 Compare the captured command through the existing and fresh connections, and correlate UTC timestamps with Cloud tasks, coordinator/shard logs and node health.
 If topology failures occur, retain the original failed attempt, stop the sweep, and establish server health with a supported aggregate before rerunning individual queries.
 A successful fresh probe does not retrospectively validate failed benchmark attempts.
+When the loaded document count is known, use `--expected-count`: a warning, malformed response or incomplete count fails the health probe without retrying.
+Lettuce's synchronous transport wrappers are recognized for lost cursor replies while retaining the complete original cause chain; both protocol versions have real TCP regression coverage.
 
 == Retain failure evidence and acceptance status
 
@@ -106,7 +111,7 @@ python3 benchmarks/issue-133/capture-query-metrics.py --sql "SELECT * FROM hits_
 Pin connector revision/artifact SHA-256, Trino/client/server versions, dataset checksum and row count, Redis API mode, physical AZ, timeout/cache settings and UTC timestamps.
 Validate all successful CSVs independently against the retained 10M DuckDB references, including valid SQL ties.
 Keep original failures, diagnostic probes and reruns separate.
-Q5 acceptance still requires three exact full-data results within the unchanged 1,200-second limit; a local or reduced-data run does not satisfy it.
+Full-data Q5 now passes three independent exact-reference checks within the unchanged 1,200-second limit; see `../issue-133/cloud-2026-10-08-full/acceptance.json` and the issue #133 report.
 Q3's merged widening pushdown and the merged Q5 buffered exact-read fallback are retained unchanged.
 
 [source,shell]
@@ -115,3 +120,11 @@ Q3's merged widening pushdown and the merged Q5 buffered exact-read fallback are
 python3 -m unittest discover -s benchmarks/issue-133 -p 'test_*.py'
 python3 -m unittest discover -s benchmarks/issue-135-136 -p 'test_*.py'
 ----
+
+== Retained original Cloud events
+
+`original-cloud-event-summary.json` retains only the original benchmark database's configuration lifecycle events returned by the Cloud system-log API; access rules and unrelated environments are omitted.
+They establish activation on October 7 and deletion on October 8 (UTC), but do not contain Query Engine coordinator/shard failure diagnostics.
+They cannot establish the precise original incident cause or prove that a healthy recreated database recovered that deleted database.
+A paired fixed/bare LOAD replay on the recreated database is queued after the full benchmark sweep, with health checks through the existing and fresh connections and no restart/retry.
+Those diagnostic responses must remain separate from benchmark timings.

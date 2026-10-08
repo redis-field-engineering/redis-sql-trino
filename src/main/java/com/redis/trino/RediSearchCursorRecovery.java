@@ -47,6 +47,12 @@ final class RediSearchCursorRecovery {
 
     private static boolean disconnected(Throwable failure) {
         RuntimeException cause = RediSearchQueryErrors.classify(failure);
+        // Lettuce's synchronous adapter wraps transport RedisExceptions in another RedisException.
+        // Keep that wrapper as the reported cause, but recognize its disconnection for read failure
+        // classification and bounded, idempotent deletion cleanup.
+        while (cause.getClass() == RedisException.class && cause.getCause() instanceof RedisException nested) {
+            cause = nested;
+        }
         return cause instanceof RedisException && ("Connection disconnected".equals(cause.getMessage())
                 || "Currently not connected. Commands are rejected.".equals(cause.getMessage()));
     }

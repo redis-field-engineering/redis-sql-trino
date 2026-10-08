@@ -1,0 +1,42 @@
+{
+  "scope": "Original clickbench-ram database lifecycle events; access rules and unrelated environments omitted",
+  "events": [
+    {
+      "time": "2026-10-08T01:52:09Z",
+      "resource": "clickbench-ram",
+      "type": "Configuration",
+      "description": "DB deleted"
+    },
+    {
+      "time": "2026-10-07T18:40:16Z",
+      "resource": "clickbench-ram",
+      "type": "Configuration",
+      "description": "Eviction policy changed from volatile-lru to noeviction"
+    },
+    {
+      "time": "2026-10-07T18:30:42Z",
+      "resource": "clickbench-ram",
+      "type": "Configuration",
+      "description": "Cluster enabled"
+    },
+    {
+      "time": "2026-10-07T18:30:42Z",
+      "resource": "clickbench-ram",
+      "type": "Configuration",
+      "description": "RESP3 protocol was enabled"
+    },
+    {
+      "time": "2026-10-07T18:30:42Z",
+      "resource": "clickbench-ram",
+      "type": "Configuration",
+      "description": "Data-persistence policy set to Append Only File (AOF) - fsync every 1 sec"
+    },
+    {
+      "time": "2026-10-07T18:30:42Z",
+      "resource": "clickbench-ram",
+      "type": "Configuration",
+      "description": "DB activated"
+    }
+  ],
+  "finding": "Only configuration lifecycle events are exposed here. No Query Engine coordinator/shard failure diagnostic was returned. These events do not establish the incident root cause."
+}
