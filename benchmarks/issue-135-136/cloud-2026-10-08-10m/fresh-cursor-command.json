@@ -1,0 +1,1 @@
+["FT.AGGREGATE","hits_10m","*","LOAD","1","@__key","WITHCURSOR","COUNT","1","DIALECT","2"]

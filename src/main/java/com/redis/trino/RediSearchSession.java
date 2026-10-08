@@ -211,7 +211,7 @@ public class RediSearchSession {
     }
 
     private ClientOptions clientOptions(RediSearchConfig config) {
-        ClientOptions.Builder builder = ClientOptions.builder();
+        ClientOptions.Builder builder = RediSearchCursorRecovery.configure(ClientOptions.builder());
         builder.sslOptions(sslOptions(config));
         builder.protocolVersion(protocolVersion(config));
         // Asynchronous commands, such as the cursor reads scans prefetch, time out like synchronous ones
@@ -276,6 +276,19 @@ public class RediSearchSession {
     private Connection connect() {
         if (client instanceof RedisClusterClient) {
             StatefulRedisClusterConnection<String, String> clusterConnection = ((RedisClusterClient) client).connect();
+            // REJECT_COMMANDS also rejects a command while its node connection is being opened for
+            // the first time. Establish primary connections before exposing the cluster connection;
+            // later disconnects still fail commands without replaying a consumed cursor batch.
+            try {
+                for (var node : clusterConnection.getPartitions()) {
+                    // Key routing caches host/port connections separately from cursor ownership by node ID.
+                    clusterConnection.getConnection(node.getUri().getHost(), node.getUri().getPort());
+                    clusterConnection.getConnection(node.getNodeId());
+                }
+            } catch (RuntimeException failure) {
+                clusterConnection.close();
+                throw failure;
+            }
             return new Connection(clusterConnection, clusterConnection.sync(), clusterConnection.async());
         }
         StatefulRedisConnection<String, String> redisConnection = ((RedisClient) client).connect();
@@ -738,18 +751,25 @@ public class RediSearchSession {
         }
 
         AggregationReply<String> read(RediSearchTableHandle table, Cursor cursor) {
-            if (config.getCursorCount() > 0) {
-                return sync.ftCursorread(table.getIndex(), cursor, Math.toIntExact(config.getCursorCount()));
+            try {
+                if (config.getCursorCount() > 0) {
+                    return sync.ftCursorread(table.getIndex(), cursor, Math.toIntExact(config.getCursorCount()));
+                }
+                return sync.ftCursorread(table.getIndex(), cursor);
+            } catch (RuntimeException failure) {
+                throw RediSearchCursorRecovery.readFailure(failure);
             }
-            return sync.ftCursorread(table.getIndex(), cursor);
         }
 
         CompletableFuture<AggregationReply<String>> readAsync(RediSearchTableHandle table, Cursor cursor) {
-            if (config.getCursorCount() > 0) {
-                return async.ftCursorread(table.getIndex(), cursor, Math.toIntExact(config.getCursorCount()))
-                        .toCompletableFuture();
+            try {
+                CompletableFuture<AggregationReply<String>> read = config.getCursorCount() > 0
+                        ? async.ftCursorread(table.getIndex(), cursor, Math.toIntExact(config.getCursorCount())).toCompletableFuture()
+                        : async.ftCursorread(table.getIndex(), cursor).toCompletableFuture();
+                return read.exceptionally(failure -> { throw RediSearchCursorRecovery.readFailure(failure); });
+            } catch (RuntimeException failure) {
+                throw RediSearchCursorRecovery.readFailure(failure);
             }
-            return async.ftCursorread(table.getIndex(), cursor).toCompletableFuture();
         }
     }
 
@@ -842,7 +862,8 @@ public class RediSearchSession {
      * would block the connection.
      */
     public void cursorDeleteAsync(Connection scan, RediSearchTableHandle tableHandle, Cursor cursor) {
-        cursorCommands(scan, cursor).async.ftCursordel(tableHandle.getIndex(), cursor).exceptionally(e -> {
+        RediSearchCursorRecovery.delete(() -> cursorCommands(scan, cursor).async
+                .ftCursordel(tableHandle.getIndex(), cursor).toCompletableFuture()).exceptionally(e -> {
             log.warn(e, "Could not delete cursor %s of index %s", cursor.getCursorId(), tableHandle.getIndex());
             return null;
         });
