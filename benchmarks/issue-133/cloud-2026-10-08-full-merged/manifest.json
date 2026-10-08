@@ -28,19 +28,19 @@
     "redisDataVolumeIops": 16000,
     "redisDataVolumeMiBPerSecond": 1000
   },
-  "rawArchiveSha256": "34a0b396bd01dc4f19b2a0ec20e88a5224ae2f84b23617f3a90f2918b9271c1b",
+  "rawArchiveSha256": "1c94ab65c4783e93d0499b725f5c8f9993ac2b7af10bd11c850ea597787650fb",
   "status": {
     "phase": "full query complete",
-    "utc": "2026-10-08T18:45:50Z",
+    "utc": "2026-10-08T19:06:20Z",
     "sample": {
-      "query": 5,
+      "query": 6,
       "mode": "cluster",
       "try": 3,
-      "seconds": 451.1171806459997,
-      "wall_seconds": 451.1173113270006,
+      "seconds": 397.6257691669998,
+      "wall_seconds": 397.62590520899994,
       "error": null,
       "rows_in_table": 99997497,
-      "output_sha256": "3ca5c640507ee1eac1ab83be5ac996ac22b783b187ae33bf3ec551b14ac8e281",
+      "output_sha256": "f6ac5b4c40414084ba4478ee071274d5a49824c4bd91ecb97a19e9bc7800b3ad",
       "connector_revision": "d2e503417c45df8dc9dcb59ed8c6028d37b74f5f",
       "artifact_sha256": "a85af0e2bbc8825c52833f39fb6a4d8511a53235e7b15a7a9068677c6d97c90d"
     }
