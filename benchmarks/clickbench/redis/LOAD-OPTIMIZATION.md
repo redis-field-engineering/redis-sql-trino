@@ -38,7 +38,9 @@ may exceed wall time. Estimated wire bytes are a conservative framing estimate,
 not measured network traffic. A single row larger than the configured pipeline
 byte budget is sent alone and counted as `oversized_rows`.
 
-For a small real Redis integration check, use a fresh disposable local instance:
+Redis Software or Redis Cloud is the default for new performance measurements.
+The following small integration check explicitly uses Redis Open Source for
+loader compatibility; it is not the default query benchmark environment:
 
 ```sh
 docker run -d --name clickbench-load-verification --memory 512m \

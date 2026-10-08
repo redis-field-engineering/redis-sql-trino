@@ -36,6 +36,9 @@ Additional coverage checks JSON arrays crossing boundaries, serialized split sta
 
 == Measurement setup
 
+This retained local experiment used Redis Open Source explicitly. New development and performance runs default to Redis Software or Redis Cloud.
+See link:../qpf/README.adoc[the controlled Software benchmark] for the full 105-column dataset and combined QPF/split/concurrency comparison.
+
 The sample has exactly 5,000,000 ClickBench rows. Its original Parquet file is 617,409,348 bytes (589 MiB).
 This local benchmark loads a projection: UserID, SearchPhrase, AdvEngineID, plus a generated immutable ordinal.
 The populated Redis database initially uses 1,608,017,440 bytes, including 694.13 MiB of index memory, and reports zero indexing failures.

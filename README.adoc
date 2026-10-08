@@ -51,10 +51,13 @@ For example, {name} lets you query and visualize your Redis data from Tableau.
 
 Redis deployments that include the Query Engine:
 
-* https://redis.io/docs/latest/operate/oss_and_stack/[Redis 8] and later: the Query Engine and JSON are built in, so the stock `redis` image works. The Docker Compose example uses `redis:8.4`.
 * https://redis.com/try-free/[Redis Cloud]: Fully-managed, enterprise-grade Redis deployed on AWS, Azure, or GCP.
-* https://redis.com/redis-enterprise-software/overview/[Redis Enterprise]: Enterprise-grade Redis for on-premises and private cloud deployment.
+* https://redis.com/redis-enterprise-software/overview/[Redis Software]: Redis for on-premises and private cloud deployment.
+* https://redis.io/docs/latest/operate/oss_and_stack/[Redis 8] and later: the Query Engine and JSON are built in; available as an explicit compatibility option.
 * https://redis.io/docs/stack/[Redis Stack]: The Redis 7.x distribution that bundled RediSearch and RedisJSON as modules.
+
+Redis Software or Redis Cloud is the default environment for development, query benchmarks and the quick start.
+The test suite uses Redis Software. The optional Compose `oss` profile starts Redis Open Source for compatibility checks.
 
 === Compatibility
 
@@ -174,16 +177,40 @@ Next, build the connector (requires JDK 25):
 ./mvnw clean package -DskipTests
 ----
 
-Then use Docker Compose to launch containers for Trino and Redis:
+Configure a Redis Software or Redis Cloud database with the Query Engine, then launch Trino against its endpoint:
+For a local database, follow the https://redis.io/docs/latest/operate/rs/installing-upgrading/quickstarts/docker-quickstart/[Redis Software Docker quickstart]; a database published on host port 12000 is reachable from Trino as `redis://host.docker.internal:12000`.
+
 [source,console]
 ----
+export REDISEARCH_URI='rediss://your-redis-endpoint:port'
+export REDISEARCH_USERNAME='default'
+read -rs REDISEARCH_PASSWORD
+export REDISEARCH_PASSWORD
+# Set true only if the database exposes the OSS Cluster API.
+export REDISEARCH_CLUSTER=false
 docker compose up
 ----
 
-Compose runs the stock `trinodb/trino:483` image with the plugin you just built mounted into `/usr/lib/trino/plugin/redisearch`, and the catalog configuration from `docker/compose/catalog/redisearch.properties`.
+Use `redis://` for a non-TLS local Redis Software endpoint, or `rediss://` when TLS is enabled.
+Compose runs the stock `trinodb/trino:483` image with the plugin you just built mounted into `/usr/lib/trino/plugin/redisearch`; `docker/setup.sh` writes the catalog from these environment variables.
 If you changed the project version, set `REDIS_SQL_TRINO_VERSION` to match the directory name under `target/`.
 
-This example includes a preloaded data set describing a collection of beers.
+Open the Trino CLI and list the indexes exposed as tables:
+[source,console]
+----
+docker exec -it trino trino --catalog redisearch --schema default
+trino:default> SHOW TABLES;
+----
+
+=== Optional OSS compatibility demo
+
+For the older self-contained beers demo, explicitly select the OSS profile:
+[source,console]
+----
+REDISEARCH_URI=redis://redis:6379 REDISEARCH_USERNAME= REDISEARCH_PASSWORD= REDISEARCH_CLUSTER=false docker compose --profile oss up
+----
+
+This optional example loads a data set describing a collection of beers.
 
 Each beer is represented as a Redis hash.
 Start the Redis CLI to examine this data.
@@ -268,9 +295,9 @@ For a multi-node cluster, set `TRINO_NODE_TYPE` to `coordinator` or `worker` on 
 
 === Redis installation
 
-For a self-managed deployment, or for testing locally, install https://redis.io/docs/latest/operate/oss_and_stack/install/[Redis 8] (for example, `docker run -p 6379:6379 redis:8.4`) or spin up a free https://redis.com/try-free/[Redis Cloud] instance.
-If you need a fully-managed, cloud-based deployment of Redis on AWS, GCP, or Azure, see all of the https://redis.com/redis-enterprise-cloud/overview/[Redis Cloud] offerings.
-For deployment in your own private cloud or data center, consider https://redis.com/redis-enterprise-software/overview/[Redis Enterprise].
+Use https://redis.com/redis-enterprise-software/overview/[Redis Software] for local, private-cloud or on-premises development and testing.
+Use https://redis.com/redis-enterprise-cloud/overview/[Redis Cloud] for a managed deployment on AWS, GCP or Azure.
+Redis Open Source remains supported for explicitly selected compatibility tests; it is not the default benchmark environment.
 
 == Building from source
 

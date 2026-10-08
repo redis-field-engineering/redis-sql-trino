@@ -1,0 +1,73 @@
+= Controlled QPF, split and concurrency benchmark
+
+Redis Software is this benchmark's default deployment. Redis Cloud is also a supported target for connector performance testing; its hardware, dataset and storage must be matched when comparing settings.
+Redis Open Source is an explicit compatibility target, not the default environment and not a substitute for measuring Software/Cloud QPF.
+
+== Protocol
+
+The controlled run uses one Redis Software database throughout, containing the first 5,000,000 physical ClickBench Parquet rows and all 105 columns.
+Ordinal keys preserve duplicates. The source SHA-256 is `78aecd305590b48cc3524ea93010eb0806a415de828478d261617383cd3a2eaf`.
+Q3, Q5, Q6 and Q30 use the retained independent DuckDB references, exact integer comparisons and a relative floating-point tolerance of 1e-10 (absolute 1e-8).
+Every SQL response page must be consumed; an error, incomplete result or failed health check stops the run without retrying the query.
+
+The matrix is Standard/2x QPF, one/automatic connector splits, and 1/4/8 concurrent SQL clients: 12 configurations.
+The eight-connection pool and 1,000-row cursor size remain fixed in both split modes.
+Each configuration gets a fresh Trino process and one excluded warmup of each query, followed by three measured rounds.
+Each round contains three executions of each query in a deterministic shuffled order: 12 queries per round, 36 per configuration and 432 measured queries overall.
+The client pool runs at most the selected concurrency, including the final drain of the fixed workload.
+The configuration order is shuffled with seed 20261008; each configuration uses the same per-round query order.
+Redis remains running, QPF changes in place, and the harness rejects a Redis shard process restart.
+Standard explicitly sets `search-workers` to zero: this Software build retained three workers when only the QPF `active` flag was disabled.
+The initial attempt stopped at that configuration gate after 36 correct 2x-QPF queries; those samples are excluded from the complete restarted matrix.
+The database's internal routing remains `sched_policy=mnp`, `conns=32` in both modes, isolating the worker-capacity change rather than comparing different proxy-routing settings.
+
+The harness verifies the database's QPF and effective `search-workers` settings through the Software management API, records actual Trino source-driver counts, and checks the exact indexed row count before and after each measured round.
+Redis shard CPU seconds are read from each shard process's live Linux counters, using timestamps around each round; retained thread names provide additional runtime evidence.
+Linux cgroup v2 counters provide total Redis Software and Trino CPU use, memory use and throttling; those broader counters include each container's service overhead.
+Average CPU cores means CPU seconds divided by elapsed seconds, not a percentage of all host CPUs.
+One-second memory samples provide a sampled peak rather than an exact high-water mark.
+Request, conversion and exact-read metrics can overlap and must not be added to reconstruct latency.
+
+The temporary ARM64 host has 16 physical cores and 64 GiB RAM.
+Redis Software gets CPUs 0-7 and a 48-GiB container limit, with a 36-GiB, two-shard database and AOF every second.
+Trino gets CPUs 8-15, a 12-GiB container limit and an 8-GiB JVM heap.
+Both containers use the same host and 200-GiB gp3 volume at 6,000 IOPS and 250 MiB/s throughout the comparison.
+This isolates their assigned CPU cores but shares the host memory subsystem, storage and kernel; it is a development benchmark, not a production topology recommendation.
+
+Throughput is completed queries divided by each measured round's elapsed time.
+SQL latency excludes subsequent metrics retrieval; the harness retrieves Trino metrics after the timed round.
+Per-query p95 has only nine measured samples per configuration and is descriptive, not a production tail-latency estimate.
+
+== Reproduction
+
+The Linux harness expects a dedicated host with Docker, Python, `redis==6.4.0`, `pyarrow==21.0.0` and `boto3==1.40.45`.
+`QPF_ROOT` defaults to `/opt/qpf`; keep this directory private because it holds generated database credentials.
+The host must have at least the CPU and RAM allocations specified above.
+
+Stage these inputs before running:
+
+* `hits-5m.parquet`: the exact sample with the SHA-256 above.
+* `redis/load.py` and `redis/create.sql` from `benchmarks/clickbench/redis/` for the existing lossless value encodings.
+* `create.sql`, `queries.sql` and the Q3/Q5/Q6/Q30 reference JSONs from `benchmarks/issue-135-136/cloud-2026-10-08-pr-5m/`.
+* The built connector directory under `plugin/`, with its JAR SHA-256 recorded in `runtime.json`.
+* `runtime.json` with `trinoImage` and `redisImage` pinned to their local image IDs, `connectorRevision`, `connectorJarSha256`, and private checkpoint `bucket`/`prefix` settings.
+* These scripts in `qpf/`.
+
+[source,console]
+----
+python qpf/software.py bootstrap
+python qpf/start-trino.py --splits 1
+# Execute create.sql through Trino once to create the empty hits_5m index.
+python qpf/load.py
+python qpf/run.py
+python qpf/summarize.py /opt/qpf/out
+----
+
+`software.py` creates only its named isolated Software container/database and refuses to replace an unrelated cluster.
+The loader requires an empty index; use a new environment rather than overwriting prior data.
+The run writes sanitized outputs, metrics, health checks and configuration snapshots under `out/`, and checkpoints them into the configured private S3 prefix after each round.
+Checkpoints exclude the private connection and management credentials.
+Install a bounded cleanup deadline before provisioning resources and delete the temporary host after retaining the results.
+
+The earlier unmatched Cloud comparison remains at `../issue-135-136/cloud-2026-10-08-qpf/`; its resident data and storage differed and it cannot isolate QPF's effect.
+The earlier local projection benchmark at `../issue-142/` is a separate dataset shape and runtime.
