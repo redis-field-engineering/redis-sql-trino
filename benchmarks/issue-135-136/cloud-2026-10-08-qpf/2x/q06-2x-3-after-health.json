@@ -1,0 +1,9 @@
+{
+  "label": "q06-2x-3-after",
+  "utc": "2026-10-08T22:26:55Z",
+  "documents": 5000000,
+  "indexDocs": 5000000,
+  "indexing": 0,
+  "indexFailures": 0,
+  "exactFiveMillion": true
+}

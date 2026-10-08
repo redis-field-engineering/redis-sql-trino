@@ -1,0 +1,1 @@
+SELECT COUNT(DISTINCT SearchPhrase) FROM hits_5m;

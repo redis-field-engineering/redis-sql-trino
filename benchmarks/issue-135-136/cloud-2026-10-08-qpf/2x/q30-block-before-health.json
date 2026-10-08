@@ -1,0 +1,9 @@
+{
+  "label": "q30-block-before",
+  "utc": "2026-10-08T22:27:10Z",
+  "documents": 5000000,
+  "indexDocs": 5000000,
+  "indexing": 0,
+  "indexFailures": 0,
+  "exactFiveMillion": true
+}

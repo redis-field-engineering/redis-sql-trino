@@ -1,0 +1,86 @@
+[
+  {
+    "query": 3,
+    "file": "q03-cluster-1.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 3,
+    "file": "q03-cluster-2.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 3,
+    "file": "q03-cluster-3.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 5,
+    "file": "q05-cluster-1.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 5,
+    "file": "q05-cluster-2.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 5,
+    "file": "q05-cluster-3.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 6,
+    "file": "q06-cluster-1.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 6,
+    "file": "q06-cluster-2.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 6,
+    "file": "q06-cluster-3.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 30,
+    "file": "q30-cluster-1.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 30,
+    "file": "q30-cluster-2.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 30,
+    "file": "q30-cluster-3.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  }
+]

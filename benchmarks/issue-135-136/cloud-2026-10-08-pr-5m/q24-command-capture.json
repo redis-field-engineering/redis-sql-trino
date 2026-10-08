@@ -1,0 +1,10 @@
+{
+  "capturedFrom": "actual 5M Q24 DEBUG command tokens",
+  "loggedUtc": "2026-10-08T20:19:33.706Z",
+  "queryThread": "SplitRunner-20261008_201933_00002_t9x5e.1.0.0-18-261",
+  "connectorRevision": "74a7d8708fbe07ee96891af89ca132f16e183559",
+  "mountedArtifactSha256": "971773ea31dcfae27a0d5ab76329e1c32dd65061d8d4f22d8ff608b20baee94d",
+  "matchingCommandLogEntries": 2,
+  "commandSha256": "4d8a29124153dd735f58fb36d010bf65b185fe03c7396cb834212bfebda1590d",
+  "loadOperands": 106
+}

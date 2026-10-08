@@ -1,0 +1,27 @@
+{
+  "databaseId": 14678768,
+  "subscriptionId": 3443288,
+  "phase": "standard",
+  "queryPerformanceFactor": "Standard",
+  "rows": 5000000,
+  "sourceSha256": "78aecd305590b48cc3524ea93010eb0806a415de828478d261617383cd3a2eaf",
+  "queries": [
+    3,
+    5,
+    6,
+    30
+  ],
+  "attemptsPerQuery": 3,
+  "protocol": "Restart Trino and clear runner page cache before each query block. Open a fresh RedisCluster client for one exact direct FT.AGGREGATE COUNT health check before each block and after each query attempt. Execute three attempts per query block without query retries.",
+  "scope": "QPF measures Redis query worker allocation; it does not enable connector multi-split scanning",
+  "connectorRevision": "74a7d8708fbe07ee96891af89ca132f16e183559",
+  "artifactSha256": "971773ea31dcfae27a0d5ab76329e1c32dd65061d8d4f22d8ff608b20baee94d",
+  "healthCoverage": {
+    "beforeEachQueryBlock": true,
+    "freshRedisClusterClient": true,
+    "exactDirectAggregateCountExpected": 5000000,
+    "afterEachQueryAttempt": true,
+    "beforeEachAttempt": false,
+    "note": "Pre-attempt health is covered by the block-level check; each attempt receives a fresh-client post-check."
+  }
+}

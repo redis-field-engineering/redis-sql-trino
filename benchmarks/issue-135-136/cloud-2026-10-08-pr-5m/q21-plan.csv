@@ -1,0 +1,30 @@
+"Trino version: 483
+Fragment 0 [SINGLE]
+    Output layout: [count]
+    Output partitioning: SINGLE []
+    Output[columnNames = [_col0]]
+    │   Layout: [count:bigint]
+    │   Estimates: {rows: 1 (9B), cpu: 0, memory: 0B, network: 0B}
+    │   _col0 := count
+    └─ Aggregate[type = FINAL]
+       │   Layout: [count:bigint]
+       │   Estimates: {rows: 1 (9B), cpu: ?, memory: 9B, network: 0B}
+       │   count := count(count_0)
+       └─ LocalExchange[partitioning = SINGLE]
+          │   Layout: [count_0:bigint]
+          │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+          └─ RemoteSource[sourceFragmentIds = [1]]
+                 Layout: [count_0:bigint]
+
+Fragment 1 [SOURCE]
+    Output layout: [count_0]
+    Output partitioning: SINGLE []
+    Aggregate[type = PARTIAL]
+    │   Layout: [count_0:bigint]
+    │   count_0 := count(*)
+    └─ ScanFilterProject[table = redis_cluster:RediSearchTableHandle{schemaTableName=default.hits_5m, index=hits_5m, limit=OptionalLong.empty, sort=[], constraint=ALL}, filterPredicate = $like(url, LikePattern '[%google%]')]
+           Layout: []
+           Estimates: {rows: 5000000 (0B), cpu: 262.26M, memory: 0B, network: 0B}/{rows: ? (0B), cpu: 262.26M, memory: 0B, network: 0B}/{rows: ? (0B), cpu: 0, memory: 0B, network: 0B}
+           url := RediSearchColumnHandle{name=url, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[], filterable=true}
+
+"

@@ -1,0 +1,171 @@
+{
+  "subscriptionId": 3443288,
+  "databaseId": 14678768,
+  "databaseName": "clickbench-trino-ram",
+  "databaseStatusAfterAttempts": "active",
+  "queryPerformanceFactorAfterAttempts": "Standard",
+  "rows": 5000000,
+  "sourceDatasetSha256": "78aecd305590b48cc3524ea93010eb0806a415de828478d261617383cd3a2eaf",
+  "scope": "QPF affects Redis query-worker allocation; it does not enable connector multi-split scanning.",
+  "standardCohort": {
+    "completed": true,
+    "attempts": 12,
+    "queries": [
+      3,
+      5,
+      6,
+      30
+    ],
+    "attemptsPerQuery": 3,
+    "sqlErrors": 0,
+    "allOutputsMatchedExisting5mReferences": true,
+    "queryPerformanceFactor": "Standard",
+    "seconds": {
+      "3": [
+        0.512221521,
+        0.422668449,
+        0.417748704
+      ],
+      "5": [
+        25.731305813,
+        24.408951704,
+        21.600766264
+      ],
+      "6": [
+        20.429785834,
+        24.131562049,
+        23.57967607
+      ],
+      "30": [
+        24.390770401,
+        23.023124313,
+        20.239137945
+      ]
+    },
+    "outputSha256": {
+      "3": "ce0fb93b609fda529529da89f8a1766bd4ad4468657b9398c38c29dd65d16fd7",
+      "5": "eb6622f624b5e8befd71170660461446478b5d63f5a1f745510cbb8f9d0a73b2",
+      "6": "287e3a32626eb3218926fd1882d0779582d70c292969942dfc389ff898b8bb31",
+      "30": "4c74e3ea72c3ba4d9c2d4c9ef97fe5d7ef75c0b4c10ee8d2f00792ca351ad028"
+    },
+    "archiveSha256": "26c5b1bbb572863470e4fde89f1f683d253d66c0c03d47d2efae6a6fb1aefa3e",
+    "clusterAfterHealthChecksPassed": 12,
+    "healthCoverage": "fresh RedisCluster exact-count check before each query block and after each attempt; not before every attempt"
+  },
+  "recoveryCountRounds": [
+    {
+      "round": 1,
+      "trinoQueryId": "20261008_212551_00007_aipfz",
+      "directRedisCount": 5000000,
+      "trinoCount": 5000000,
+      "passed": true
+    },
+    {
+      "round": 2,
+      "trinoQueryId": "20261008_212617_00008_aipfz",
+      "directRedisCount": 5000000,
+      "trinoCount": 5000000,
+      "passed": true,
+      "secondsAfterPreviousRound": 26
+    },
+    {
+      "round": 3,
+      "trinoQueryId": "20261008_213654_00004_nzxdf",
+      "directRedisCount": 5000000,
+      "trinoCount": 5000000,
+      "passed": true
+    },
+    {
+      "round": 4,
+      "trinoQueryId": "20261008_213728_00005_nzxdf",
+      "directRedisCount": 5000000,
+      "trinoCount": 5000000,
+      "passed": true,
+      "secondsAfterPreviousRound": 34
+    }
+  ],
+  "qpfUpdate": {
+    "requestedFactor": "2x",
+    "endpoint": "PUT /subscriptions/3443288/databases/14678768",
+    "payload": {
+      "queryPerformanceFactor": "2x"
+    },
+    "attempts": [
+      {
+        "taskId": "bf07654e-9370-4340-ac70-58b7e91d4546",
+        "taskStatus": "processing-error",
+        "taskDescription": "Task request failed during processing. See error information for failure details.",
+        "errorDescription": "Cluster provision general failure occurred",
+        "errorStatus": "500 INTERNAL_SERVER_ERROR",
+        "databaseStatusAfterFailure": "active",
+        "factorAfterFailure": "Standard"
+      },
+      {
+        "taskId": "fd31f0e5-2027-4a46-b6ef-8e1015b3d857",
+        "initialTaskDescription": "Task request was successfully evaluated, and is now being processed.",
+        "taskStatus": "processing-error",
+        "taskDescription": "Task request failed during processing. See error information for failure details.",
+        "errorDescription": "Cluster provision general failure occurred",
+        "errorStatus": "500 INTERNAL_SERVER_ERROR",
+        "databaseStatusAfterFailure": "active",
+        "factorAfterFailure": "Standard"
+      }
+    ],
+    "cohort2xRun": false,
+    "otherCapacityChanges": false
+  },
+  "separateQpf2Cohort": {
+    "completed": true,
+    "subscriptionId": 3443582,
+    "databaseId": 14679387,
+    "databaseName": "clickbench-trino-qpf2-ram",
+    "databaseStatusAtRun": "active",
+    "queryPerformanceFactor": "2x",
+    "rows": 5000000,
+    "sourceDatasetSha256": "78aecd305590b48cc3524ea93010eb0806a415de828478d261617383cd3a2eaf",
+    "connectorRevision": "74a7d8708fbe07ee96891af89ca132f16e183559",
+    "artifactSha256": "971773ea31dcfae27a0d5ab76329e1c32dd65061d8d4f22d8ff608b20baee94d",
+    "queries": [
+      3,
+      5,
+      6,
+      30
+    ],
+    "attemptsPerQuery": 3,
+    "attemptCount": 12,
+    "sqlErrors": 0,
+    "allPostAttemptHealthChecksPassed": true,
+    "allOutputsMatchedExisting5mReferences": true,
+    "seconds": {
+      "3": [
+        0.5914014119998683,
+        0.49929015299994717,
+        0.49650761099997
+      ],
+      "5": [
+        26.25937974500016,
+        24.48168437100003,
+        20.805893823000133
+      ],
+      "6": [
+        21.35118740500002,
+        21.201684400000204,
+        21.170894165000163
+      ],
+      "30": [
+        21.655306584999835,
+        22.167146684000045,
+        20.147326757999963
+      ]
+    },
+    "medianSeconds": {
+      "3": 0.49929015299994717,
+      "5": 24.48168437100003,
+      "6": 21.201684400000204,
+      "30": 21.655306584999835
+    },
+    "scope": "QPF changes Redis query-worker allocation; it does not enable connector multi-split scanning. This pinned connector revision used one split.",
+    "comparison": "Exploratory only; Standard and QPF2 clusters differ in resident indexes/data population, managed-host data-volume IOPS/throughput, provisioning and cache state. Do not infer causal QPF speedup.",
+    "outputArchiveSha256": "3cbc8af8d52d58e90f83ed9a6b379fbffe5408be24718a95c29ab3cd4fba3df1"
+  }
+}

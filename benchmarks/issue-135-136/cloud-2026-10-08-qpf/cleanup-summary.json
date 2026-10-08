@@ -1,0 +1,26 @@
+{
+  "dateUtc": "2026-10-08",
+  "standard": {
+    "subscriptionId": 3443288,
+    "cloudSubscriptionDeleted": true,
+    "runnerTerminated": true,
+    "databaseHostsTerminated": 3,
+    "verifiedDataVolumesAbsent": 3,
+    "cleanupLambdaRemoved": true,
+    "deadlineRuleRemoved": true,
+    "temporaryIamRolesAndInstanceProfileRemoved": true
+  },
+  "qpf2x": {
+    "subscriptionId": 3443582,
+    "cloudSubscriptionDeleted": true,
+    "runnerTerminated": true,
+    "databaseHostsTerminated": 3,
+    "verifiedVolumesAbsent": 7,
+    "connectionSecretDeleted": true,
+    "cleanupLambdaRemoved": true,
+    "deadlineRuleRemoved": true,
+    "temporaryIamRolesAndInstanceProfileRemoved": true
+  },
+  "privateArtifacts": "Private S3 archives retained under the existing 30-day expiration lifecycle.",
+  "scope": "Only the two dedicated Trino issue-validation environments were removed."
+}
