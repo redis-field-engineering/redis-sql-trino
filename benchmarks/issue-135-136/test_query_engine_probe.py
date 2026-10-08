@@ -61,6 +61,16 @@ class TestProbe(unittest.TestCase):
         self.assertFalse(result["complete"])
         self.assertIsNone(result["successfulSeconds"])
 
+    def test_timeout_warning_fails_after_cursor_cleanup_without_read_retry(self):
+        client = Client(reply=[{"results": [], "warning": ["Timeout limit was reached"]}, 42])
+        result = probe.probe(client, ["FT.AGGREGATE", "hits", "*", "WITHCURSOR"])
+        self.assertFalse(result["complete"])
+        self.assertTrue(result["cursorDeleted"])
+        self.assertIn("warning", result["error"]["message"])
+        self.assertEqual(client.commands[-1], ("FT.CURSOR", "DEL", "hits", 42))
+        self.assertEqual(len(client.commands), 2)
+        self.assertIsNone(result["successfulSeconds"])
+
     def test_rejects_non_query_commands_and_retains_expression_boundaries(self):
         with self.assertRaises(ValueError):
             probe.validate(["FLUSHALL", "hits", "*"])

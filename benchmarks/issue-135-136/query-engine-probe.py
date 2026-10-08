@@ -56,6 +56,9 @@ def probe(client, command, expected_count=None):
                 result["cursorDeleted"] = True
         else:
             result["complete"] = True
+        payload = result["reply"][0] if "WITHCURSOR" in [token.upper() for token in command[3:]] else result["reply"]
+        if isinstance(payload, dict) and payload.get("warning"):
+            raise ValueError("Query Engine returned a warning: " + str(payload["warning"]))
         if expected_count is not None:
             result["documents"] = count_documents(result["reply"])
             if result["documents"] != expected_count:

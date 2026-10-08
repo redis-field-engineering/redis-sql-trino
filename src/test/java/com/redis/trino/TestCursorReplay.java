@@ -45,6 +45,25 @@ import io.trino.spi.TrinoException;
 /** Exercises Lettuce's real reconnect path after a server consumes a command but drops its reply. */
 class TestCursorReplay {
     @Test
+    void nativeResp3WarningFailsBeforeRowsAndCursorIsDeletedWithoutReadRetry() throws Exception {
+        try (LostReplyServer server = new LostReplyServer("FT.CURSOR", "READ", true);
+                RedisClient client = server.client(ProtocolVersion.RESP3, true);
+                StatefulRedisConnection<String, String> connection = client.connect()) {
+            var reply = connection.sync().ftCursorread("hits", Cursor.of(42, "node"), 1000);
+            assertThat(reply.getReplies().get(0).getWarnings()).containsExactly("Timeout limit was reached");
+            Throwable failure = catchThrowable(() -> RediSearchQueryErrors.verifyComplete(reply));
+            assertThat(failure).isInstanceOf(TrinoException.class).hasMessageContaining("Timeout limit was reached");
+            assertThat(((TrinoException) failure).getErrorCode())
+                    .isEqualTo(RediSearchErrorCode.REDISEARCH_INCOMPLETE_RESULT.toErrorCode());
+            assertThat(RediSearchCursorRecovery.delete(() -> connection.async()
+                    .ftCursordel("hits", reply.getCursor().orElseThrow()).toCompletableFuture()).get(10, TimeUnit.SECONDS))
+                    .isEqualTo("OK");
+            assertThat(server.commands.get()).isEqualTo(1);
+            assertThat(server.deletions.get()).isEqualTo(1);
+        }
+    }
+
+    @Test
     void defaultDriverReplaysConsumedCursorRead() throws Exception {
         try (LostReplyServer server = new LostReplyServer("FT.CURSOR", "READ");
                 RedisClient client = server.client(ProtocolVersion.RESP2, false);
@@ -161,13 +180,19 @@ class TestCursorReplay {
         private final CountDownLatch reconnected = new CountDownLatch(1);
         private final String type;
         private final String argument;
+        private final boolean warning;
         private final Future<?> task;
         private volatile Socket active;
         private volatile boolean closed;
 
         LostReplyServer(String type, String argument) throws IOException {
+            this(type, argument, false);
+        }
+
+        LostReplyServer(String type, String argument, boolean warning) throws IOException {
             this.type = type;
             this.argument = argument;
+            this.warning = warning;
             task = executor.submit(() -> { serve(); return null; });
         }
 
@@ -203,6 +228,14 @@ class TestCursorReplay {
                         }
                         if (command.get(0).equals(type) && command.get(1).equals(argument)
                                 && commands.incrementAndGet() == 1) {
+                            if (warning) {
+                                String reply = "*2\r\n%5\r\n+attributes\r\n*0\r\n+format\r\n+STRING\r\n"
+                                        + "+results\r\n*0\r\n+total_results\r\n:0\r\n+warning\r\n*1\r\n"
+                                        + "+Timeout limit was reached\r\n:42\r\n";
+                                socket.getOutputStream().write(reply.getBytes(StandardCharsets.UTF_8));
+                                socket.getOutputStream().flush();
+                                continue;
+                            }
                             // The cursor advanced (or the safe read/deletion executed), but no reply reached Lettuce.
                             break;
                         }

@@ -34,6 +34,9 @@ A failed read removed from the page source's queue no longer prevents cursor cle
 Cleanup waits asynchronously for in-flight reads and skips deletion when a successful reply proves the cursor was exhausted.
 Only idempotent cursor deletion retries: at most three attempts, with 250 ms between attempts, on the cursor's original owning node.
 Other server errors are not retried, and failure after the bound is logged.
+RESP3 query warnings fail with the external error `REDISEARCH_INCOMPLETE_RESULT` before any rows from the warned batch are converted or returned.
+This deliberately rejects all server query warnings, including warnings whose effect cannot be established by the connector.
+An initial warned reply's live cursor is deleted even though the page source has not yet taken ownership; an exhausted cursor is not deleted.
 
 == Redis Cloud 8.6.2 sample validation
 
