@@ -178,6 +178,8 @@ Next, build the connector (requires JDK 25):
 ----
 
 Configure a Redis Software or Redis Cloud database with the Query Engine, then launch Trino against its endpoint:
+For a local database, follow the https://redis.io/docs/latest/operate/rs/installing-upgrading/quickstarts/docker-quickstart/[Redis Software Docker quickstart]; a database published on host port 12000 is reachable from Trino as `redis://host.docker.internal:12000`.
+
 [source,console]
 ----
 export REDISEARCH_URI='rediss://your-redis-endpoint:port'

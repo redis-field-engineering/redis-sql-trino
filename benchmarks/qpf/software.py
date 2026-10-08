@@ -62,13 +62,14 @@ def snapshot():
     db = api('/v1/bdbs/' + str(database_uid()))
     allowed = ('uid', 'name', 'status', 'memory_size', 'redis_version', 'shards_count',
                'replication', 'data_persistence', 'aof_policy', 'query_performance_factor',
-               'oss_cluster', 'module_list', 'port', 'eviction_policy')
+               'oss_cluster', 'module_list', 'port', 'eviction_policy', 'conns', 'sched_policy')
     return {key: db.get(key) for key in allowed}
 
 
 def set_factor(factor):
     assert factor in (0, 2)
-    api('/v1/bdbs/' + str(database_uid()), 'PUT', {'query_performance_factor': {'active': factor != 0, 'scaling_factor': factor}})
+    path = '/v1/bdbs/' + str(database_uid())
+    api(path, 'PUT', {'query_performance_factor': {'active': factor != 0, 'scaling_factor': factor}})
     def ready():
         db = snapshot()
         qpf = db.get('query_performance_factor') or {}
@@ -76,6 +77,14 @@ def set_factor(factor):
             if factor == 0 or qpf.get('scaling_factor') == factor:
                 return db
         return None
+    wait_for(ready)
+    if factor == 0:
+        # Software 8.2/Redis 8.6 can retain the prior search-workers setting when
+        # QPF is disabled. Reset it explicitly so Standard really uses zero workers.
+        # Management updates are asynchronous; a busy response can briefly persist
+        # after the database reports active. This idempotent setup PUT may retry.
+        wait_for(lambda: api(path, 'PUT', {'search': {'search-workers': 0}}) or True)
+    wait_for(lambda: api(path + '?extended=true')['search']['search-workers'] == (0 if factor == 0 else 3))
     return wait_for(ready)
 
 

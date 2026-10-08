@@ -17,6 +17,9 @@ Each round contains three executions of each query in a deterministic shuffled o
 The client pool runs at most the selected concurrency, including the final drain of the fixed workload.
 The configuration order is shuffled with seed 20261008; each configuration uses the same per-round query order.
 Redis remains running, QPF changes in place, and the harness rejects a Redis shard process restart.
+Standard explicitly sets `search-workers` to zero: this Software build retained three workers when only the QPF `active` flag was disabled.
+The initial attempt stopped at that configuration gate after 36 correct 2x-QPF queries; those samples are excluded from the complete restarted matrix.
+The database's internal routing remains `sched_policy=mnp`, `conns=32` in both modes, isolating the worker-capacity change rather than comparing different proxy-routing settings.
 
 The harness verifies the database's QPF and effective `search-workers` settings through the Software management API, records actual Trino source-driver counts, and checks the exact indexed row count before and after each measured round.
 Redis shard CPU seconds are read from each shard process's live Linux counters, using timestamps around each round; retained thread names provide additional runtime evidence.
