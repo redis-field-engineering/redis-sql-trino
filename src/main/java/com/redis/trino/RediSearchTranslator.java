@@ -29,6 +29,7 @@ import static java.util.Objects.requireNonNull;
 import static java.util.function.Function.identity;
 import static java.util.stream.Collectors.toMap;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -38,7 +39,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import io.lettuce.core.codec.StringCodec;
 import io.lettuce.core.protocol.CommandArgs;
+import io.lettuce.core.protocol.CommandKeyword;
 import io.lettuce.core.search.arguments.AggregateArgs;
 import io.lettuce.core.search.arguments.AggregateArgs.GroupBy;
 import io.lettuce.core.search.arguments.AggregateArgs.SortBy;
@@ -92,6 +95,17 @@ public class RediSearchTranslator {
 
 		public AggregateArgs getArgs() {
 			return args;
+		}
+
+		/**
+		 * The ordered command tokens for diagnostics and direct reproduction. No connection URI or authentication
+		 * is included; query literals are included, so only capture these at explicitly enabled DEBUG level.
+		 */
+		public List<String> getCommandArguments() {
+			ArgumentCollector command = new ArgumentCollector();
+			command.add("FT.AGGREGATE").add(index).add(query);
+			args.build(command);
+			return List.copyOf(command.arguments);
 		}
 
 		/**
@@ -173,12 +187,14 @@ public class RediSearchTranslator {
 				}
 			}
 		}
-		loads.forEach(args::load);
+		// Always mark LOAD operands as field references. A bare field named "params" can be parsed as the
+		// command's PARAMS clause by a distributed coordinator; @params is unambiguous.
+		loads.forEach(field -> args.load("@" + field));
 		// SORTBY sorts a copy of each column, loaded AS another name: next to LOAD *, a NUMERIC field's own name holds
 		// the hash's text, which Redis would sort as a string
 		List<RediSearchSortItem> sort = table.getSort();
 		for (int i = 0; i < sort.size(); i++) {
-			args.load(sort.get(i).getColumn(), sortAlias(i));
+			args.load("@" + sort.get(i).getColumn(), sortAlias(i));
 		}
 		// Steps run in the order they're added: GROUPBY leaves only the groups, SORTBY keeps the first LIMIT of the
 		// filtered rows, and LIMIT counts the filtered rows
@@ -264,6 +280,46 @@ public class RediSearchTranslator {
 
 	private static boolean isNumericField(RediSearchColumnHandle column) {
 		return column.getFieldType() == RediSearchFieldType.NUMERIC && column.isSupportsPredicates();
+	}
+
+	// AggregateArgs writes textual values, integer counts and keywords through these overloads. Keep token
+	// boundaries rather than splitting toCommandString(), whose FILTER/APPLY expressions contain spaces.
+	private static final class ArgumentCollector extends CommandArgs<String, String> {
+		private final List<String> arguments = new ArrayList<>();
+
+		ArgumentCollector() {
+			super(StringCodec.UTF8);
+		}
+
+		@Override
+		public CommandArgs<String, String> add(String value) {
+			arguments.add(value);
+			return super.add(value);
+		}
+
+		@Override
+		public CommandArgs<String, String> add(long value) {
+			arguments.add(Long.toString(value));
+			return super.add(value);
+		}
+
+		@Override
+		public CommandArgs<String, String> add(Object value) {
+			arguments.add(value.toString());
+			return super.add(value);
+		}
+
+		@Override
+		public CommandArgs<String, String> add(double value) {
+			arguments.add(Double.toString(value));
+			return super.add(value);
+		}
+
+		@Override
+		public CommandArgs<String, String> add(CommandKeyword value) {
+			arguments.add(value.name());
+			return super.add(value);
+		}
 	}
 
 	/**

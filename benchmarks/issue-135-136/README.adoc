@@ -1,0 +1,77 @@
+= Query Engine parser and topology diagnostics: issues #135 and #136
+
+The October 7 Q24 PARAMS error and subsequent Q25-Q43 topology errors are separate failures.
+Their ordering does not establish causality.
+The connector generated no intentional PARAMS clause for these queries, but ClickBench has a column named `Params`.
+Bare LOAD operands can be confused with command keywords by the distributed coordinator.
+The connector now sends explicit field references (`@params`, `@userid`, `@__key`, etc.), including SORTBY source loads; result field names and exact-value readers are unchanged.
+This uses the https://redis.io/docs/latest/commands/ft.aggregate/[documented LOAD field-reference syntax].
+A 105-column SQL regression now exercises Q24's full-row projection, residual LIKE filter, timestamp ordering and LIMIT on both non-sharded and two-shard OSS Cluster API Redis Enterprise databases.
+It includes DATE, exact DOUBLE and adjacent BIGINT values above 2^53.
+On Redis Enterprise Software 8.2.0-78.18, the minimal unchanged `SELECT params, id FROM reserved_params` projection passed without sharding but disconnected the sharded coordinator and failed with `ERRCLUSTER Uninitialized cluster state, could not perform command` before this fix.
+The sharded projection passes with explicit field references, including an adjacent BIGINT above 2^53 and a missing Params value.
+The original Cloud response was a PARAMS parser error rather than this local ERRCLUSTER response; Cloud rerun and coordinator diagnostics remain necessary before attributing the entire Q24-Q43 incident to this trigger.
+
+== Connector changes
+
+Enable `com.redis.trino.RediSearchSession=DEBUG` in Trino's `log.properties` during a diagnostic.
+The `Running Redis command tokens:` message contains a JSON string array with the exact FT.AGGREGATE arguments, including LOAD, FILTER, SORTBY, cursor, TIMEOUT and DIALECT ordering.
+Expression arguments remain single array elements, including spaces, quotes and escapes.
+Connection URIs, credentials and authentication commands are excluded; query literals remain in the captured command, so review logs before sharing them.
+Copy only the JSON array into a command file for direct replay.
+
+The exact server response `shards topology update is either transient or has failed` is classified as the external Trino error `REDISEARCH_SHARD_TOPOLOGY_UNAVAILABLE`.
+Both initial aggregate requests and asynchronous cursor reads preserve the original exception as their cause and retain request timing.
+Parser errors, command timeouts and unrelated exceptions keep their existing classification.
+There is no automatic retry: a cursor read may consume a batch even when its reply is lost, so retrying it could silently omit rows.
+A failed read removed from the page source's queue no longer prevents cursor cleanup.
+Cleanup waits asynchronously for in-flight reads and skips deletion when a successful reply proves the cursor was exhausted.
+
+== Direct connection probe
+
+Install `redis` in a diagnostic Python virtual environment.
+Use a private JSON connection-options file containing host, port, username and password; do not commit this file.
+Keep the original protocol and API mode. This probe deliberately uses a fresh direct connection to the chosen coordinator rather than a cluster client.
+It disables retries and preserves server responses, so it can be compared with the connector's existing connection.
+It does not prove that every cluster routing path is healthy.
+
+[source,shell]
+----
+python3 benchmarks/issue-135-136/query-engine-probe.py --connection /private/path/connection.json --index hits_10m > fresh-health.json
+python3 benchmarks/issue-135-136/query-engine-probe.py --connection /private/path/connection.json --command-file /private/path/q24-command.json > fresh-q24.json
+----
+
+A cursor reply is the first batch only. The probe deletes any open cursor on the same connection and marks the response incomplete.
+It never retries a failed cursor read, and it never labels command-probe wall time as successful SQL benchmark time.
+A deletion failure retains the first reply and reports an error.
+Do not use the first batch to validate Q24's complete SQL result.
+
+Collect SQL EXPLAIN and exact command tokens before executing unchanged Q24.
+Minimize projection in separate, labelled diagnostic attempts: URL/EventTime only, then exact BIGINTs, then all 105 columns.
+Compare the captured command through the existing and fresh connections, and correlate UTC timestamps with Cloud tasks, coordinator/shard logs and node health.
+If topology failures occur, retain the original failed attempt, stop the sweep, and establish server health with a supported aggregate before rerunning individual queries.
+A successful fresh probe does not retrospectively validate failed benchmark attempts.
+
+== Retain failure evidence and acceptance status
+
+The query-metrics collector also retains the original failure type, message and cause chain.
+`successfulElapsedTime` is null unless Trino reports FINISHED; failed wall time stays in `queryStats.elapsedTime`.
+Capture before restarting Trino:
+
+[source,shell]
+----
+python3 benchmarks/issue-133/capture-query-metrics.py --sql "SELECT * FROM hits_10m WHERE URL LIKE '%google%' ORDER BY EventTime LIMIT 10;" > q24-metrics.json
+----
+
+Pin connector revision/artifact SHA-256, Trino/client/server versions, dataset checksum and row count, Redis API mode, physical AZ, timeout/cache settings and UTC timestamps.
+Validate all successful CSVs independently against the retained 10M DuckDB references, including valid SQL ties.
+Keep original failures, diagnostic probes and reruns separate.
+Q5 acceptance still requires three exact full-data results within the unchanged 1,200-second limit; a local or reduced-data run does not satisfy it.
+Q3's merged widening pushdown and the merged Q5 buffered exact-read fallback are retained unchanged.
+
+[source,shell]
+----
+./mvnw test -Dtest=TestQueryErrors,TestQueryBuilder,TestExpression,TestCursorReads,TestShardedCursorReads,TestAggregationPushdown,TestShardedAggregationPushdown,TestResp2AggregationPushdown
+python3 -m unittest discover -s benchmarks/issue-133 -p 'test_*.py'
+python3 -m unittest discover -s benchmarks/issue-135-136 -p 'test_*.py'
+----

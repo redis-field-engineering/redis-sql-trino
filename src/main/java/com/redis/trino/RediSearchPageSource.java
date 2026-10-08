@@ -206,22 +206,23 @@ public class RediSearchPageSource implements ConnectorPageSource {
 
 	@Override
 	public void close() {
-		if (!reads.isEmpty()) {
-			// Deleted once the reads in flight finish, unless one exhausted the cursor: Redis would fail a read that
-			// arrived after the delete. Waiting for them here would hold up Trino's thread.
-			Cursor current = cursor.orElseThrow();
-			List<CompletableFuture<AggregationReply<String>>> pending = List.copyOf(reads);
-			CompletableFuture.allOf(pending.toArray(CompletableFuture[]::new)).whenComplete((ignored, failure) -> {
-				boolean exhausted = pending.stream().filter(read -> !read.isCompletedExceptionally())
-						.map(CompletableFuture::join)
-						.anyMatch(reply -> reply.getCursor().filter(next -> next.getCursorId() != 0).isEmpty());
-				if (!exhausted) {
-					session.cursorDeleteAsync(connection, table, current);
-				}
-			});
-			reads.clear();
-		}
+		cursor.ifPresent(current -> deleteAfterReads(List.copyOf(reads),
+				() -> session.cursorDeleteAsync(connection, table, current)));
+		reads.clear();
 		cursor = Optional.empty();
 		exactReader.close();
+	}
+
+	static void deleteAfterReads(List<CompletableFuture<AggregationReply<String>>> pending, Runnable delete) {
+		// Wait without blocking Trino. Even if a failed read has been removed from the queue, an active cursor
+		// still needs deletion. A successful final reply means Redis has already deleted it.
+		CompletableFuture.allOf(pending.toArray(CompletableFuture[]::new)).whenComplete((ignored, failure) -> {
+			boolean exhausted = pending.stream().filter(read -> !read.isCompletedExceptionally())
+					.map(CompletableFuture::join)
+					.anyMatch(reply -> reply.getCursor().filter(next -> next.getCursorId() != 0).isEmpty());
+			if (!exhausted) {
+				delete.run();
+			}
+		});
 	}
 }

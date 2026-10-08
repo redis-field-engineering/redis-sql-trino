@@ -28,6 +28,21 @@ class TestCapture(unittest.TestCase):
         self.assertEqual(result["scanMetrics"], [])
         self.assertIsNone(result["queryStats"]["physicalInputPositions"])
 
+    def test_failed_attempt_keeps_server_cause_and_no_successful_timing(self):
+        result = capture.capture({
+            "queryId": "q24", "state": "FAILED", "queryStats": {"elapsedTime": "21.406s"},
+            "failureInfo": {"type": "TrinoException", "message": "Query failed", "stack": ["ignored"],
+                            "cause": {"type": "RedisCommandExecutionException",
+                                      "message": "SEARCH_PARSE_ARGS Bad arguments for PARAMS"}},
+        })
+        self.assertIsNone(result["successfulElapsedTime"])
+        self.assertEqual(result["queryStats"]["elapsedTime"], "21.406s")
+        self.assertIn("PARAMS", result["failure"]["cause"]["message"])
+        self.assertNotIn("stack", result["failure"])
+        success = capture.capture({"queryId": "q25", "state": "FINISHED",
+                                   "queryStats": {"elapsedTime": "10s"}})
+        self.assertEqual(success["successfulElapsedTime"], "10s")
+
     def test_sql_selection_excludes_explain(self):
         self.assertEqual(capture.normalized(capture.Q5), capture.normalized("select count(distinct UserID) from hits"))
         self.assertNotEqual(capture.normalized(capture.Q5), capture.normalized("EXPLAIN " + capture.Q5))

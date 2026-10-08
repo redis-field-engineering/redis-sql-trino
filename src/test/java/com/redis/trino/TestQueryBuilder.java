@@ -261,7 +261,7 @@ public class TestQueryBuilder {
 				List.of(count, style), Optional.of(hashIndex()));
 		assertThat(aggregation.getQuery()).isEqualTo("@style:{Wheat}");
 		// The field is loaded once, and FILTER runs before GROUPBY and LIMIT
-		assertThat(commandString(aggregation)).isEqualTo("LOAD 3 __key style c FILTER exists(@style) && @style == \"Wheat\" "
+		assertThat(commandString(aggregation)).isEqualTo("LOAD 3 @__key @style @c FILTER exists(@style) && @style == \"Wheat\" "
 				+ "GROUPBY 0 REDUCE COUNT 0 AS c LIMIT 0 10 WITHCURSOR COUNT 1000 DIALECT 2");
 	}
 
@@ -278,7 +278,7 @@ public class TestQueryBuilder {
 		// stored, and the DOUBLE isn't loaded by name, which would round it again
 		RediSearchTranslator.Aggregation aggregation = translator.aggregate(table, List.of(style, abv, ibu),
 				Optional.of(hashIndex()));
-		assertThat(commandString(aggregation)).isEqualTo("LOAD * LOAD 3 __key style ibu "
+		assertThat(commandString(aggregation)).isEqualTo("LOAD * LOAD 3 @__key @style @ibu "
 				+ "FILTER exists(@style) && @style == \"Wheat\" WITHCURSOR COUNT 1000 DIALECT 2");
 		// LOAD * names a field indexed AS another name by its hash field
 		assertThat(aggregation.getReader().read(Map.of("raw_abv", value("4.123456789012345"), "style", value("Wheat"),
@@ -286,14 +286,14 @@ public class TestQueryBuilder {
 				.containsExactly("Wheat", "4.123456789012345", null);
 		// INTEGER values are exact as doubles
 		assertThat(commandString(translator.aggregate(table, List.of(style, ibu), Optional.of(hashIndex()))))
-				.startsWith("LOAD 3 __key style ibu ");
+				.startsWith("LOAD 3 @__key @style @ibu ");
 		// With LOAD *, a BIGINT is read as stored too
 		RediSearchColumnHandle id = numeric("id", BIGINT);
 		assertThat(commandString(translator.aggregate(table, List.of(id, abv), Optional.of(hashIndex()))))
-				.startsWith("LOAD * LOAD 2 __key style ");
+				.startsWith("LOAD * LOAD 2 @__key @style ");
 		// Without FT.INFO, columns are loaded by name
 		assertThat(commandString(translator.aggregate(table, List.of(style, abv), Optional.empty())))
-				.startsWith("LOAD 3 __key style abv ");
+				.startsWith("LOAD 3 @__key @style @abv ");
 	}
 
 	@Test
@@ -308,7 +308,7 @@ public class TestQueryBuilder {
 		// Redis returns an integer in full, so a BIGINT is loaded by name rather than with every field of the hash
 		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
 				List.of(ibu, id), Optional.of(index));
-		assertThat(commandString(aggregation)).isEqualTo("LOAD 3 __key ibu id WITHCURSOR COUNT 1000 DIALECT 2");
+		assertThat(commandString(aggregation)).isEqualTo("LOAD 3 @__key @ibu @id WITHCURSOR COUNT 1000 DIALECT 2");
 		// and read again from its hash field if Redis may have rounded it
 		RediSearchRowReader reader = aggregation.getReader();
 		assertThat(reader.getExactPositions()).containsExactly(1);
@@ -339,9 +339,27 @@ public class TestQueryBuilder {
 		RediSearchTranslator translator = new RediSearchTranslator(new RediSearchConfig());
 		// SORTBY runs after FILTER, on copies loaded AS other names: next to LOAD *, abv would sort as text
 		assertThat(commandString(translator.aggregate(table, List.of(style, abv, ibu), Optional.of(hashIndex()))))
-				.isEqualTo("LOAD * LOAD 9 __key style ibu abv AS __sort_0 ibu AS __sort_1 "
+				.isEqualTo("LOAD * LOAD 9 @__key @style @ibu @abv AS __sort_0 @ibu AS __sort_1 "
 						+ "FILTER exists(@style) && @style == \"Wheat\" SORTBY 4 @__sort_0 DESC @__sort_1 ASC MAX 10 "
 						+ "LIMIT 0 10 WITHCURSOR COUNT 1000 DIALECT 2");
+	}
+
+	@Test
+	public void testDiagnosticCommandPreservesArgumentBoundaries() {
+		RediSearchColumnHandle style = filterable("style", RediSearchFieldType.TAG);
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers",
+				TupleDomain.withColumnDomains(Map.of(style, varchars("say \"hi\""))), OptionalLong.empty(),
+				List.of(), List.of(), List.of()).withTopN(List.of(new RediSearchSortItem("abv", false)), 10);
+		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(
+				new RediSearchConfig().setQueryTimeoutMillis(1200000)).aggregate(table,
+				List.of(style, numeric("abv", DoubleType.DOUBLE)), Optional.of(hashIndex()));
+		assertThat(aggregation.getCommandArguments()).containsExactly("FT.AGGREGATE", "beers",
+				new RediSearchQueryBuilder().buildQuery(table.getConstraint()), "LOAD", "*", "LOAD", "5", "@__key",
+				"@style", "@abv", "AS", "__sort_0", "TIMEOUT", "1200000", "FILTER",
+				"exists(@style) && @style == \"say \\\"hi\\\"\"", "SORTBY", "2", "@__sort_0", "DESC", "MAX", "10",
+				"LIMIT", "0", "10", "WITHCURSOR", "COUNT", "1000", "DIALECT", "2");
+		assertThat(String.join(" ", aggregation.getCommandArguments().subList(3, aggregation.getCommandArguments().size())))
+				.isEqualTo(commandString(aggregation));
 	}
 
 	@Test
@@ -355,7 +373,7 @@ public class TestQueryBuilder {
 				false, 1, false);
 		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
 				List.of(RediSearchBuiltinField.KEY.getColumnHandle(), score, id), Optional.of(json));
-		assertThat(commandString(aggregation)).isEqualTo("LOAD 3 __key score id WITHCURSOR COUNT 1000 DIALECT 3");
+		assertThat(commandString(aggregation)).isEqualTo("LOAD 3 @__key @score @id WITHCURSOR COUNT 1000 DIALECT 3");
 		// DIALECT 3 returns the values at each JSON path as an array, with numbers as stored
 		assertThat(aggregation.getReader().read(Map.of("__key", value("doc:1"), "score", value("[9007199254740993]"),
 				"id", value("[\"1\"]")))).containsExactly("doc:1", "9007199254740993", "1");
@@ -394,7 +412,7 @@ public class TestQueryBuilder {
 		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
 				List.of(style, s, a), Optional.of(hashIndex()));
 		// Every document adds a number to each sum, and the count of its values. The average's sum is read as a double.
-		assertThat(commandString(aggregation)).isEqualTo("LOAD 6 __key abv ibu style s a "
+		assertThat(commandString(aggregation)).isEqualTo("LOAD 6 @__key @abv @ibu @style @s @a "
 				+ "APPLY case(exists(@abv), @abv, 0) AS __value_s APPLY exists(@abv) AS __has_s "
 				+ "APPLY case(exists(@ibu), @ibu, 0) AS __value_a APPLY exists(@ibu) AS __has_a "
 				+ "GROUPBY 1 @style REDUCE SUM 1 @__value_s AS s REDUCE SUM 1 @__has_s AS __count_s "
@@ -429,7 +447,7 @@ public class TestQueryBuilder {
 				false, Optional.empty());
 		// A document without either value adds 0, and isn't counted
 		assertThat(commandString(new RediSearchTranslator(new RediSearchConfig()).aggregate(table, List.of(s),
-				Optional.of(hashIndex())))).isEqualTo("LOAD 4 __key abv ibu s "
+				Optional.of(hashIndex())))).isEqualTo("LOAD 4 @__key @abv @ibu @s "
 						+ "APPLY case(exists(@abv) && exists(@ibu), (@abv * @ibu), 0) AS __value_s "
 						+ "APPLY exists(@abv) && exists(@ibu) AS __has_s "
 						+ "GROUPBY 0 REDUCE SUM 1 @__value_s AS s REDUCE SUM 1 @__has_s AS __count_s "
@@ -449,7 +467,7 @@ public class TestQueryBuilder {
 		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
 				List.of(product, style), Optional.of(hashIndex()));
 		// The columns it refers to are read as stored, from the hashes LOAD * returns
-		assertThat(commandString(aggregation)).isEqualTo("LOAD * LOAD 2 __key style WITHCURSOR COUNT 1000 DIALECT 2");
+		assertThat(commandString(aggregation)).isEqualTo("LOAD * LOAD 2 @__key @style WITHCURSOR COUNT 1000 DIALECT 2");
 		RediSearchRowReader reader = aggregation.getReader();
 		String[] row = reader.read(Map.of("style", value("Wheat"), "raw_abv", value("0.1"), "ibu", value("3")));
 		assertThat(reader.project(row)).containsExactly(Double.toString(0.1 * 3), "Wheat");
@@ -474,7 +492,7 @@ public class TestQueryBuilder {
 		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
 				List.of(abv, s, c), Optional.of(hashIndex()));
 		// After GROUPBY, for the DOUBLE key and sum but not the count
-		assertThat(commandString(aggregation)).isEqualTo("LOAD 4 __key abv s c GROUPBY 1 @abv REDUCE SUM 1 @abv AS s "
+		assertThat(commandString(aggregation)).isEqualTo("LOAD 4 @__key @abv @s @c GROUPBY 1 @abv REDUCE SUM 1 @abv AS s "
 				+ "REDUCE COUNT 0 AS c APPLY floor(log2(abs(@abv))) AS __exponent_0 "
 				+ "APPLY abs(@abv) * 2 ^ (26 - floor(@__exponent_0 / 2)) * 2 ^ (27 - ceil(@__exponent_0 / 2)) AS __mantissa_0 "
 				+ "APPLY floor(log2(abs(@s))) AS __exponent_1 "
@@ -582,6 +600,8 @@ public class TestQueryBuilder {
 	private static String commandString(RediSearchTranslator.Aggregation aggregation) {
 		CommandArgs<String, String> args = new CommandArgs<>(StringCodec.UTF8);
 		aggregation.getArgs().build(args);
+		List<String> tokens = aggregation.getCommandArguments();
+		assertThat(String.join(" ", tokens.subList(3, tokens.size()))).isEqualTo(args.toCommandString());
 		return args.toCommandString();
 	}
 

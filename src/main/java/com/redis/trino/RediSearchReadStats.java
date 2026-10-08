@@ -3,6 +3,7 @@ package com.redis.trino;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Supplier;
 
@@ -27,8 +28,26 @@ final class RediSearchReadStats {
 		long start = System.nanoTime();
 		try {
 			return request.get();
+		} catch (RuntimeException e) {
+			throw RediSearchQueryErrors.classify(e);
 		} finally {
 			requestNanos.add(System.nanoTime() - start);
+		}
+	}
+
+	<T> CompletableFuture<T> redisRequestAsync(Supplier<CompletableFuture<T>> request) {
+		long start = System.nanoTime();
+		try {
+			return request.get().handle((reply, failure) -> {
+				requestNanos.add(System.nanoTime() - start);
+				if (failure != null) {
+					throw RediSearchQueryErrors.classify(failure);
+				}
+				return reply;
+			});
+		} catch (RuntimeException e) {
+			requestNanos.add(System.nanoTime() - start);
+			throw RediSearchQueryErrors.classify(e);
 		}
 	}
 
