@@ -18,8 +18,12 @@
     ]
   },
   "6": {
-    "complete": false,
-    "passed": false,
-    "timesSeconds": []
+    "complete": true,
+    "passed": true,
+    "timesSeconds": [
+      403.56845540300037,
+      409.55597893399954,
+      397.6257691669998
+    ]
   }
 }

@@ -40,5 +40,26 @@
     "valid": true,
     "reason": "reference match",
     "rows": 1
+  },
+  {
+    "query": 6,
+    "file": "q06-cluster-1.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 6,
+    "file": "q06-cluster-2.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
+  },
+  {
+    "query": 6,
+    "file": "q06-cluster-3.csv",
+    "valid": true,
+    "reason": "reference match",
+    "rows": 1
   }
 ]

@@ -111,7 +111,7 @@ python3 benchmarks/issue-133/capture-query-metrics.py --sql "SELECT * FROM hits_
 Pin connector revision/artifact SHA-256, Trino/client/server versions, dataset checksum and row count, Redis API mode, physical AZ, timeout/cache settings and UTC timestamps.
 Validate all successful CSVs independently against the retained 10M DuckDB references, including valid SQL ties.
 Keep original failures, diagnostic probes and reruns separate.
-Full-data Q5 now passes three independent exact-reference checks within the unchanged 1,200-second limit; see `../issue-133/cloud-2026-10-08-full/acceptance.json` and the issue #133 report.
+Full-data Q5 now passes three independent exact-reference checks within the unchanged 1,200-second limit; see `../issue-133/cloud-2026-10-08-full-merged/acceptance.json` and the issue #133 report.
 Q3's merged widening pushdown and the merged Q5 buffered exact-read fallback are retained unchanged.
 
 [source,shell]

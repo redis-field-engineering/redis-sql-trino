@@ -64,7 +64,7 @@ Request and exact-read wait timings can now overlap, so their sum is cumulative 
 
 === Recreated Cloud full-data acceptance, October 8, 2026
 
-`cloud-2026-10-08-full/` retains complete outputs, checksums, independent DuckDB references/correctness, plans, fresh direct health probes and final scan metrics.
+`cloud-2026-10-08-full-merged/` retains complete outputs, checksums, independent DuckDB references/correctness, plans, fresh direct health probes and final scan metrics.
 The full dataset contains 99,997,497 documents, verified by SQL COUNT and FT.INFO with zero indexing failures.
 All three unchanged Q5 attempts completed within the original 1,200-second limit: 433.321 / 437.125 / 451.117 seconds.
 Every result is exactly 17,630,976 distinct UserIDs and matches the independent full-data reference.
@@ -84,4 +84,5 @@ Trino still computes exact DISTINCT; no NUMERIC BIGINT grouping, approximate cou
 Full Q3 also passed all three independent reference checks in 7.771 / 7.627 / 7.575 seconds.
 Its best observed time is about 61.6 times faster than the 466.243-second baseline.
 The first attempt delivers one aggregate row (27 bytes), one aggregate request, zero cursor reads and zero exact HGETs.
-Q6 and the remaining full-query regression sweep are still in progress in this snapshot.
+Full Q6 independently passes in 403.568 / 409.556 / 397.626 seconds; all three results match the reference.
+The remaining full-query regression sweep is in progress on final connector `74a7d87`, which includes the additional failure-handling fixes.

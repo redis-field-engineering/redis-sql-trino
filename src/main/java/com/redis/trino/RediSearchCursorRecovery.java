@@ -36,6 +36,13 @@ final class RediSearchCursorRecovery {
 
     static RuntimeException readFailure(Throwable failure) {
         RuntimeException cause = RediSearchQueryErrors.classify(failure);
+        RuntimeException nested = driverCause(cause);
+        if (nested instanceof TrinoException lost
+                && lost.getErrorCode().equals(REDISEARCH_CURSOR_REPLY_LOST.toErrorCode())) {
+            // A failed-write replay filter completes the command with our exception. The synchronous
+            // adapter wraps that exception too; retain the wrapper while restoring its external classification.
+            return lostReply(cause);
+        }
         return disconnected(cause) ? lostReply(cause) : cause;
     }
 
@@ -45,14 +52,19 @@ final class RediSearchCursorRecovery {
                         + "may have consumed its batch. Verify server health and rerun the complete query.", cause);
     }
 
-    private static boolean disconnected(Throwable failure) {
+    private static RuntimeException driverCause(Throwable failure) {
         RuntimeException cause = RediSearchQueryErrors.classify(failure);
         // Lettuce's synchronous adapter wraps transport RedisExceptions in another RedisException.
         // Keep that wrapper as the reported cause, but recognize its disconnection for read failure
         // classification and bounded, idempotent deletion cleanup.
-        while (cause.getClass() == RedisException.class && cause.getCause() instanceof RedisException nested) {
+        while (cause.getClass() == RedisException.class && cause.getCause() instanceof RuntimeException nested) {
             cause = nested;
         }
+        return cause;
+    }
+
+    private static boolean disconnected(Throwable failure) {
+        RuntimeException cause = driverCause(failure);
         return cause instanceof RedisException && ("Connection disconnected".equals(cause.getMessage())
                 || "Currently not connected. Commands are rejected.".equals(cause.getMessage()));
     }
