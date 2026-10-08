@@ -77,7 +77,7 @@ It does not prove that every cluster routing path is healthy.
 
 [source,shell]
 ----
-python3 benchmarks/issue-135-136/query-engine-probe.py --connection /private/path/connection.json --index hits_10m > fresh-health.json
+python3 benchmarks/issue-135-136/query-engine-probe.py --connection /private/path/connection.json --index hits_10m --expected-count 10000000 > fresh-health.json
 python3 benchmarks/issue-135-136/query-engine-probe.py --connection /private/path/connection.json --command-file /private/path/q24-command.json > fresh-q24.json
 ----
 
@@ -91,6 +91,8 @@ Minimize projection in separate, labelled diagnostic attempts: URL/EventTime onl
 Compare the captured command through the existing and fresh connections, and correlate UTC timestamps with Cloud tasks, coordinator/shard logs and node health.
 If topology failures occur, retain the original failed attempt, stop the sweep, and establish server health with a supported aggregate before rerunning individual queries.
 A successful fresh probe does not retrospectively validate failed benchmark attempts.
+When the loaded document count is known, use `--expected-count`: a warning, malformed response or incomplete count fails the health probe without retrying.
+Lettuce's synchronous transport wrappers are recognized for lost cursor replies while retaining the complete original cause chain; both protocol versions have real TCP regression coverage.
 
 == Retain failure evidence and acceptance status
 

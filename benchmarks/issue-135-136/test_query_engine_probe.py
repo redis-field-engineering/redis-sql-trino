@@ -19,6 +19,31 @@ class Client:
 
 
 class TestProbe(unittest.TestCase):
+    def test_health_requires_complete_expected_count_under_both_protocols(self):
+        replies = [[1, ["documents", "10000000"]],
+                   {"results": [{"extra_attributes": {"documents": "10000000"}}], "warning": []}]
+        for reply in replies:
+            client = Client(reply=reply)
+            result = probe.probe(client, ["FT.AGGREGATE", "hits", "*"], expected_count=10000000)
+            self.assertTrue(result["complete"])
+            self.assertIsNone(result["error"])
+            self.assertEqual(result["documents"], 10000000)
+            self.assertEqual(len(client.commands), 1)
+            self.assertIsNone(result["successfulSeconds"])
+
+    def test_partial_warning_wrong_count_and_malformed_health_fail_without_retry(self):
+        for reply in [[1, ["documents", "9999999"]],
+                      {"results": [{"extra_attributes": {"documents": "10000000"}}],
+                       "warning": ["Timeout limit was reached"]},
+                      {"results": []}, [1, ["other", "10000000"]],
+                      [1, ["documents", 10000000.5]]]:
+            client = Client(reply=reply)
+            result = probe.probe(client, ["FT.AGGREGATE", "hits", "*"], expected_count=10000000)
+            self.assertFalse(result["complete"])
+            self.assertIsNotNone(result["error"])
+            self.assertEqual(len(client.commands), 1)
+            self.assertIsNone(result["successfulSeconds"])
+
     def test_retains_parser_and_topology_failures_without_retries_or_success_timings(self):
         for message in ("SEARCH_PARSE_ARGS Bad arguments for PARAMS", "shards topology update is either transient or has failed"):
             client = Client(error=RuntimeError(message))

@@ -84,6 +84,26 @@ class TestCursorReplay {
 
     @ParameterizedTest
     @EnumSource(value = ProtocolVersion.class, names = {"RESP2", "RESP3"})
+    void synchronousLostCursorReplyPreservesTransportCauseAndFailsExternally(ProtocolVersion protocol) throws Exception {
+        try (LostReplyServer server = new LostReplyServer("FT.CURSOR", "READ");
+                RedisClient client = server.client(protocol, true);
+                StatefulRedisConnection<String, String> connection = client.connect()) {
+            Throwable transport = catchThrowable(() -> connection.sync().ftCursorread("hits", Cursor.of(42, "node"), 1000));
+            assertThat(transport).isInstanceOf(RedisException.class);
+            RuntimeException failure = RediSearchCursorRecovery.readFailure(transport);
+            assertThat(failure).isInstanceOf(TrinoException.class).hasCause(transport);
+            assertThat(((TrinoException) failure).getErrorCode())
+                    .isEqualTo(RediSearchErrorCode.REDISEARCH_CURSOR_REPLY_LOST.toErrorCode());
+            assertThat(server.commands.get()).isEqualTo(1);
+            assertThat(RediSearchCursorRecovery.delete(() -> connection.async()
+                    .ftCursordel("hits", Cursor.of(42, "node")).toCompletableFuture()).get(10, TimeUnit.SECONDS))
+                    .isEqualTo("OK");
+            assertThat(server.deletions.get()).isEqualTo(1);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ProtocolVersion.class, names = {"RESP2", "RESP3"})
     void exactHashReadsWorkAgainAfterDisconnectedBatchFails(ProtocolVersion protocol) throws Exception {
         try (LostReplyServer server = new LostReplyServer("HGET", "doc");
                 RedisClient client = server.client(protocol, true);

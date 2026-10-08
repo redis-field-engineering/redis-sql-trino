@@ -15,7 +15,29 @@ def validate(command):
     return command
 
 
-def probe(client, command):
+def count_documents(reply):
+    """Validate the complete global COUNT reply, including RESP3 partial-result warnings."""
+    if isinstance(reply, dict):
+        if reply.get("warning"):
+            raise ValueError("Query Engine returned a warning: " + str(reply["warning"]))
+        rows = reply.get("results", [])
+        if len(rows) != 1:
+            raise ValueError("Expected one global COUNT result")
+        value = rows[0].get("extra_attributes", {}).get("documents")
+    elif isinstance(reply, list) and len(reply) == 2 and reply[0] == 1:
+        fields = reply[1]
+        if not isinstance(fields, list) or len(fields) != 2 or fields[0] != "documents":
+            raise ValueError("Unexpected RESP2 global COUNT fields")
+        value = fields[1]
+    else:
+        raise ValueError("Unexpected global COUNT reply")
+    if not (type(value) is int and value >= 0
+            or isinstance(value, str) and value.isascii() and value.isdigit()):
+        raise ValueError("Expected an exact nonnegative document count")
+    return int(value)
+
+
+def probe(client, command, expected_count=None):
     start = time.perf_counter()
     result = {"command": validate(command), "successfulSeconds": None, "cursorDeleted": False}
     try:
@@ -34,6 +56,10 @@ def probe(client, command):
                 result["cursorDeleted"] = True
         else:
             result["complete"] = True
+        if expected_count is not None:
+            result["documents"] = count_documents(result["reply"])
+            if result["documents"] != expected_count:
+                raise ValueError(f"Global COUNT {result['documents']} does not match expected {expected_count}")
         result["error"] = None
     except Exception as error:
         result["complete"] = False
@@ -48,9 +74,12 @@ def main():
     parser.add_argument("--index", help="Index for a lightweight global COUNT health probe")
     parser.add_argument("--command-file", type=Path, help="Exact JSON command array captured from DEBUG logs")
     parser.add_argument("--protocol", type=int, choices=(2, 3), default=3)
+    parser.add_argument("--expected-count", type=int, help="Require a complete global COUNT matching the loaded dataset")
     args = parser.parse_args()
     if bool(args.index) == bool(args.command_file):
         parser.error("Specify exactly one of --index or --command-file")
+    if args.expected_count is not None and (not args.index or args.expected_count < 0):
+        parser.error("--expected-count requires --index and a nonnegative count")
     import redis
     options = json.loads(args.connection.read_text())
     # Redis (rather than RedisCluster) deliberately tests the selected coordinator without client routing.
@@ -63,7 +92,7 @@ def main():
     ]
     validate(command)
     with redis.Redis(**options) as client:
-        result = probe(client, command)
+        result = probe(client, command, args.expected_count)
     password = options.get("password")
     encoded = json.dumps({"capturedUtc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                           "redisPyVersion": redis.__version__, "protocol": args.protocol, "probe": result}, indent=2)
