@@ -1,0 +1,12 @@
+{
+  "num_docs": 5000000,
+  "hash_indexing_failures": 0,
+  "indexing": 0,
+  "percent_indexed": 1,
+  "cursor_stats": {
+    "global_idle": 0,
+    "global_total": 0,
+    "index_total": 0
+  },
+  "indexing_status": "OK"
+}

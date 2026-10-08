@@ -27,6 +27,7 @@ import static io.airlift.slice.SizeOf.instanceSize;
 import static java.util.Objects.requireNonNull;
 
 import java.util.List;
+import java.util.Optional;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -41,11 +42,24 @@ public class RediSearchSplit implements ConnectorSplit {
 	private static final long INSTANCE_SIZE = instanceSize(RediSearchSplit.class);
 
 	private final List<HostAddress> addresses;
+	private final Optional<RediSearchScanPartition> partition;
+
+	public RediSearchSplit(List<HostAddress> addresses) {
+		this(addresses, Optional.empty());
+	}
 
 	@JsonCreator
-	public RediSearchSplit(@JsonProperty("addresses") List<HostAddress> addresses) {
+	public RediSearchSplit(@JsonProperty("addresses") List<HostAddress> addresses,
+			@JsonProperty("partition") Optional<RediSearchScanPartition> partition) {
+		this.partition = requireNonNull(partition, "partition is null");
 		this.addresses = ImmutableList.copyOf(requireNonNull(addresses, "addresses is null"));
 	}
+
+	@JsonProperty
+	public Optional<RediSearchScanPartition> getPartition() { return partition; }
+
+	@Override
+	public String toString() { return "RediSearchSplit[partition=" + partition + "]"; }
 
 	@Override
 	public boolean isRemotelyAccessible() {
@@ -60,6 +74,6 @@ public class RediSearchSplit implements ConnectorSplit {
 
 	@Override
 	public long getRetainedSizeInBytes() {
-		return INSTANCE_SIZE + SizeOf.estimatedSizeOf(addresses, HostAddress::getRetainedSizeInBytes);
+		return INSTANCE_SIZE + partition.map(value -> 128L + SizeOf.estimatedSizeOf(value.field())).orElse(0L) + SizeOf.estimatedSizeOf(addresses, HostAddress::getRetainedSizeInBytes);
 	}
 }

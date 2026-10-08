@@ -24,9 +24,11 @@
 package com.redis.trino;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 
@@ -44,7 +46,7 @@ public class RediSearchConfig {
     public static final String DEFAULT_SCHEMA = "default";
 
     public static final long DEFAULT_CURSOR_COUNT = 1000;
-    public static final long DEFAULT_SCAN_CONNECTIONS = 4;
+    public static final long DEFAULT_SCAN_CONNECTIONS = 8;
 
     public static final Duration DEFAULT_TABLE_CACHE_REFRESH = Duration.ofMinutes(1);
 
@@ -81,6 +83,45 @@ public class RediSearchConfig {
 
     private long tableCacheRefresh = DEFAULT_TABLE_CACHE_REFRESH.toSeconds();
     private long scanConnections = DEFAULT_SCAN_CONNECTIONS;
+    private int scanSplits;
+    private String scanPartitionField;
+    private List<Double> scanPartitionBoundaries = List.of();
+
+    @Min(0)
+    @Max(64)
+    public int getScanSplits() { return scanSplits; }
+
+    @Config("redisearch.scan-splits")
+    @ConfigDescription("Maximum splits per document scan; 0 automatically selects from data and capacity")
+    public RediSearchConfig setScanSplits(int scanSplits) {
+        this.scanSplits = scanSplits;
+        return this;
+    }
+
+    public String getScanPartitionField() { return scanPartitionField; }
+
+    @Config("redisearch.scan-partition-field")
+    @ConfigDescription("Indexed NUMERIC field used to partition document scans")
+    public RediSearchConfig setScanPartitionField(String field) {
+        this.scanPartitionField = field;
+        return this;
+    }
+
+    @NotNull
+    public List<Double> getScanPartitionBoundaries() { return scanPartitionBoundaries; }
+
+    @Config("redisearch.scan-partition-boundaries")
+    @ConfigDescription("Strictly increasing finite numeric cut points, comma separated")
+    public RediSearchConfig setScanPartitionBoundaries(List<Double> boundaries) {
+        for (int i = 0; i < boundaries.size(); i++) {
+            com.google.common.base.Preconditions.checkArgument(Double.isFinite(boundaries.get(i))
+                    && (i == 0 || boundaries.get(i) > boundaries.get(i - 1)),
+                    "scan-partition-boundaries must be finite and strictly increasing");
+        }
+        this.scanPartitionBoundaries = List.copyOf(boundaries);
+        return this;
+    }
+
     private boolean aggregationPushdownEnabled = true;
     private boolean dynamicFilteringEnabled = true;
     private io.airlift.units.Duration dynamicFilteringWaitTimeout = DEFAULT_DYNAMIC_FILTERING_WAIT_TIMEOUT;
