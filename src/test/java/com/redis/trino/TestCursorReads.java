@@ -1,18 +1,26 @@
 package com.redis.trino;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.stream.IntStream;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
 import com.redis.trino.RedisEnterprise.Deployment;
 
 import io.lettuce.core.api.sync.RedisCommands;
+import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.cluster.api.StatefulRedisClusterConnection;
+import io.lettuce.core.RedisCommandExecutionException;
+import io.lettuce.core.search.AggregationReply;
+import io.lettuce.core.search.AggregationReply.Cursor;
 import io.lettuce.core.codec.StringCodec;
 import io.lettuce.core.output.NestedMultiOutput;
 import io.lettuce.core.protocol.CommandArgs;
@@ -25,6 +33,9 @@ import io.trino.operator.OperatorStats;
 import io.trino.plugin.base.metrics.DurationTiming;
 import io.trino.plugin.base.metrics.LongCount;
 import io.trino.spi.metrics.Metrics;
+import io.trino.spi.connector.SchemaTableName;
+import io.trino.spi.type.TypeManager;
+import io.trino.spi.TrinoException;
 
 /**
  * Scans read the batches of a cursor ahead, and delete the cursor when Trino stops before the last one.
@@ -44,9 +55,60 @@ public class TestCursorReads extends AbstractTestQueryFramework {
 
 	private RediSearchServer redisearch;
 
-	protected Deployment deployment() {
+    protected Deployment deployment() {
 		return Deployment.NON_SHARDED;
-	}
+    }
+
+    @Test
+    public void testRejectsInitialWarningAndDeletesItsCursor() throws InterruptedException {
+        redisearch.getConnection().sync().ftCreate("warned_initial", CreateArgs.builder().withPrefix("warned_initial:").build(),
+                List.of(NumericFieldArgs.builder().name("id").build()));
+        redisearch.writeHashes("warned_initial:", 100);
+        redisearch.awaitIndexed("warned_initial");
+        TypeManager unusedTypes = (TypeManager) java.lang.reflect.Proxy.newProxyInstance(
+                TypeManager.class.getClassLoader(), new Class<?>[] {TypeManager.class},
+                (proxy, method, args) -> { throw new UnsupportedOperationException("No SQL type lookup in this scan"); });
+        AtomicReference<Cursor> initialCursor = new AtomicReference<>();
+        RediSearchSession session = new RediSearchSession(unusedTypes, new RediSearchConfig()
+                .setUri(redisearch.getRedisURI()).setCluster(deployment().isCluster()).setCursorCount(7)) {
+            @Override
+            public AggregateResult result(ExactHashReader exactReader, RediSearchRowReader reader, Optional<Cursor> cursor,
+                    AggregationReply<String> reply, RediSearchReadStats stats) {
+                initialCursor.set(reply.getCursor().orElseThrow());
+                // Inject a warning into a real live-cursor reply before the page source can take ownership.
+                reply.getReplies().get(0).getWarnings().add("Timeout limit was reached");
+                return super.result(exactReader, reader, cursor, reply, stats);
+            }
+        };
+        try (var reader = session.exactHashReader()) {
+            var table = new RediSearchTableHandle(new SchemaTableName("default", "warned_initial"), "warned_initial");
+            var column = new RediSearchColumnHandle("id", io.trino.spi.type.DoubleType.DOUBLE,
+                    RediSearchFieldType.NUMERIC, false, true, Optional.empty());
+            assertThatThrownBy(() -> session.aggregate(session.scanConnection(), table, List.of(column), reader,
+                    new RediSearchReadStats())).isInstanceOfSatisfying(TrinoException.class,
+                            failure -> assertThat(failure.getErrorCode())
+                                    .isEqualTo(RediSearchErrorCode.REDISEARCH_INCOMPLETE_RESULT.toErrorCode()));
+            assertThat(initialCursor.get().getCursorId()).isPositive();
+            // Use the actual owning node; the other shard's FT.INFO cannot prove this cursor was deleted.
+            var connection = session.getConnection();
+            StatefulRedisConnection<String, String> owner = connection instanceof StatefulRedisClusterConnection<String, String> cluster
+                    ? cluster.getConnection(initialCursor.get().getNodeId().orElseThrow())
+                    : (StatefulRedisConnection<String, String>) connection;
+            long deadline = System.nanoTime() + TIMEOUT.toNanos();
+            while (true) {
+                List<Object> info = owner.sync().dispatch(FT_INFO,
+                        new NestedMultiOutput<>(StringCodec.UTF8), new CommandArgs<>(StringCodec.UTF8).add("warned_initial"));
+                List<?> stats = (List<?>) info.get(info.indexOf("cursor_stats") + 1);
+                if ((Long) stats.get(stats.indexOf("index_total") + 1) == 0) { break; }
+                assertThat(System.nanoTime()).as("initial cursor deleted within %s", TIMEOUT).isLessThan(deadline);
+                Thread.sleep(10);
+            }
+            assertThatThrownBy(() -> owner.sync().ftCursorread("warned_initial", initialCursor.get(), 1))
+                    .isInstanceOf(RedisCommandExecutionException.class).hasMessageContaining("Cursor not found");
+        } finally {
+            session.shutdown();
+        }
+    }
 
 	@Override
 	protected QueryRunner createQueryRunner() throws Exception {

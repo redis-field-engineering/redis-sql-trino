@@ -45,6 +45,24 @@ import io.trino.spi.TrinoException;
 /** Exercises Lettuce's real reconnect path after a server consumes a command but drops its reply. */
 class TestCursorReplay {
     @Test
+    void synchronousWrapperOfReplayFilterFailureKeepsExternalClassificationWithoutRetryingDeletion() throws Exception {
+        TrinoException discarded = new TrinoException(RediSearchErrorCode.REDISEARCH_CURSOR_REPLY_LOST,
+                "Write replay was discarded");
+        RedisException wrapper = new RedisException(discarded);
+        RuntimeException result = RediSearchCursorRecovery.readFailure(wrapper);
+        assertThat(result).isInstanceOf(TrinoException.class).hasCause(wrapper);
+        assertThat(((TrinoException) result).getErrorCode()).isEqualTo(discarded.getErrorCode());
+        AtomicInteger attempts = new AtomicInteger();
+        var deletion = RediSearchCursorRecovery.delete(() -> {
+            attempts.incrementAndGet();
+            return CompletableFuture.failedFuture(wrapper);
+        });
+        assertThat(catchThrowable(() -> deletion.get(10, TimeUnit.SECONDS)))
+                .isInstanceOf(ExecutionException.class).hasCause(wrapper);
+        assertThat(attempts.get()).isEqualTo(1);
+    }
+
+    @Test
     void nativeResp3WarningFailsBeforeRowsAndCursorIsDeletedWithoutReadRetry() throws Exception {
         try (LostReplyServer server = new LostReplyServer("FT.CURSOR", "READ", true);
                 RedisClient client = server.client(ProtocolVersion.RESP3, true);
