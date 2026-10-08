@@ -1,0 +1,8 @@
+{
+  "scope": "Local integration; not Cloud throughput",
+  "rows": 1000,
+  "columns": 105,
+  "hash_values_match_reference": true,
+  "indexed_rows": 1000,
+  "repeated_load_rejected": true
+}

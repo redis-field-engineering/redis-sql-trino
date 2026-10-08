@@ -1,0 +1,32 @@
+{
+  "mode": "encoding-only",
+  "source": "/private/tmp/clickbench-hits-10m.parquet",
+  "source_rows": 10000000,
+  "target_rows": 10000000,
+  "options": {
+    "limit": 10000000,
+    "workers": 8,
+    "batch_rows": 5000,
+    "pipeline_rows": 5000,
+    "max_pipeline_bytes": 16777216,
+    "encoder": "arrow",
+    "table": "hits",
+    "encode_only": true,
+    "index_timeout": 3600
+  },
+  "ingestion_seconds": 19.88176541699795,
+  "index_wait_seconds": 0.00019204203272238374,
+  "elapsed_seconds": 19.881786957965232,
+  "rows_per_second": 502972.8978155912,
+  "worker_totals": {
+    "rows": 10000000,
+    "decode_seconds": 4.48479304445209,
+    "encode_seconds": 52.22103791049449,
+    "enqueue_seconds": 87.12463950930396,
+    "write_seconds": 0.0009223795495927334,
+    "pipelines": 3692,
+    "estimated_wire_bytes": 60734528235,
+    "oversized_rows": 0
+  },
+  "correctness": "encoding checks required"
+}
