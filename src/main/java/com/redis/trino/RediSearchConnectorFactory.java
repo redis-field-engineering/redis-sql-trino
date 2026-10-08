@@ -48,7 +48,10 @@ public class RediSearchConnectorFactory implements ConnectorFactory {
 		requireNonNull(config, "config is null");
 
 		Bootstrap app = new Bootstrap(new JsonModule(), new RediSearchClientModule(),
-				binder -> binder.bind(TypeManager.class).toInstance(context.getTypeManager()));
+				binder -> {
+					binder.bind(TypeManager.class).toInstance(context.getTypeManager());
+					binder.bind(io.trino.spi.NodeManager.class).toInstance(context.getNodeManager());
+				});
 
 		Injector injector = app.doNotInitializeLogging().setRequiredConfigurationProperties(config).initialize();
 

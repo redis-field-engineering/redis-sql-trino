@@ -1,0 +1,152 @@
+= Bounded parallel document scans: issue #142
+
+The connector partitions document scans using disjoint predicates on an indexed NUMERIC field.
+Automatic selection is the default: target at least 250,000 matching rows per split, cap by estimated Trino CPU capacity and eight pooled connections, and reject ranges that leave at least 80% of matching rows on one source.
+HASH fields and cut points can be discovered from cached MIN/MAX and range counts; manual configuration remains available, including JSON arrays.
+The hard split ceiling is 64. Unusable statistics, small scans and global operations use one split.
+See the connector guide for discovery costs, cache lifetime and explicit overrides.
+Each partition selects a distinct connection pool slot on its worker and owns its cursor and exact-value reader independently.
+Connections remain pooled across queries; use Trino resource groups to bound overall analytical concurrency.
+
+== Threading model
+
+Lettuce already supports multiple cores for connection I/O through Netty event loops and configurable computation thread pools.
+See https://redis.github.io/lettuce/advanced-usage/client-resources/[Lettuce client resources].
+One connector split still owns one cursor and one Trino source pipeline; the new splits expose disjoint work to multiple connections and Trino drivers.
+Redis Query Engine query workers control server-side execution separately.
+This sweep holds their count at zero to isolate the effect of connector splits; it does not measure the combination with additional server query workers.
+
+== Coverage and fallback
+
+Let `S(b)` be the documents matching `@field:[b +inf]`.
+The partitions are the complement of `S(b0)`, then `S(b0) - S(b1)`, and so on, ending with `S(last)`.
+These nested-set differences are disjoint and cover the index, including missing fields, empty arrays and multi-valued JSON documents crossing several boundaries.
+They avoid the overlaps that adjacent numeric ranges can produce for arrays.
+The partition field must remain stable during execution; these independent Redis cursors do not provide snapshot isolation against concurrent mutations.
+
+Static and collected dynamic filters are intersected with every partition's predicate.
+LIMIT, ordering/top-N, grouping and reducers stay single-split; exact DISTINCT and unsupported expressions can still run in Trino over parallel document sources.
+Missing, NOINDEX, non-NUMERIC and unsafe field aliases fall back to a single split.
+A worker rechecks the schema before querying and rejects an unsafe partition or an incomplete index.
+Cursor warnings, failed reads, exact BIGINT recovery and deletion retain the existing fail-safe implementation.
+
+Regression coverage runs the cursor suite with four partitions on both a single shard and two OSS-API shards.
+It covers complete row multisets, empty/uneven partitions, cut-point equality, filters, a join, exact integers beyond 2^53, NULLs, decimal/scientific spellings, early termination and cursor cleanup on every shard.
+Additional coverage checks JSON arrays crossing boundaries, serialized split state, NOINDEX parsing, concurrency caps and global-operation rejection.
+
+== Measurement setup
+
+The sample has exactly 5,000,000 ClickBench rows. Its original Parquet file is 617,409,348 bytes (589 MiB).
+This local benchmark loads a projection: UserID, SearchPhrase, AdvEngineID, plus a generated immutable ordinal.
+The populated Redis database initially uses 1,608,017,440 bytes, including 694.13 MiB of index memory, and reports zero indexing failures.
+This measures the projected scans; it does not establish performance on the complete 105-column index or the full Cloud dataset.
+
+`sample.json` records independently computed PyArrow results and the Parquet SHA-256.
+`runtime.json` pins the fixed-count candidate production source and class hashes, connector JAR hash, Redis image ID, protocol and hardware/runtime settings.
+The fixed-count sweep preceded the automatic planner; its manual partition execution path is preserved in the final change.
+A separate automatic-mode run and runtime manifest validate the final defaults with partition settings omitted.
+The sweep uses Redis 8.6.2/Search 8.6.0, query workers 0, RESP3, cursor count 1,000 and eight scan connections per Trino worker.
+Trino 483 runs a coordinator and two workers in one DistributedQueryRunner JVM, with coordinator scheduling enabled and task concurrency four, Temurin 25, G1, a fixed 3-GiB heap and the JaCoCo agent enabled for every configuration.
+The Mac16,1 host has ten CPU cores and 16 GiB RAM; Docker has ten cores and about 7.75 GiB RAM.
+Redis stays running, and each split setting creates a fresh Trino runner.
+Each setting runs one excluded warmup followed by three measured passes.
+
+The queries are:
+
+* Scan control: `SELECT sum(length(SearchPhrase)) FROM hits` (Trino evaluates the unsupported expression).
+* Unchanged Q5: `SELECT COUNT(DISTINCT UserID) FROM hits`.
+* Unchanged Q6: `SELECT COUNT(DISTINCT SearchPhrase) FROM hits`.
+* Pushed-down control: `SELECT SUM(AdvEngineID) FROM hits` (a projection of Q3's reducer, not the full Q3 SQL).
+
+A separate Redis client issues an ordinal point lookup every 100 ms during each query, with twenty idle lookups before each configuration.
+Point measurements include Redis response transfer and decoding; they do not include Trino SQL scheduling.
+JVM and Redis CPU counters report average cores consumed during the query, including the lookup probe and background activity.
+Trino operator CPU time is recorded separately.
+Request/wait/conversion times are cumulative work and can overlap across sources; they must not be summed to infer elapsed latency.
+Global SUM can block point traffic with query workers zero; its short runs provide few lookup samples, so their p95 values are descriptive rather than a robust tail estimate.
+
+== Fixed-count results
+
+Medians of three measured passes, excluding the first pass. Times are seconds.
+
+[cols="1,1,1,1,1",options="header"]
+|===
+|Splits |Scan control |Q5 |Q6 |Pushed-down SUM
+|1 |86.63 |99.39 |93.26 |4.40
+|2 |23.17 |46.44 |28.90 |4.53
+|4 |28.35 |37.90 |26.92 |4.33
+|8 |22.36 |32.63 |23.86 |4.37
+|===
+
+Eight splits improved scan control by 3.88x, Q5 by 3.05x and Q6 by 3.91x relative to one split.
+The trend is not linear: scan control was faster with two splits than with four.
+Every scan returned 5,000,000 rows, Q5 returned 1,062,330, Q6 returned 610,809, and SUM returned 3,094,732.
+The scan and Q6 each processed 79,264,206 bytes; Q5 processed 45,000,000 bytes.
+Each full scan made 5,000 cursor reads across its sources. Q5 additionally recovered 4,829,868 exact HASH values.
+
+[cols="1,1,1,1,1",options="header"]
+|===
+|Splits |Q5 JVM cores |Q5 Redis cores |Q5 source nodes |Largest scan lookup p95 (ms)
+|1 |0.40 |0.19 |1 |21.22
+|2 |1.32 |0.70 |2 |33.05
+|4 |2.82 |0.88 |3 |47.98
+|8 |4.94 |0.88 |3 |69.38
+|===
+
+The observed scan-traffic envelope was a per-trial point-lookup p95 below 70 ms across all measured parallel configurations (below 50 ms with at most four splits).
+This is a bound observed in this local sweep, not a deployment SLO; idle point medians were below 1 ms, and concurrent scan traffic already raises latency in the one-split case.
+Median pushed-down SUM latency stayed within 3% of the one-split result across the three parallel configurations and always used one source and one aggregate request.
+Its occasional point lookups were blocked for seconds even with one split and provide too few samples for a reliable tail estimate.
+Use Trino resource groups and measure Redis query workers separately when sharing the server with point traffic.
+
+== Automatic selection
+
+The automatic-mode sweep omits all four split/connection/partition properties. `auto-runtime.json` pins its compiled classes and source separately.
+`auto-results.json` retains the cold warmup and three measured passes.
+An earlier cold attempt fell back to one split and took 99.59 seconds for the scan control; it was stopped after that result and is retained in `auto-initial-fallback.json` with its runtime manifest.
+That attempt did not log the discovery reason, so its cause is unconfirmed. Fallback diagnostics were added before the repeated sweep; this is not evidence that transient fallback is eliminated.
+Bounded discovery can favor availability over parallelism when statistics cannot be obtained. The warmup is reported separately so discovery cost is visible.
+
+
+[cols="1,1,1,1,1",options="header"]
+|===
+|Mode |Scan control (s) |Q5 (s) |Q6 (s) |Pushed-down SUM (s)
+|Automatic |20.60 |30.02 |22.04 |3.81
+|===
+
+The repeated automatic sweep selected eight sources on three execution nodes for all scans, and one source for SUM.
+All trials returned the exact expected results and full row counts. The cold scan warmup took 28.59 seconds, including discovery; the measured scan median was 20.60 seconds.
+The automatic sweep's largest measured per-trial scan lookup p95 was 78.34 ms; its observed envelope was below 80 ms.
+The configurations ran sequentially on the same local host; the three measured passes per setting are not a randomized or statistically powered comparison.
+
+== Validation
+
+The original full suite passed 333 tests (16 skipped). The final targeted suite passed all 42 tests, followed by all 12 packaged-plugin tests.
+`verification.json` pins the final packaged artifact and records the RESP3 NOINDEX parsing change made after the automatic benchmark; indexed benchmark fields follow the same scan path.
+Live automatic discovery, cache reuse, skew rejection and point-lookup fallback are exercised on 500,000 rows.
+Raw timings and every per-source work counter are retained in `results.json` and `summary.json`.
+
+== Reproduction
+
+Use a new isolated Redis instance with Query Engine enabled; the loader requires a new `hits` index.
+
+[source,shell]
+----
+docker run -d --name issue142-benchmark -p 127.0.0.1:16379:6379 \
+  redis:8.6.2 redis-server --save '' --appendonly no
+python3 benchmarks/issue-142/load-sample.py /path/to/clickbench-hits-5m.parquet
+./mvnw test -Dtest=RediSearchParallelScanBenchmark \
+  -Dbenchmark.redis-uri=redis://127.0.0.1:16379 -Dbenchmark.attempts=4
+python3 benchmarks/issue-142/summarize.py
+./mvnw test -Dtest=RediSearchParallelScanBenchmark \
+  -Dbenchmark.redis-uri=redis://127.0.0.1:16379 -Dbenchmark.splits=0 \
+  -Dbenchmark.attempts=4 -Dbenchmark.output=benchmarks/issue-142/auto-results.json
+python3 benchmarks/issue-142/summarize.py
+./mvnw verify
+./mvnw test -Dtest=TestParallelCursorReads,TestShardedParallelCursorReads,TestScanPartitions
+./mvnw -Pproduct-tests failsafe:integration-test failsafe:verify
+----
+
+The benchmark reads the existing sample and performs no writes.
+`results.json` retains every trial and counter; `summary.json` excludes warmup and validates exact results, row coverage, source counts and execution on multiple nodes. The coordinator also executes source tasks: two splits used two nodes; four and eight used all three.
+`plan-*.txt` retains the scan plans; executed source counts appear in the metrics rather than the EXPLAIN text.

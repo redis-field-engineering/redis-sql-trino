@@ -81,8 +81,14 @@ public class RediSearchPageSource implements ConnectorPageSource {
 
 	public RediSearchPageSource(RediSearchSession session, RediSearchTableHandle table,
 			List<RediSearchColumnHandle> columns) {
+		this(session, table, columns, Optional.empty());
+	}
+
+	public RediSearchPageSource(RediSearchSession session, RediSearchTableHandle table,
+			List<RediSearchColumnHandle> columns, Optional<RediSearchScanPartition> partition) {
 		this.session = session;
-		this.connection = session.scanConnection();
+		this.connection = partition.map(value -> session.scanConnection(value.connectionSlot()))
+				.orElseGet(session::scanConnection);
 		this.exactReader = session.exactHashReader();
 		this.table = table;
 		List<Type> columnTypes = columns.stream().map(RediSearchColumnHandle::getType).toList();
@@ -90,7 +96,8 @@ public class RediSearchPageSource implements ConnectorPageSource {
 		this.pageBuilder = new PageBuilder(columnTypes);
 		RediSearchSession.AggregateResult first;
 		try {
-			first = session.aggregate(connection, table, columns, exactReader, stats);
+			first = partition.isEmpty() ? session.aggregate(connection, table, columns, exactReader, stats)
+					: session.aggregate(connection, table, columns, exactReader, stats, partition);
 		} catch (RuntimeException | Error e) {
 			exactReader.close();
 			throw e;

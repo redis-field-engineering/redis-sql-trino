@@ -693,8 +693,57 @@ redisearch.aggregation-pushdown.enabled=false
 Trino then computes aggregates from cursor batches, while Redis still applies supported filters.
 Disabling pushdown transfers more rows and can make aggregations substantially slower, but lets Redis process cursor batches between other commands.
 Aggregation pushdown remains enabled by default.
-Keep `redisearch.scan-connections=4` and `redisearch.cursor-count=1000` as the starting point and compare configurations with the benchmark rather than assuming more connections or smaller batches will help.
+The measurements above predate automatic split selection. The current defaults use automatic splits, eight pooled scan connections and `redisearch.cursor-count=1000`; compare configurations with the benchmark when tuning a shared deployment.
 See link:benchmarks/issue-115/README.adoc[the experiment report] for the configurations, timing variability, reproduction command and raw samples.
+
+=== Parallel document scans
+
+The connector uses Lettuce for Redis communication. Lettuce supports multiple CPU cores through Netty I/O event loops and computation thread pools.
+Its default pool sizes follow the available CPU count, with a minimum of two threads, unless configured otherwise.
+See https://redis.github.io/lettuce/advanced-usage/client-resources/[Lettuce client resources] for the threading settings.
+A physical connection processes its network events on one event loop; additional client threads do not automatically partition a query or create more Trino sources.
+
+[cols="1,2",options="header"]
+|===
+|Layer |Work it parallelizes
+|Lettuce |Redis network I/O and protocol decoding across connections.
+|Trino connector |Independent scan splits, each with a cursor, processed by separate Trino drivers/workers.
+|Redis Query Engine |Server-side query computation through query workers.
+|===
+
+The connector's existing connection pool supports concurrency between scans.
+Multiple splits let a single document scan use several connections and Trino source pipelines.
+Tune Redis query workers independently and measure the combined configuration; client-side parallelism alone does not determine server-side query concurrency.
+
+Automatic split selection is the default (`redisearch.scan-splits=0`).
+The planner targets at least 250,000 matching rows per split and selects the largest count allowed by the estimated CPU capacity (active Trino workers times coordinator CPU count), the connection pool (eight by default), and a hard ceiling of 64.
+Small tables and selective filters use one split. A filter's match count is checked before choosing parallelism.
+For HASH indexes, the planner examines up to three indexed NUMERIC fields, obtains their MIN/MAX in one bounded statistics query, and checks the counts of the proposed ranges.
+A field is rejected if one partition would contain at least 80% of the matching documents; the planner then tries another candidate.
+Discovery results, including unsupported cases, are cached for five minutes (up to 256 entries).
+Statistics queries have a ten-second server timeout and count probes have a one-second timeout; unavailable or partial statistics fall back to one split.
+The first scan can therefore pay a discovery cost; subsequent scans reuse its plan.
+MIN/MAX discovery is a server-side aggregate and can delay concurrent point traffic when Redis query workers are disabled; configured boundaries avoid this discovery work.
+This is a cost heuristic, not a guarantee of the optimal count under every load. Use the benchmark and explicit overrides when tuning a shared deployment.
+JSON arrays support explicit partition fields and cut points; automatic MIN/MAX discovery currently applies to HASH indexes.
+
+Set `redisearch.scan-splits=1` to force one source. To override automatic selection and supply known boundaries:
+
+[source,properties]
+----
+redisearch.scan-splits=4
+redisearch.scan-connections=4
+redisearch.scan-partition-field=ordinal
+redisearch.scan-partition-boundaries=1250000,2500000,3750000
+----
+
+The connector verifies the schema and partitions the matching documents into disjoint sets, including missing fields and multi-valued JSON.
+Static and dynamic filters remain active in every partition; cursors retain exact reads, timeout handling and cleanup.
+Pushed-down limits, ordering, grouping and reducers remain one Redis operation.
+Unsupported schemas or unusable statistics use one split.
+The split count is capped by the connection pool and available cut points; it bounds each query rather than all concurrent queries.
+Keep the partition field stable during a scan because Redis cursors do not provide snapshot isolation.
+See link:benchmarks/issue-142/README.adoc[the parallel scan benchmark] for measured tradeoffs and reproducible settings.
 
 == Support
 

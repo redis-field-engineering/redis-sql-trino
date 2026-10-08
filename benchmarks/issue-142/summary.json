@@ -1,0 +1,346 @@
+{
+  "1": {
+    "scan": {
+      "elapsed_ms": 86630.493625,
+      "jvm_cpu_cores": 0.25625575504048725,
+      "redis_cpu_cores": 0.16984069216655126,
+      "point_scan_median_ms": 10.859709,
+      "point_scan_p95_ms": 17.510625,
+      "redis.request-wall-time": 85988.712829,
+      "redis.row-conversion-time": 1140.105833,
+      "redis.cursor.requests": 5000,
+      "input_bytes": 79264206,
+      "trino_cpu_ms": 2075.0,
+      "redis.exact-hash-reads": 0,
+      "redis.exact-hash-read-wait-time": 0.0,
+      "redis.exact-hash-read-batches": 0,
+      "max_point_p95_ms": 17.928083,
+      "range_elapsed_ms": [
+        86377.446083,
+        88204.442458
+      ],
+      "speedup": 1.0
+    },
+    "q5": {
+      "elapsed_ms": 99387.780709,
+      "jvm_cpu_cores": 0.39857774454350703,
+      "redis_cpu_cores": 0.1865562173940216,
+      "point_scan_median_ms": 8.894167,
+      "point_scan_p95_ms": 17.934917,
+      "redis.request-wall-time": 96567.542975,
+      "redis.row-conversion-time": 2935.648932,
+      "redis.cursor.requests": 5000,
+      "input_bytes": 45000000,
+      "trino_cpu_ms": 4979.0,
+      "redis.exact-hash-reads": 4829868,
+      "redis.exact-hash-read-wait-time": 75066.507225,
+      "redis.exact-hash-read-batches": 4855,
+      "max_point_p95_ms": 17.996166,
+      "range_elapsed_ms": [
+        97077.043333,
+        101108.899209
+      ],
+      "speedup": 1.0
+    },
+    "q6": {
+      "elapsed_ms": 93257.399709,
+      "jvm_cpu_cores": 0.2592446884592943,
+      "redis_cpu_cores": 0.19497198874285013,
+      "point_scan_median_ms": 10.911167,
+      "point_scan_p95_ms": 18.944709,
+      "redis.request-wall-time": 91828.915256,
+      "redis.row-conversion-time": 1146.629326,
+      "redis.cursor.requests": 5000,
+      "input_bytes": 79264206,
+      "trino_cpu_ms": 3071.0,
+      "redis.exact-hash-reads": 0,
+      "redis.exact-hash-read-wait-time": 0.0,
+      "redis.exact-hash-read-batches": 0,
+      "max_point_p95_ms": 21.2235,
+      "range_elapsed_ms": [
+        87309.210208,
+        93903.653125
+      ],
+      "speedup": 1.0
+    },
+    "q3": {
+      "elapsed_ms": 4404.292292,
+      "jvm_cpu_cores": 0.0838674865331993,
+      "redis_cpu_cores": 0.9913068509063411,
+      "point_scan_median_ms": 293.279292,
+      "point_scan_p95_ms": 3883.545667,
+      "redis.request-wall-time": 3983.095292,
+      "redis.row-conversion-time": 0.286583,
+      "redis.cursor.requests": 0,
+      "input_bytes": 9,
+      "trino_cpu_ms": 6.0,
+      "redis.exact-hash-reads": 0,
+      "redis.exact-hash-read-wait-time": 0.0,
+      "redis.exact-hash-read-batches": 0,
+      "max_point_p95_ms": 4191.486875,
+      "range_elapsed_ms": [
+        4397.34175,
+        4626.473625
+      ],
+      "speedup": 1.0
+    }
+  },
+  "2": {
+    "scan": {
+      "elapsed_ms": 23171.593208,
+      "jvm_cpu_cores": 0.6575190088672819,
+      "redis_cpu_cores": 0.8117649412862076,
+      "point_scan_median_ms": 4.453708,
+      "point_scan_p95_ms": 20.687083,
+      "redis.request-wall-time": 45479.106688,
+      "redis.row-conversion-time": 773.14314,
+      "redis.cursor.requests": 5000,
+      "input_bytes": 79264206,
+      "trino_cpu_ms": 1361.0,
+      "redis.exact-hash-reads": 0,
+      "redis.exact-hash-read-wait-time": 0.0,
+      "redis.exact-hash-read-batches": 0,
+      "max_point_p95_ms": 22.630375,
+      "range_elapsed_ms": [
+        13642.086083,
+        25405.023584
+      ],
+      "speedup": 3.738650719756758
+    },
+    "q5": {
+      "elapsed_ms": 46441.4865,
+      "jvm_cpu_cores": 1.3170769846051331,
+      "redis_cpu_cores": 0.7044640869784458,
+      "point_scan_median_ms": 5.91225,
+      "point_scan_p95_ms": 20.380416,
+      "redis.request-wall-time": 84191.641341,
+      "redis.row-conversion-time": 4823.31856,
+      "redis.cursor.requests": 5000,
+      "input_bytes": 45000000,
+      "trino_cpu_ms": 6748.0,
+      "redis.exact-hash-reads": 4829868,
+      "redis.exact-hash-read-wait-time": 72234.306271,
+      "redis.exact-hash-read-batches": 4855,
+      "max_point_p95_ms": 21.675875,
+      "range_elapsed_ms": [
+        44687.150959,
+        48296.39225
+      ],
+      "speedup": 2.1400645887809815
+    },
+    "q6": {
+      "elapsed_ms": 28902.201917,
+      "jvm_cpu_cores": 0.6772713392638222,
+      "redis_cpu_cores": 0.8422194706153864,
+      "point_scan_median_ms": 7.063875,
+      "point_scan_p95_ms": 24.416459,
+      "redis.request-wall-time": 56296.575589,
+      "redis.row-conversion-time": 932.657066,
+      "redis.cursor.requests": 5000,
+      "input_bytes": 79264206,
+      "trino_cpu_ms": 2544.0,
+      "redis.exact-hash-reads": 0,
+      "redis.exact-hash-read-wait-time": 0.0,
+      "redis.exact-hash-read-batches": 0,
+      "max_point_p95_ms": 33.05375,
+      "range_elapsed_ms": [
+        25480.869,
+        32276.936667
+      ],
+      "speedup": 3.2266538022539692
+    },
+    "q3": {
+      "elapsed_ms": 4532.913,
+      "jvm_cpu_cores": 0.09182615149370155,
+      "redis_cpu_cores": 1.0063495593231078,
+      "point_scan_median_ms": 3813.300917,
+      "point_scan_p95_ms": 4418.788125,
+      "redis.request-wall-time": 4466.340001,
+      "redis.row-conversion-time": 0.297292,
+      "redis.cursor.requests": 0,
+      "input_bytes": 9,
+      "trino_cpu_ms": 3.0,
+      "redis.exact-hash-reads": 0,
+      "redis.exact-hash-read-wait-time": 0.0,
+      "redis.exact-hash-read-batches": 0,
+      "max_point_p95_ms": 5594.397375,
+      "range_elapsed_ms": [
+        3923.135708,
+        5815.794208
+      ],
+      "speedup": 0.9716251540675942
+    }
+  },
+  "4": {
+    "scan": {
+      "elapsed_ms": 28353.816,
+      "jvm_cpu_cores": 1.711133697136216,
+      "redis_cpu_cores": 0.8509030850335232,
+      "point_scan_median_ms": 8.543334,
+      "point_scan_p95_ms": 21.354791,
+      "redis.request-wall-time": 108744.436615,
+      "redis.row-conversion-time": 1424.289491,
+      "redis.cursor.requests": 5000,
+      "input_bytes": 79264206,
+      "trino_cpu_ms": 1928.0,
+      "redis.exact-hash-reads": 0,
+      "redis.exact-hash-read-wait-time": 0.0,
+      "redis.exact-hash-read-batches": 0,
+      "max_point_p95_ms": 47.976333,
+      "range_elapsed_ms": [
+        26651.477,
+        29686.576458
+      ],
+      "speedup": 3.055338076010651
+    },
+    "q5": {
+      "elapsed_ms": 37900.223959,
+      "jvm_cpu_cores": 2.8220347142034043,
+      "redis_cpu_cores": 0.8829572583626627,
+      "point_scan_median_ms": 8.602917,
+      "point_scan_p95_ms": 29.466,
+      "redis.request-wall-time": 130684.473833,
+      "redis.row-conversion-time": 8455.183494,
+      "redis.cursor.requests": 5000,
+      "input_bytes": 45000000,
+      "trino_cpu_ms": 10459.0,
+      "redis.exact-hash-reads": 4829868,
+      "redis.exact-hash-read-wait-time": 116625.625286,
+      "redis.exact-hash-read-batches": 4855,
+      "max_point_p95_ms": 36.051708,
+      "range_elapsed_ms": [
+        36061.604,
+        38396.120875
+      ],
+      "speedup": 2.6223533881096976
+    },
+    "q6": {
+      "elapsed_ms": 26917.922334,
+      "jvm_cpu_cores": 1.7988561299656878,
+      "redis_cpu_cores": 0.8521851618178438,
+      "point_scan_median_ms": 7.927042,
+      "point_scan_p95_ms": 29.768375,
+      "redis.request-wall-time": 104836.122865,
+      "redis.row-conversion-time": 1462.7391,
+      "redis.cursor.requests": 5000,
+      "input_bytes": 79264206,
+      "trino_cpu_ms": 3020.0,
+      "redis.exact-hash-reads": 0,
+      "redis.exact-hash-read-wait-time": 0.0,
+      "redis.exact-hash-read-batches": 0,
+      "max_point_p95_ms": 29.945625,
+      "range_elapsed_ms": [
+        26008.549667,
+        29499.782708
+      ],
+      "speedup": 3.4645095766253355
+    },
+    "q3": {
+      "elapsed_ms": 4328.35175,
+      "jvm_cpu_cores": 0.07355386493253466,
+      "redis_cpu_cores": 1.0181885301781362,
+      "point_scan_median_ms": 252.642709,
+      "point_scan_p95_ms": 3923.846917,
+      "redis.request-wall-time": 4272.267208,
+      "redis.row-conversion-time": 0.235084,
+      "redis.cursor.requests": 0,
+      "input_bytes": 9,
+      "trino_cpu_ms": 2.0,
+      "redis.exact-hash-reads": 0,
+      "redis.exact-hash-read-wait-time": 0.0,
+      "redis.exact-hash-read-batches": 0,
+      "max_point_p95_ms": 4155.231667,
+      "range_elapsed_ms": [
+        4002.884416,
+        4621.617959
+      ],
+      "speedup": 1.0175449100226202
+    }
+  },
+  "8": {
+    "scan": {
+      "elapsed_ms": 22355.459792,
+      "jvm_cpu_cores": 3.8674114438654614,
+      "redis_cpu_cores": 0.8780274788633146,
+      "point_scan_median_ms": 10.069083,
+      "point_scan_p95_ms": 29.957291,
+      "redis.request-wall-time": 174528.977737,
+      "redis.row-conversion-time": 1789.43587,
+      "redis.cursor.requests": 5000,
+      "input_bytes": 79264206,
+      "trino_cpu_ms": 2187.0,
+      "redis.exact-hash-reads": 0,
+      "redis.exact-hash-read-wait-time": 0.0,
+      "redis.exact-hash-read-batches": 0,
+      "max_point_p95_ms": 36.618166,
+      "range_elapsed_ms": [
+        21205.072959,
+        23329.07975
+      ],
+      "speedup": 3.8751380839861365
+    },
+    "q5": {
+      "elapsed_ms": 32630.167125,
+      "jvm_cpu_cores": 4.93541789733564,
+      "redis_cpu_cores": 0.877098602969536,
+      "point_scan_median_ms": 14.690209,
+      "point_scan_p95_ms": 34.410875,
+      "redis.request-wall-time": 218687.058694,
+      "redis.row-conversion-time": 12772.762102,
+      "redis.cursor.requests": 5000,
+      "input_bytes": 45000000,
+      "trino_cpu_ms": 12950.000000000002,
+      "redis.exact-hash-reads": 4829868,
+      "redis.exact-hash-read-wait-time": 193530.738681,
+      "redis.exact-hash-read-batches": 4855,
+      "max_point_p95_ms": 41.953208,
+      "range_elapsed_ms": [
+        31671.463542,
+        33862.450375
+      ],
+      "speedup": 3.045886351984169
+    },
+    "q6": {
+      "elapsed_ms": 23863.875959,
+      "jvm_cpu_cores": 3.109311124793045,
+      "redis_cpu_cores": 0.8944137170621734,
+      "point_scan_median_ms": 12.750042,
+      "point_scan_p95_ms": 41.367042,
+      "redis.request-wall-time": 173872.519618,
+      "redis.row-conversion-time": 1973.410006,
+      "redis.cursor.requests": 5000,
+      "input_bytes": 79264206,
+      "trino_cpu_ms": 3357.0,
+      "redis.exact-hash-reads": 0,
+      "redis.exact-hash-read-wait-time": 0.0,
+      "redis.exact-hash-read-batches": 0,
+      "max_point_p95_ms": 69.380167,
+      "range_elapsed_ms": [
+        23003.695042,
+        26983.195
+      ],
+      "speedup": 3.9078898947188416
+    },
+    "q3": {
+      "elapsed_ms": 4366.420583,
+      "jvm_cpu_cores": 0.07624334463046982,
+      "redis_cpu_cores": 1.0080276614647683,
+      "point_scan_median_ms": 236.410333,
+      "point_scan_p95_ms": 4071.820625,
+      "redis.request-wall-time": 4280.832125,
+      "redis.row-conversion-time": 0.411083,
+      "redis.cursor.requests": 0,
+      "input_bytes": 9,
+      "trino_cpu_ms": 4.0,
+      "redis.exact-hash-reads": 0,
+      "redis.exact-hash-read-wait-time": 0.0,
+      "redis.exact-hash-read-batches": 0,
+      "max_point_p95_ms": 4237.097375,
+      "range_elapsed_ms": [
+        4124.582959,
+        4502.701834
+      ],
+      "speedup": 1.008673399247761
+    }
+  }
+}

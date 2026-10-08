@@ -1,0 +1,15 @@
+{
+  "rows": 5000000,
+  "parquet_sha256": "78aecd305590b48cc3524ea93010eb0806a415de828478d261617383cd3a2eaf",
+  "q5": 1062330,
+  "q6": 610809,
+  "scan": 30167033,
+  "q3": 3094732,
+  "load_seconds": 31.31879970896989,
+  "projection": [
+    "ordinal (generated)",
+    "UserID",
+    "SearchPhrase",
+    "AdvEngineID"
+  ]
+}

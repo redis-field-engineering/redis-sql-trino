@@ -1,0 +1,27 @@
+{
+  "samples" : [ {
+    "splits" : 0,
+    "attempt" : 0,
+    "query" : "scan",
+    "result" : 30167033,
+    "elapsed_ms" : 99593.25,
+    "redis_cpu_cores" : 0.2600553953204638,
+    "point_idle_median_ms" : 2.85125,
+    "point_scan_median_ms" : 10.689917,
+    "point_scan_p95_ms" : 18.052292,
+    "point_samples" : 791,
+    "trino_cpu_ms" : 2241.0,
+    "jvm_cpu_cores" : 0.3194749644177693,
+    "input_bytes" : 79264206,
+    "source_worker_count" : 1,
+    "source_drivers" : 1,
+    "redis.exact-hash-read-batches" : 0,
+    "redis.request-wall-time" : 88179.407969,
+    "redis.exact-hash-reads" : 0,
+    "redis.row-conversion-time" : 1131.753924,
+    "redis.exact-hash-read-wait-time" : 0.0,
+    "redis.cursor.requests" : 5000,
+    "redis.aggregate.requests" : 1,
+    "redis.rows.received" : 5000000
+  } ]
+}

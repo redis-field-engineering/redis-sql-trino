@@ -137,10 +137,26 @@ public class RediSearchTranslator {
 	 */
 	public Aggregation aggregate(RediSearchTableHandle table, List<RediSearchColumnHandle> outputs,
 			Optional<RediSearchIndexInfo> indexInfo) {
+		return aggregate(table, outputs, indexInfo, Optional.empty());
+	}
+
+	public Aggregation aggregate(RediSearchTableHandle table, List<RediSearchColumnHandle> outputs,
+			Optional<RediSearchIndexInfo> indexInfo, Optional<RediSearchScanPartition> partition) {
+		partition.ifPresent(value -> {
+			com.google.common.base.Preconditions.checkArgument(RediSearchScanPartition.isDocumentScan(table),
+					"Cannot partition a global operation");
+			com.google.common.base.Preconditions.checkState(indexInfo.filter(info ->
+					RediSearchScanPartition.supported(info, value.field())).isPresent(),
+					"Partition field is no longer indexed NUMERIC: %s", value.field());
+		});
 		// Arithmetic the scan returns is computed by the reader, from the columns it refers to
 		List<RediSearchColumnHandle> columns = readColumns(outputs);
 		boolean computes = columns.size() != outputs.size() || !columns.equals(outputs);
 		String query = queryBuilder.buildQuery(table.getConstraint());
+		if (partition.isPresent()) {
+			query = query.equals("*") ? partition.get().query()
+					: "(" + query + ") (" + partition.get().query() + ")";
+		}
 		Map<String, List<String>> equalities = RediSearchQueryBuilder.equalities(table.getConstraint());
 		Optional<GroupBy> groupBy = queryBuilder.group(table);
 		// A scan reads the documents' values. Redis returns a NUMERIC field loaded by name formatted as a double, and

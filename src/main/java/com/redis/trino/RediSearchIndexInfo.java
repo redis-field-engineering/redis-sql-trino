@@ -54,12 +54,23 @@ public class RediSearchIndexInfo {
 		private final String identifier;
 		private final RediSearchFieldType type;
 		private final Optional<Character> separator;
+		private final boolean indexed;
 
 		public Field(String attribute, String identifier, RediSearchFieldType type, Optional<Character> separator) {
+			this(attribute, identifier, type, separator, true);
+		}
+
+		public Field(String attribute, String identifier, RediSearchFieldType type, Optional<Character> separator,
+				boolean indexed) {
+			this.indexed = indexed;
 			this.attribute = requireNonNull(attribute, "attribute is null");
 			this.identifier = requireNonNull(identifier, "identifier is null");
 			this.type = requireNonNull(type, "type is null");
 			this.separator = requireNonNull(separator, "separator is null");
+		}
+
+		public boolean isIndexed() {
+			return indexed;
 		}
 
 		/**
@@ -178,7 +189,10 @@ public class RediSearchIndexInfo {
 				String alias = string(attributeMap.get("attribute"));
 				RediSearchFieldType type = RediSearchFieldType.of(string(attributeMap.get("type")));
 				String name = alias == null ? identifier : alias;
-				fields.add(new Field(name, identifier == null ? name : identifier, type, separator(type, attributeMap)));
+				boolean indexed = !((List<?>) attribute).stream()
+						.flatMap(value -> value instanceof List<?> flags ? flags.stream() : java.util.stream.Stream.of(value))
+						.anyMatch(value -> "NOINDEX".equals(string(value)));
+				fields.add(new Field(name, identifier == null ? name : identifier, type, separator(type, attributeMap), indexed));
 			}
 		}
 		boolean indexing = number(info.get("indexing"), 0) != 0;
