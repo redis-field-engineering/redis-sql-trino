@@ -2,35 +2,164 @@
 :revnumber: {project-version}
 :docinfo1:
 
+[[introduction]]
 == Introduction
 
-{project-name} is a https://trino.io[Trino] connector which allows access to RediSearch data from Trino.
+{project-name} exposes Redis Query Engine indexes as tables in https://trino.io[Trino].
+Use SQL to read Redis hashes and JSON documents, join them with other Trino catalogs, and connect JDBC clients such as Tableau or Apache Superset.
+The connector can also create and modify hash-backed tables.
 
-This guide provides documentation and usage information across the following topics:
+Redis evaluates supported filters, aggregations and limits close to the data.
+Trino evaluates the remaining SQL, including joins, window functions and expressions the connector cannot translate exactly.
+An index is required: this connector discovers tables with `FT._LIST` and reads them with `FT.AGGREGATE` and cursors, rather than scanning the Redis keyspace.
 
-* <<Installation,Installation>>
-* <<Configuration,Configuration>>
-* <<sql-support,SQL support>>
-* <<Clients,Clients>>
-* <<Walkthrough,Walkthrough>>
+The connector name and configuration prefix remain `redisearch`, even though RediSearch is now called the Redis Query Engine.
+This guide describes the current connector source; use a release with the matching Trino version when installing it.
 
-== Installation
+* <<requirements,Requirements and compatibility>>
+* <<quick-start,Quick start with a released plugin>>
+* <<installation,Installation and upgrades>>
+* <<configuration,Configuration reference>>
+* <<existing-data,Querying existing HASH and JSON data>>
+* <<sql-support,SQL support and data types>>
+* <<execution,Execution, pushdown and numeric correctness>>
+* <<performance,Performance and parallel scans>>
+* <<clients,CLI, JDBC and visualization clients>>
+* <<troubleshooting,Troubleshooting>>
+* <<build,Building from source>>
+* <<Walkthrough,Single-node Linux walkthrough>>
 
-=== Trino
+[[requirements]]
+== Requirements and compatibility
 
-Trino installation instructions are available at https://trino.io/docs/current/installation.html[https://trino.io/docs/current/installation.html].
+[cols="1,3",options="header"]
+|===
+|Component |Requirement
+|Trino |{trino-version}. The connector uses Trino's plugin interface; do not assume a plugin built for another Trino release is compatible.
+|Java |64-bit Java 25, at least 25.0.1, for Trino {trino-version}. Use Eclipse Temurin for building this project; its Maven rules accept Temurin or Oracle. The stock Trino container includes its runtime.
+|Redis |A database with the Query Engine and working `FT._LIST`, `FT.INFO`, `FT.SEARCH`, `FT.AGGREGATE` and `FT.CURSOR` commands. HASH and JSON indexes are readable; creating and updating rows requires HASH indexes.
+|Network |The coordinator and every Trino worker must reach the Redis endpoint. With the OSS Cluster API enabled, they must also reach the addresses advertised by the cluster.
+|===
 
-=== RediSearch connector
+Redis Software and Redis Cloud RAM databases are the default development and benchmark targets.
+Redis 8 includes the Query Engine; the optional Open Source example uses `redis:8.4`.
+Redis Stack 7.x also includes Search and JSON, but some aggregation expressions need newer Query Engine capabilities.
+The connector probes support for `case()` before using the corresponding aggregation path; see <<aggregations,aggregation correctness>>.
 
-Download {project-url}/releases/latest[latest release] and unzip without any directory structure under:
+Flex is not supported on the targets recorded in the project's testing matrix.
+Redis Cloud Essentials Flex has no Query Engine, and the documented Cloud Pro Search-on-Flex beta lacks `FT.AGGREGATE` and NUMERIC fields, which this connector needs.
+The locally tested Redis Software Flex build also rejected required read and DDL operations.
+See {project-url}/blob/master/README.adoc#tested-deployment-matrix[the tested deployment matrix] for pinned versions, checks and limitations, and https://redis.io/docs/latest/operate/rc/databases/create-database/create-flex-database/[Redis's current Flex documentation] for product availability.
+A successful TCP connection or an advertised command alone does not establish connector compatibility.
 
-`<trino>/plugin/redisearch`
+[[quick-start]]
+== Quick start with a released plugin
 
-Create a RediSearch connector configuration file and change/add <<properties,properties>> as needed.
+This example runs Trino in Docker against an existing Redis Software or Redis Cloud RAM database with the Query Engine.
+It does not require a local JDK or Maven build.
+Use a disposable database for the write example below.
 
+. Download the release and unpack every plugin JAR into one directory:
++
+[source,console,subs="verbatim,attributes"]
+----
+mkdir -p redis-trino-demo/plugin redis-trino-demo/catalog
+cd redis-trino-demo
+curl -fL {project-url}/releases/download/v{project-version}/{artifact-id}-{project-version}.zip -o connector.zip
+unzip -j connector.zip -d plugin
+----
++
+These release URLs assume the guide was published with a release version.
+When building a snapshot, use <<build,the source build>> instead of a snapshot release URL.
+
+. Create `catalog/redisearch.properties`, replacing the endpoint and credentials:
++
+[source,properties]
+----
+connector.name=redisearch
+redisearch.uri=rediss://your-redis-endpoint:port
+redisearch.username=default
+redisearch.password=replace-with-your-password
+redisearch.cluster=false
+----
++
+Use `redis://` for a database without TLS.
+For a Redis Software database exposed on host port 12000, use `redis://host.docker.internal:12000`.
+A container's `localhost` refers to that container, not to the host or another container.
+Protect this file from other users and source control; see <<authentication,Authentication and TLS>>.
+
+. Start Trino with the plugin and catalog mounted:
++
+[source,console,subs="verbatim,attributes"]
+----
+docker run -d --name redis-trino-demo \
+  --add-host=host.docker.internal:host-gateway \
+  -p 127.0.0.1:8080:8080 \
+  -v "$PWD/plugin:/usr/lib/trino/plugin/redisearch:ro" \
+  -v "$PWD/catalog:/etc/trino/catalog:ro" \
+  trinodb/trino:{trino-version}
+----
++
+The HTTP endpoint is bound to the host's loopback interface for this local demo.
+Wait for `docker logs redis-trino-demo` to report that the server started, then open its bundled CLI:
++
+[source,console]
+----
+docker exec -it redis-trino-demo trino --catalog redisearch --schema default
+----
+
+. Check discovery and try a small table:
++
+[source,sql]
+----
+SHOW TABLES;
+CREATE TABLE guide_drinks (id VARCHAR, name VARCHAR, abv DOUBLE);
+INSERT INTO guide_drinks VALUES ('1', 'Test Ale', 5.5), ('2', 'Light Ale', 3.2);
+SELECT __key, name, abv FROM guide_drinks WHERE abv > 4;
+SELECT count(*), avg(abv) FROM guide_drinks;
+UPDATE guide_drinks SET abv = 5.7 WHERE id = '1';
+DELETE FROM guide_drinks WHERE id = '2';
+----
++
+The filtered query returns `Test Ale`; the first aggregate returns a count of `2` and an average of `4.35`.
+Each INSERT creates a new Redis hash with a generated key; `id` is an ordinary column, not a primary key.
+Do not rerun INSERT expecting it to replace rows.
+
+. Clean up the example table only after confirming it contains no data you want to keep:
++
+[source,sql]
+----
+DROP TABLE guide_drinks;
+----
++
+`DROP TABLE` deletes the index and its documents.
+Exit the CLI and remove the demo container with `docker rm -f redis-trino-demo`.
+The Redis database and the local plugin/catalog files remain.
+
+For the repository's Compose-based development environment and optional Open Source beers demo, see {project-url}/blob/master/README.adoc#quick-start[the README quick start].
+
+[[installation]]
+== Installation and upgrades
+
+Install Trino {trino-version} using https://trino.io/docs/current/installation/deployment.html[Trino's deployment instructions], or follow the <<Walkthrough,single-node Linux walkthrough>>.
+On every coordinator and worker, unpack the connector ZIP into `<trino>/plugin/redisearch` with all its JARs at that directory's top level.
+A container uses `/usr/lib/trino/plugin/redisearch`.
+Installing only the connector's own JAR leaves its dependencies missing.
+
+Create `etc/catalog/redisearch.properties` on each node (or `/etc/trino/catalog/redisearch.properties` in the stock container).
+The filename defines the catalog name: `analytics.properties` exposes `analytics.default.<index>`, while `connector.name=redisearch` stays the same.
+All nodes need matching plugin versions, catalog settings and readable certificate files.
+Restart the affected Trino nodes after installing the plugin or changing their static catalog configuration.
+
+For an upgrade, stop the node, replace the plugin directory's contents with the new distribution, and restart it.
+Do not overlay a new ZIP onto old dependency JARs.
+Back up catalog files separately and verify `SHOW TABLES`, `DESCRIBE` and representative reads before resuming workloads.
+An upgrade does not rewrite application keys or indexes.
+
+[[configuration]]
 == Configuration
 
-To configure the RediSearch connector, create a catalog properties file and change/add properties as needed.
+Catalog properties configure the connector at startup. The following is a minimal non-TLS local connection:
 
 .etc/catalog/redisearch.properties
 [source,properties]
@@ -41,12 +170,12 @@ redisearch.uri=redis://localhost:6379
 
 [[properties]]
 .Connector properties
-[cols="1,1,1"]
+[cols="2,4,1",options="header"]
 |===
 |Property name|Description|Default
 
 |`redisearch.default-schema-name`
-|The schema that contains all tables defined without a qualifying schema name.
+|Name of the single SQL schema containing the Redis indexes. This does not select a Redis logical database or key prefix.
 |`default`
 
 |`redisearch.case-insensitive-names`
@@ -54,11 +183,15 @@ redisearch.uri=redis://localhost:6379
 |`false`
 
 |`redisearch.cursor-count`
-|Number of rows read during each https://redis.io/docs/stack/search/reference/aggregations/#cursor-api[aggregation cursor] fetch.
+|Number of rows requested per https://redis.io/docs/latest/commands/ft.cursor-read/[aggregation cursor] batch. `0` uses the server's batch default; it does not cap the total query result.
 |`1000`
 
+|`redisearch.query-timeout-ms`
+|Redis aggregation timeout override in milliseconds. `0` leaves the server default unchanged. This does not replace Trino's query timeout; see <<timeouts,timeouts and result completeness>>.
+|`0`
+
 |`redisearch.narrow-scan-cursor-count`
-|Optional batch size for unbounded document scans of at most two input fields. Maximum 10000; 0 uses `cursor-count`. Applies to the initial request and later cursor reads. Larger batches increase response/hydration memory; only one cursor read is prefetched.
+|Optional batch size for unbounded document scans of at most two requested columns. Maximum 10000; 0 uses `cursor-count`. Applies to the initial request and later cursor reads. Larger batches increase response/hydration memory; only one cursor read is prefetched.
 |`0`
 
 |`redisearch.aggregation-group-limit`
@@ -99,7 +232,7 @@ redisearch.uri=redis://localhost:6379
 |===
 
 .Redis connection properties
-[cols="1,1,1"]
+[cols="2,4,1",options="header"]
 |===
 |Property name|Description|Default
 
@@ -128,7 +261,7 @@ redisearch.uri=redis://localhost:6379
 The RediSearch connector provides additional security options to support Redis servers with TLS mode.
 
 .TLS properties
-[cols="1,1,1"]
+[cols="2,4,1",options="header"]
 |===
 |Property name|Description|Default
 
@@ -153,63 +286,123 @@ The RediSearch connector provides additional security options to support Redis s
 |
 |===
 
-[[sql-support]]
-=== Parallel document scans
+[[authentication]]
+=== Authentication, TLS and cluster routing
 
-The connector uses Lettuce for Redis communication. Lettuce supports multiple CPU cores through Netty I/O event loops and computation thread pools.
-Its default pool sizes follow the available CPU count, with a minimum of two threads, unless configured otherwise.
-See https://redis.github.io/lettuce/advanced-usage/client-resources/[Lettuce client resources] for the threading settings.
-A physical connection processes its network events on one event loop; additional client threads do not automatically partition a query or create more Trino sources.
+Use `rediss://` to enable TLS; certificate properties alone do not change a `redis://` connection into a TLS connection.
+Set the ACL username and password with `redisearch.username` and `redisearch.password`, or use the authentication portion of a Redis URI.
+When a separate password is set, it overrides URI credentials; a separate username is applied with that password.
+Avoid putting passwords in shell history or committed configuration files.
+For deployments using Trino's secrets support, see https://trino.io/docs/current/security/secrets.html[Trino secrets management].
 
-[cols="1,2",options="header"]
-|===
-|Layer |Work it parallelizes
-|Lettuce |Redis network I/O and protocol decoding across connections.
-|Trino connector |Independent scan splits, each with a cursor, processed by separate Trino drivers/workers.
-|Redis Query Engine |Server-side query computation through query workers.
-|===
-
-The connector's existing connection pool supports concurrency between scans.
-Multiple splits let a single document scan use several connections and Trino source pipelines.
-Tune Redis query workers independently and measure the combined configuration; client-side parallelism alone does not determine server-side query concurrency.
-
-Automatic split selection is the default (`redisearch.scan-splits=0`).
-The planner targets at least 250,000 matching rows per split and selects the largest count allowed by the estimated CPU capacity (active Trino workers times coordinator CPU count), the connection pool (eight by default), and a hard ceiling of 64.
-Small tables and selective filters use one split. A filter's match count is checked before choosing parallelism.
-For HASH indexes, the planner examines up to three indexed NUMERIC fields, obtains their MIN/MAX in one bounded statistics query, and checks the counts of the proposed ranges.
-A field is rejected if one partition would contain at least 80% of the matching documents; the planner then tries another candidate.
-Discovery results, including unsupported cases, are cached for five minutes (up to 256 entries).
-Statistics queries have a ten-second server timeout and count probes have a one-second timeout; unavailable or partial statistics fall back to one split.
-The first scan can therefore pay a discovery cost; subsequent scans reuse its plan.
-MIN/MAX discovery is a server-side aggregate and can delay concurrent point traffic when Redis query workers are disabled; configured boundaries avoid this discovery work.
-This is a cost heuristic, not a guarantee of the optimal count under every load. Use the benchmark and explicit overrides when tuning a shared deployment.
-JSON arrays support explicit partition fields and cut points; automatic MIN/MAX discovery currently applies to HASH indexes.
-
-Set `redisearch.scan-splits=1` to force one source. To override automatic selection and supply known boundaries:
+A TLS connection with separate credentials can look like this:
 
 [source,properties]
 ----
-redisearch.scan-splits=4
-redisearch.scan-connections=4
-redisearch.scan-partition-field=ordinal
-redisearch.scan-partition-boundaries=1250000,2500000,3750000
+connector.name=redisearch
+redisearch.uri=rediss://redis.example.net:12000
+redisearch.username=analytics
+redisearch.password=${ENV:REDIS_ANALYTICS_PASSWORD}
+redisearch.cacert-path=/etc/trino/certs/redis-ca.pem
 ----
 
-This partitions one document scan into four Trino sources with independent cursors and distinct scan connection slots on each worker.
-The NUMERIC field must already be indexed; the connector does not alter the index. Explicit boundaries skip discovery.
-Choose cut points from the field's distribution; uneven partitions still return complete results but can limit the speedup.
-If fewer splits are allowed, the connector selects evenly spaced cut points from the configured list and merges the other intervals.
-The lowest partition includes values below the first cut and documents without an indexed value; the highest includes every value above the last cut.
-For multi-valued JSON, partitions use differences of nested range matches, so documents matching multiple ranges appear once.
-All partitions preserve static and dynamic filters. Each source rechecks its index schema before querying and fails if the partition field has become unsafe.
+The environment variable must exist in every Trino node's process.
+Omit `cacert-path` when the default trust configuration already trusts the server certificate.
+For mutual TLS, also configure `redisearch.cert-path` and `redisearch.key-path`, and `redisearch.key-password` when the private key is encrypted.
+Certificate paths refer to files inside the Trino runtime; mount them into containers on every node.
+`redisearch.insecure=true` disables peer verification and should be limited to controlled diagnostics.
 
-Pushed-down LIMIT, ORDER BY/top-N, grouping and reducers always use one split.
-Trino can still compute joins, unsupported expressions and exact DISTINCT from the parallel document sources.
-The normal cursor timeout, failure, exact BIGINT recovery and best-effort deletion behavior applies to each source.
-The pool bounds connections per worker; the split bound applies per query, not to the number of simultaneous queries.
-Configure Trino resource groups to bound overall analytical concurrency when sharing Redis with latency-sensitive traffic.
-Parallel scans do not provide snapshot isolation: keep the partition field stable during a scan, as moving a document across cut points during execution can cause omissions or repetitions.
+Set `redisearch.cluster=true` only when the database exposes the OSS Cluster API.
+A sharded Redis Software or Cloud database behind a single database endpoint can still use `cluster=false`; sharding alone does not imply cluster routing.
+Check the database's connection mode and advertised node addresses rather than deriving this setting from its shard count.
 
+An ACL must allow the index commands and access to the covered document keys.
+Discovery reads `FT._LIST`, `FT.INFO`, `FT.SEARCH` and `GET __trino:columns:<index>`; scans use `FT.AGGREGATE`, `FT.CURSOR` and, when needed, exact hash reads.
+Writes additionally need the hash/delete commands for their statements, and DDL needs `FT.CREATE`, `FT.ALTER` or `FT.DROPINDEX` plus access to the type metadata keys.
+Scope permissions to the indexes, document prefixes and operations the deployment uses, and test with the actual service account.
+Allowing `PING` alone is insufficient.
+
+=== Removed properties
+
+Do not carry `redisearch.default-limit` or `redisearch.table-cache-expiration` into a new catalog.
+Both are declared defunct and rejected at startup.
+The former silently capped scans; use a SQL `LIMIT` for an intentional result limit.
+Use `redisearch.table-cache-refresh` for metadata refresh.
+
+[[existing-data]]
+== Querying existing data
+
+Use Redis `FT.CREATE` to expose hashes or JSON documents your applications already write.
+`CREATE TABLE` creates a new HASH index with `SKIPINITIALSCAN`, so it is not the way to index an existing keyspace.
+Only indexed documents become SQL rows; unrelated Redis strings, lists and unindexed hashes do not appear as tables.
+
+=== HASH example
+
+Run these commands with a Redis CLI connected to your database, using an unused key prefix and index name:
+
+[source,console]
+----
+HSET guide:beer:1 id 1 name "Test Ale" abv 5.5
+HSET guide:beer:2 id 2 name "Light Ale" abv 3.2
+FT.CREATE guide_beers ON HASH PREFIX 1 guide:beer: SCHEMA id TAG name TEXT abv NUMERIC
+FT.INFO guide_beers
+----
+
+Wait until `FT.INFO` reports `indexing` as `0`, then query from the Trino CLI:
+
+[source,sql]
+----
+DESCRIBE redisearch.default.guide_beers;
+SELECT __key, name, abv
+FROM redisearch.default.guide_beers
+WHERE abv > 4;
+----
+
+`abv` reads as DOUBLE; `id` and `name` read as VARCHAR.
+NUMERIC filters can run in Redis.
+A TEXT field's SQL equality is exact string equality, not a request for arbitrary full-text matching; see <<filters,filter semantics>>.
+
+=== JSON example
+
+Create a JSON document and an index with explicit field aliases:
+
+[source,console]
+----
+JSON.SET guide:product:1 $ '{"sku":"A1","name":"Travel Mug","price":12.5}'
+FT.CREATE guide_products ON JSON PREFIX 1 guide:product: SCHEMA $.sku AS sku TAG $.name AS name TEXT $.price AS price NUMERIC
+FT.INFO guide_products
+----
+
+After background indexing finishes:
+
+[source,sql]
+----
+SELECT __key, sku, price, "$"
+FROM redisearch.default.guide_products
+WHERE price < 20;
+----
+
+The SQL columns use the aliases `sku`, `name` and `price`, rather than the JSON paths.
+The `"$"` column contains the full document as JSON text.
+Indexing a JSON array does not turn its elements into separate SQL rows; a row represents a document.
+Use Trino JSON functions to interpret document text when necessary.
+The connector does not insert or update JSON documents; `DELETE` and the delete branch of `MERGE` can remove them.
+
+=== Schema discovery and application changes
+
+An index's indexed fields define its primary set of SQL columns.
+The connector also samples the first 10 documents for unindexed fields; those columns are VARCHAR and are not a complete union of every document's fields.
+Use explicit indexed fields when a stable SQL schema matters.
+
+Metadata refresh is separate from row freshness.
+`redisearch.table-cache-refresh` refreshes index descriptions and saved types, not a cached copy of query results.
+Each query reads Redis; changes to existing fields do not require a schema version or a metadata refresh.
+A newly added field can remain absent from the cached schema until the background refresh completes.
+
+To remove only an example index while retaining its data, use `FT.DROPINDEX guide_beers` in Redis without `DD`.
+SQL `DROP TABLE` uses `DD` and deletes the documents too.
+
+[[sql-support]]
 == SQL support
 
 === Tables and columns
@@ -220,9 +413,9 @@ A table has these columns:
 * One per indexed field, named by its attribute (the `AS` name for JSON paths).
 * One per field that isn't indexed but appears in the first 10 documents returned by `FT.SEARCH <index> *`.
 * For JSON indexes, a `$` column holding the whole document as JSON text.
-* A hidden `__key` column holding the document's Redis key. Hidden columns are left out of `SELECT *`, so name it: `SELECT __key, * FROM beers`.
+* A hidden `+__key+` column holding the document's Redis key. Hidden columns are left out of `SELECT *`, so name it: `+SELECT __key, * FROM beers+`.
 
-[cols="1,1"]
+[cols="1,1",options="header"]
 .Type mapping
 |===
 |Redis field type |Trino type
@@ -247,7 +440,11 @@ Retry once `FT.INFO` reports `indexing` as `0`.
 
 === Statements
 
-[cols="1,2"]
+The catalog exposes one configured schema. `redisearch.default-schema-name` changes its name; it does not create or select a Redis database or key prefix.
+Use fully qualified `catalog.schema.table` names when a client has no default catalog/schema.
+
+
+[cols="1,2",options="header"]
 .Supported statements
 |===
 |Statement |Notes
@@ -302,8 +499,59 @@ These statements fail with a `This connector does not support \...` error:
 
 Writes also fail when fault-tolerant execution is enabled (`retry-policy` other than `NONE`).
 
+=== Writing rows and changing tables
+
+Use a dedicated key prefix for tables whose lifecycle Trino manages.
+A new table named `guide_orders` uses the index `guide_orders`, document prefix `guide_orders:` and type metadata key `__trino:columns:guide_orders`.
+
+[source,sql]
+----
+CREATE TABLE guide_orders (
+    order_id BIGINT,
+    customer VARCHAR,
+    amount DOUBLE,
+    ordered_at TIMESTAMP(3)
+);
+INSERT INTO guide_orders
+VALUES (1, 'Ada', 12.5, TIMESTAMP '2026-10-09 12:00:00');
+UPDATE guide_orders SET amount = 14.0 WHERE order_id = 1;
+SELECT __key, * FROM guide_orders WHERE order_id = 1;
+ALTER TABLE guide_orders ADD COLUMN note VARCHAR;
+----
+
+`ALTER TABLE ... ADD COLUMN` changes the index and saved type metadata, but does not populate the new field in existing hashes.
+Missing values read as SQL NULL.
+Adding an indexed field can trigger background reindexing; wait for it to finish before reading the table.
+
+INSERT sends one pipelined `HSET` per row, using a generated ULID key under the index's first prefix.
+A prefix without a trailing `:` has one appended; if no usable prefix is found, the writer uses `<table>:`.
+An INSERT into an externally created index therefore requires a compatible key prefix for its rows to be indexed.
+NULL values and omitted columns are not written.
+SQL columns do not declare Redis keys or enforce primary-key uniqueness.
+Two INSERTs with the same `order_id` create two hashes.
+UPDATE and MERGE match SQL predicates; they do not turn an ordinary ID column into a uniqueness constraint.
+
+Writes are not transactional across rows.
+A failed INSERT, UPDATE, DELETE or MERGE can leave completed Redis changes in place; retrying a write may add duplicates or repeat changes.
+Inspect the affected rows and application keys before retrying.
+Do not assume Trino rollback reverses all document writes.
+
+`CREATE TABLE AS SELECT` creates a HASH index and writes the selected rows using the same rules:
+
+[source,sql]
+----
+CREATE TABLE guide_orders_copy AS
+SELECT order_id, customer, amount, ordered_at FROM guide_orders;
+----
+
+Use `DROP TABLE guide_orders_copy` and `DROP TABLE guide_orders` only when you intend to delete their data.
+For externally owned indexes, removing an index without its documents must be done in Redis with `FT.DROPINDEX` without `DD`.
+
 [[create-table-types]]
-[cols="2,1,2"]
+=== Stored column types
+
+
+[cols="2,1,2",options="header"]
 .Column types in CREATE TABLE
 |===
 |Trino type |Index field |Stored in the hash as
@@ -346,62 +594,304 @@ NUMERIC fields still hold doubles for queries and aggregations in Redis: see <<p
 
 A value its column's type can't hold, such as `4.5` written by another client to a BIGINT column, fails the query with `Value '4.5' is not a valid bigint`.
 To read the table with the default types instead, delete the key (`DEL __trino:columns:<table>`); the first query after `redisearch.table-cache-refresh` seconds has the connector describe the table again, and the queries after it use the default types.
-The TAG fields aren't full-text TEXT fields.
+
+TAG fields created by the connector aren't full-text TEXT fields.
 They're `CASESENSITIVE` and split values into tags on the ASCII unit separator (`\x1f`) instead of `,`, so Redis can prefilter `=` and `IN` on values containing commas, and doesn't return rows that only differ in case.
 
+[[execution]]
+== Execution and correctness
+
+=== From SQL to Redis
+
+For a read, the coordinator resolves the index schema and saved Trino column types, then chooses operations that can be evaluated in Redis.
+Each worker source verifies that its index has finished background indexing and starts an `FT.AGGREGATE` request.
+Document scans load projected values; grouped queries use `GROUPBY` and `REDUCE`.
+`FT.CURSOR READ` fetches additional batches until the cursor is exhausted.
+The connector prefetches one cursor batch while Trino processes the previous batch, and attempts to delete a live cursor when a source closes.
+
+Large eligible document scans can create several sources through <<parallel-scans,parallel scan planning>>.
+Pushed-down limits, ordering and aggregations remain single-source operations.
+Trino applies remaining filters, joins, sorting and expressions to the returned rows.
+A query that cannot reduce rows in Redis can read every document in the index, even if its final result is small.
+
 [[pushdown]]
-=== Pushdown
+=== Pushdown overview
 
 Redis evaluates these parts of a query. Trino evaluates everything else on the rows Redis returns.
 
-* Filters on indexed fields, combined with `AND`:
-** `=`, `IN`, `<`, `\<=`, `>`, `>=` and `BETWEEN` on NUMERIC fields of BIGINT, INTEGER, SMALLINT, TINYINT, DOUBLE, REAL, DECIMAL, TIMESTAMP(3) and TIMESTAMP(3) WITH TIME ZONE columns.
-NUMERIC fields hold doubles. Large BIGINT equality/IN values (including short inclusive ranges Trino merges from adjacent IN values) use widened numeric envelopes, retaining exact residual verification in Trino. The envelopes include every matching signed 64-bit value and may include neighboring IDs. Large/unbounded unsafe BIGINT ranges, unsafe timestamp bounds, nullable domains and DECIMAL columns of more than 15 digits retain the existing fallback; no extra index is needed.
-Redis compares a REAL value as the double it parses from the text the connector writes, so `REAL '1.1'` as 1.1 rather than 1.100000023841858.
-** `=` and `IN` on TAG fields, as a tag query, for VARCHAR, CHAR, BOOLEAN, DATE and UUID columns, whose values are compared as the connector writes them (`true`, `2024-01-02`, a lowercase UUID).
-On DATE columns, a range of up to 1,000 days, such as `BETWEEN`, is queried as the list of its dates. Redis splits stored values into tags on the field's `SEPARATOR` (by default `,` on hashes and none on JSON), trims whitespace around each tag, and ignores case unless the field is `CASESENSITIVE`.
-It returns the documents with a tag that matches the value.
-A `FILTER` step then compares the field's value as a string and keeps the documents equal to it, for example `+FILTER 'exists(@style) && @style == "Wheat"'+`.
-On JSON indexes it compares the first of the values at the field's path, and a boolean as `1` or `0`, which is how the connector reads them.
-Scans read JSON documents with `DIALECT 3`, whose values `FILTER` can't compare, so the connector keeps the equal documents itself, and Trino applies the `LIMIT`.
-A TAG field indexes a JSON boolean as the tag `true` or `false`, so on JSON indexes Trino evaluates `=` and `IN` with the values `1` and `0`.
-Trino evaluates the filter alone when a value contains the separator, starts or ends with whitespace, or has a control character other than whitespace, since a tag query can't match it.
-** `=` and `IN` on TEXT fields, as a full-text query for the value's words. Redis returns the documents containing all of them, and the `FILTER` step keeps those equal to the value.
-Trino evaluates the filter alone when a value has only stop words, and for every TEXT field of an index created with its own `STOPWORDS`.
+[[filters]]
+==== Filters
+
+Indexed predicates combined with `AND` can run in Redis under the following rules.
+An approximate prefilter can reduce the rows sent to Trino while an exact residual filter remains in Trino.
+Limits and aggregates that would discard rows before that residual filter remain in Trino too.
+
+NUMERIC fields::
+`=`, `IN`, `<`, `+<=+`, `>`, `>=` and `BETWEEN` are eligible on numeric columns and millisecond timestamp columns.
+Redis indexes numbers as doubles.
+For large BIGINT equality and IN values, including short inclusive ranges produced by Trino's optimizer, the connector queries widened numeric ranges that include the exact IDs and can also include neighboring IDs.
+Trino then verifies the stored integers exactly.
+Unsafe large or unbounded BIGINT ranges, unsafe timestamp bounds, nullable domains and DECIMAL precision above 15 retain a Trino filter.
+Redis compares REAL values from their stored text (for example `1.1`), rather than the widened binary float (`1.100000023841858`).
+
+TAG fields::
+`=` and `IN` are eligible for VARCHAR, CHAR, BOOLEAN, DATE and UUID columns.
+The connector compares values in their stored representation: for example `true`, `2024-01-02` or a lowercase UUID.
+DATE ranges of at most 1,000 days can become a list of date tags.
 +
-Trino keeps the equal rows itself, instead of a `FILTER`, when a value has a control character, for fields whose names aren't made of letters, digits and `_`, and for CHAR columns, whose values the connector pads with spaces.
+Redis splits values using the field's separator, trims surrounding tag whitespace, and ignores case unless `CASESENSITIVE` is set.
+A tag match therefore does not always mean SQL equality.
+For an eligible HASH string, an additional exact `FILTER` keeps the equal values, such as `+FILTER 'exists(@style) && @style == "Wheat"'+`.
+A value containing the separator, leading/trailing whitespace or unsuitable control characters can require a Trino-only filter.
 +
-Redis can't match a missing field or compare strings, so Trino evaluates `IS NULL`, `IS NOT NULL`, a condition combined with `OR \... IS NULL`, and `<>`, `<`, `>` and `BETWEEN` on VARCHAR columns.
-+
-On HASH fields with supported property names, `LIKE '%literal%'` without additional `%`/`_` wildcards, an ESCAPE clause or literal control characters uses an exact `contains` filter before loading the full projection. Trino evaluates other LIKE shapes and JSON LIKE. A Redis wildcard query matches single words of a TEXT field, ignores case on a TAG field without `CASESENSITIVE`, and leaves out documents once it has matched `MAXEXPANSIONS` (200 by default) distinct values.
-* With `redisearch.aggregation-pushdown.enabled=true` (the default), `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, and `min` and `max` on TIMESTAMP(3) and TIMESTAMP(3) WITH TIME ZONE columns, with or without `GROUP BY`, as `FT.AGGREGATE` with `GROUPBY` and `REDUCE`.
-If any aggregate in a query can't be pushed down, such as `count(DISTINCT \...)` or `count(column)`, or Trino filters the rows itself, Trino computes all of them.
-`count(column)` skips nulls, but Redis's `COUNT` counts documents, so only `count(*)` is pushed down.
-`sum` and `avg` add up each document's value, or 0 for a document without one (`APPLY "case(exists(@x), @x, 0)"`), and count the values (`APPLY "exists(@x)"`); the connector returns null for a group with no values and divides each average itself.
-On a sharded database, Redis's own `SUM` and `AVG` return null for a group when one shard has none of its values, and `AVG` divides by the number of documents.
-`case()` needs Redis 8.2 or later, or unstable features enabled on Redis 8.0 and Redis Stack 7.4; without it, and for columns whose names aren't made of letters, digits and `_`, the connector sends `SUM` and `AVG`, which are right on a single shard.
-Redis computes on the double values of NUMERIC fields, and formats the results and the `GROUP BY` keys rounded to 12 significant digits unless they're integers.
-So for each DOUBLE or REAL result and key, and the sum each `avg` is divided from, `APPLY` steps also return it as an integer mantissa and exponent, which Redis formats in full, and the connector reads the exact double.
-Over RESP2 (`redisearch.resp2`, or a database without RESP3), the shards of a sharded database send these values to its coordinator already rounded, so Trino computes those aggregations.
-On a BIGINT column, results and keys are exact only for values and sums below 2^53.
-Trino groups DECIMAL columns itself, and DOUBLE and REAL columns whose names aren't made of letters, digits and `_`.
-Trino evaluates `HAVING` on the groups Redis returns.
-GROUP BY pushdown requires a known cached document count no greater than `redisearch.aggregation-group-limit`, since distinct cardinality is unknown. The count is an upper bound even for filtered queries. Cache staleness/index growth can still trigger a server error; failures are not replayed after delivering output.
-* `sum` and `avg` of arithmetic on hash indexes, such as `sum(quantity * extendedprice)`: `+`, `-`, `*`, `/` and unary `-` on DOUBLE NUMERIC columns, on integer NUMERIC columns cast to DOUBLE, and on DOUBLE constants.
-An `APPLY` step computes the arithmetic before `GROUPBY`, for the documents that have all of its columns (`+APPLY "case(exists(@quantity) && exists(@extendedprice), (@quantity * @extendedprice), 0)"+`), so it needs `case()` too.
-A scan that returns the arithmetic computes it in the connector, from the values as stored.
-Trino computes arithmetic on integers, which SQL fails on when it overflows, on REAL values, which Redis would compute as doubles, and `min` and `max` of arithmetic, since Trino orders nan above other doubles.
-* `LIMIT`, unless Trino filters the rows itself. Eligible numeric HASH TopN uses Redis SORTBY. Single-column TIMESTAMP(3) HASH TopN with NULLS LAST and LIMIT up to 1000 scans only keys/order values and retains exact candidates before pipelined HMGET hydration of their projected fields. Other sort shapes remain in Trino. Timestamp selection checks the configured query timeout over the entire scan and deletes a live cursor on failure; it emits no partial candidates. As with ordinary scans, concurrent writes have no snapshot guarantee.
+JSON scans use `DIALECT 3` and keep exact string matches in the connector instead of applying that Redis string FILTER; their limit remains in Trino.
+A JSON boolean TAG is indexed as `true`/`false`, while the connector reads it as `1`/`0`, so those equality and IN predicates stay in Trino.
+
+TEXT fields::
+An equality or IN predicate first finds documents containing the value's words, then applies an exact string FILTER where supported.
+A value made only of stop words, or a field on an index with custom `STOPWORDS`, retains a Trino-only filter.
+This is SQL equality, not an SQL interface to arbitrary Redis full-text query syntax.
+
+Other string predicates::
+Trino evaluates `IS NULL`, `IS NOT NULL`, predicates combined with `OR ... IS NULL`, and VARCHAR inequality or range comparisons.
+On eligible HASH field names, `LIKE '%literal%'` can use an exact Redis `contains` filter when the literal has no additional `%` or `_` wildcard, ESCAPE clause or control character.
+Other LIKE patterns and JSON LIKE remain in Trino.
+Redis wildcard matching alone is insufficient for SQL LIKE correctness: its word boundaries, case handling and expansion limits differ.
+
+For control characters, unsupported field names and padded CHAR comparisons, exact equality can remain in Trino even when Redis supplies a prefilter.
+Use `EXPLAIN` to check the chosen plan rather than assuming every indexed predicate is fully consumed.
+
+[[aggregations]]
+==== Aggregations
+
+When aggregation pushdown is enabled, eligible `count(*)`, `min`, `max`, `sum` and `avg` run through `FT.AGGREGATE`, `GROUPBY` and `REDUCE`.
+Numeric reducer inputs are REAL, DOUBLE and integer types; `min`/`max` also support TIMESTAMP(3) and TIMESTAMP(3) WITH TIME ZONE.
+DECIMAL reducers stay in Trino.
+If one aggregate in the same aggregation cannot be translated, or Trino must filter input rows itself, Trino computes that aggregation.
+
+`count(column)`, DISTINCT aggregates and filtered aggregates stay in Trino.
+Redis's COUNT counts documents, whereas SQL `count(column)` excludes NULL values.
+Trino also evaluates HAVING after the groups are returned.
+
+For supported SUM and AVG fields, the connector computes a sum of present values and their count using `case()` and `exists()` expressions.
+An empty group returns SQL NULL; AVG divides by the count of values, rather than the number of documents.
+This avoids Redis reducer behavior on sharded databases where a shard with no values can contaminate a sum or average.
+The `case()` path requires Redis 8.2 or later, or unstable features enabled on Redis 8.0/Stack 7.4; the connector probes it.
+Without that capability, or with an unsupported field name, the older native SUM/AVG path remains, which is correct for this null-handling case on one shard.
+Test sharded nullable data before relying on that older path.
+
+Redis computes on doubles and can format floating results and group keys rounded to 12 significant digits.
+For eligible DOUBLE/REAL outputs and keys, the connector also requests integer mantissa/exponent expressions and reconstructs the computed double.
+This preserves the Redis double result; it does not give arbitrary-precision decimal arithmetic.
+With RESP2, eligible floating aggregations stay in Trino because precision can be lost between shards before the coordinator replies.
+
+NUMERIC-backed BIGINT grouping stays in Trino so adjacent large integers do not collapse into one double group.
+DECIMAL grouping and floating grouping with unsupported field names also stay in Trino.
+Other pushed-down BIGINT computations are exact only within double's integer precision range; reading exact stored values does not recover precision already lost in an aggregate.
+Widened INTEGER/SMALLINT/TINYINT SUM inputs have conservative document-count bounds; an unknown or excessive count retains Trino computation.
+
+GROUP BY pushdown requires a known cached document count no greater than `redisearch.aggregation-group-limit`.
+That unfiltered count bounds the possible number of groups, even if WHERE is selective.
+Keep the configured budget within the server's `MAX_AGGREGATE_GROUPS` limit.
+Index growth after caching can still cause a server error; the query fails rather than replaying partially delivered output.
+Global aggregates have no GROUP BY cardinality budget.
+
+==== Arithmetic aggregates
+
+Eligible HASH expressions such as `sum(quantity * extendedprice)` and `avg(quantity * extendedprice)` use a Redis `APPLY` step before reducing.
+Supported operations are `+`, `-`, `*`, `/` and unary minus on DOUBLE NUMERIC inputs, integer NUMERIC inputs cast to DOUBLE, and DOUBLE constants.
+This path needs `case()` so that a missing input yields SQL NULL behavior.
+
+Expressions on integer types that must retain SQL overflow behavior, REAL arithmetic, and `min`/`max` of arithmetic stay in Trino.
+The latter also avoids differences in ordering NaN values.
+A document scan returning an eligible arithmetic expression computes it in the connector from the stored values.
+
+==== Limits and ordering
+
+`LIMIT` can run in Redis when an exact residual filter is not required in Trino.
+Without an `ORDER BY`, SQL does not guarantee which matching rows a limit returns.
+
+For HASH indexes, `ORDER BY ... LIMIT` uses Redis `SORTBY` when all sort keys are indexed NUMERIC columns of type DOUBLE, REAL, INTEGER, SMALLINT or TINYINT, with supported field names and `NULLS LAST`.
+Trino sorts the returned candidates to produce the final order.
+BIGINT and DECIMAL sort keys do not use this path because Redis double ordering can lose precision.
+JSON ordering stays in Trino.
+
+A separate HASH optimization supports one TIMESTAMP(3) sort key, `NULLS LAST`, and a limit of at most 1,000.
+It scans keys and exact order values, keeps a bounded set of candidates, and loads their projected fields with pipelined `HMGET` only after selection finishes.
+This reduces wide-row retrieval but still scans the matching keys.
+TIMESTAMP WITH TIME ZONE, multiple timestamp sort keys, larger limits and other null ordering remain in Trino.
+Selection checks the configured timeout over the scan and emits no candidates if it fails.
+
+==== Joins and optimizer statistics
+
+Trino executes joins, including joins between Redis and another catalog.
+For an eligible document scan, dynamic filtering adds join keys collected from the other side to the Redis query, using the same indexed-field rules as static filters.
+The scan can wait up to `redisearch.dynamic-filtering.wait-timeout` (20 seconds by default).
+Large dynamic domains are compacted with a threshold of 256, so a range prefilter can replace many individual values; Trino still evaluates the join.
+A pushed-down limit or aggregation does not use this document-scan dynamic filtering path.
+
+Table row-count statistics come from cached `FT.INFO num_docs` values.
+They help Trino choose join order and distribution, but do not estimate predicate selectivity: the filtered estimate can still be the whole index count.
+A missing or stale statistic affects planning; it does not intentionally cap the returned rows.
+
+[[timeouts]]
+=== Timeouts, incomplete results and retries
+
+`redisearch.query-timeout-ms` sets the per-query Redis aggregation timeout in milliseconds; `0` uses the server default.
+For example, `redisearch.query-timeout-ms=30000` requests 30 seconds.
+Trino query limits, Redis server policy and client connection/command timeouts remain separate constraints; a larger aggregation timeout does not remove them.
+Where the deployment permits it, configure Redis's timeout policy to fail instead of returning partial results, following https://redis.io/docs/latest/develop/ai/search-and-query/administration/configuration/[Redis Query Engine configuration].
+The connector rejects aggregation replies containing server warnings with `REDISEARCH_INCOMPLETE_RESULT`.
+
+A lost cursor-read reply fails with `REDISEARCH_CURSOR_REPLY_LOST` rather than replaying the read: Redis may already have consumed its batch.
+Restore server/network health and rerun the complete query.
+The connector can reconnect for later queries and performs bounded retries for idempotent cursor deletion, but does not resume a failed result stream.
+A client that has received rows before a later scan error must treat the query as failed and discard those rows.
+
+=== Read consistency
+
+Redis cursors and the connector's follow-up exact hash reads do not provide snapshot isolation.
+Concurrent updates or deletes can change the values observed during a scan.
+Parallel scans additionally require a stable partition field to avoid moving documents between ranges while they are read.
+For repeatable analytical checks, use a quiescent dataset or an isolated copy and compare complete query results.
+
+[[performance]]
+== Performance and concurrency
+
+=== Start with the execution plan
+
+Start with the defaults: aggregation pushdown enabled, automatic splits, eight scan connections per node and 1,000 rows per cursor batch.
+A selective query or supported aggregation usually benefits most from returning fewer rows from Redis.
+A full scan can instead be limited by network transfer, exact-value reads or conversion into Trino pages.
+Use `EXPLAIN` to see the chosen filters, limits, sort keys and aggregates, then `EXPLAIN ANALYZE` on a representative read to measure its execution.
+`EXPLAIN ANALYZE` executes the query.
+
+Connector source metrics include `redis.aggregate.requests`, `redis.cursor.requests`, `redis.rows.received`, `redis.exact-hash-reads`, `redis.request-wall-time` and `redis.row-conversion-time`.
+Inspect these alongside Redis CPU, query latency and Trino worker activity.
+Request wall time includes waiting and network time; it is not a measurement of Redis CPU time.
+
+For unbounded scans of at most two requested columns, `redisearch.narrow-scan-cursor-count` can reduce cursor round trips.
+Larger batches retain more rows in memory; test them with concurrent queries before adopting them.
+Selecting only needed columns also reduces work, although exact DOUBLE and DECIMAL HASH reads can require `LOAD *`.
+
+=== Sharing Redis with application traffic
+
+A pushed-down global aggregate must process all matching documents before returning its result.
+`WITHCURSOR COUNT` batches the output, not the global computation.
+More client connections or smaller batches do not by themselves remove server-side contention.
+Evaluate https://redis.io/docs/latest/operate/oss_and_stack/stack-with-enterprise/search/query-performance-factor/[Redis query performance factor] independently of connector scan splits.
+Additional query workers consume CPU and can increase overhead; measure the target workload.
+
+When large aggregates interfere with latency-sensitive traffic, compare this catalog setting:
+
+[source,properties]
+----
+redisearch.aggregation-pushdown.enabled=false
+----
+
+Trino then computes aggregates from document batches while supported filters still run in Redis.
+This transfers more rows and can make analytical queries slower.
+Use Trino resource groups to bound analytical concurrency, and measure application tail latency as well as SQL throughput.
+
+=== Benchmark evidence
+
+The repository retains timings and reproduction instructions rather than promising a workload-independent speedup.
+The README distinguishes historical CI timings, pre-v0.4.0 comparisons and newer full-data experiments.
+Treat each result as evidence for its pinned build, dataset, server configuration and concurrency.
+
+[cols="1,3",options="header"]
+|===
+|Report |Use it to examine
+|{project-url}/blob/master/benchmarks/issue-115/README.adoc[Aggregation contention] |Point-query latency while analytical aggregations run, and query-worker tradeoffs.
+|{project-url}/blob/master/benchmarks/issue-142/README.adoc[Parallel scans] |Partitioned scan throughput and single-source comparisons.
+|{project-url}/blob/master/benchmarks/qpf/README.adoc[QPF, splits and concurrency] |A controlled 5-million-row Redis Software run across query-worker, split and client-count settings.
+|{project-url}/blob/master/clickbench.md[ClickBench results] |Query coverage, correctness, full-data timings and retained evidence.
+|===
+
+[[parallel-scans]]
+=== Parallel document scans
+
+The connector uses Lettuce for Redis communication. Lettuce supports multiple CPU cores through Netty I/O event loops and computation thread pools.
+Its default pool sizes follow the available CPU count, with a minimum of two threads, unless configured otherwise.
+See https://redis.github.io/lettuce/advanced-usage/client-resources/[Lettuce client resources] for the threading settings.
+A physical connection processes its network events on one event loop; additional client threads do not automatically partition a query or create more Trino sources.
+
+[cols="1,2",options="header"]
+|===
+|Layer |Work it parallelizes
+|Lettuce |Redis network I/O and protocol decoding across connections.
+|Trino connector |Independent scan splits, each with a cursor, processed by separate Trino drivers/workers.
+|Redis Query Engine |Server-side query computation through query workers.
+|===
+
+The connector's existing connection pool supports concurrency between scans.
+Multiple splits let a single document scan use several connections and Trino source pipelines.
+Tune Redis query workers independently and measure the combined configuration; client-side parallelism alone does not determine server-side query concurrency.
+
+Automatic split selection is the default (`redisearch.scan-splits=0`).
+The planner targets at least 250,000 matching rows per split and selects the largest count allowed by the estimated CPU capacity (active Trino workers times coordinator CPU count), the connection pool (eight by default), and a hard ceiling of 64.
+Small tables and selective filters use one split. A filter's match count is checked before choosing parallelism.
+For HASH indexes without explicit boundaries, the planner examines up to three indexed NUMERIC fields, obtains their MIN/MAX in one bounded statistics query, and checks the counts of the proposed ranges.
+A field is rejected if one partition would contain at least 80% of the matching documents; the planner then tries another candidate.
+
+Discovery results, including unsupported cases, are cached for five minutes (up to 256 entries).
+Statistics queries have a ten-second server timeout and count probes have a one-second timeout; unavailable or partial statistics fall back to one split.
+The first scan can therefore pay a discovery cost; subsequent scans can reuse discovery results.
+Selective-filter count probes still run before the discovery cache is consulted, so a cached plan does not eliminate all planning requests.
+
+MIN/MAX discovery is a server-side aggregate and can delay concurrent point traffic when Redis query workers are disabled; configured boundaries avoid this discovery work.
+This is a cost heuristic, not a guarantee of the optimal count under every load. Use the benchmark and explicit overrides when tuning a shared deployment.
+JSON arrays support explicit partition fields and cut points; automatic MIN/MAX discovery currently applies to HASH indexes.
+
+Set `redisearch.scan-splits=1` to force one source. To override automatic selection and supply known boundaries:
+
+[source,properties]
+----
+redisearch.scan-splits=4
+redisearch.scan-connections=4
+redisearch.scan-partition-field=ordinal
+redisearch.scan-partition-boundaries=1250000,2500000,3750000
+----
+
+This partitions one document scan into four Trino sources with independent cursors and distinct scan connection slots on each worker.
+The NUMERIC field must already be indexed; the connector does not alter the index. Explicit boundaries skip discovery.
+Choose cut points from the field's distribution; uneven partitions still return complete results but can limit the speedup.
+If fewer splits are allowed, the connector selects evenly spaced cut points from the configured list and merges the other intervals.
+
+The lowest partition includes values below the first cut and documents without an indexed value; the highest includes every value above the last cut.
+For multi-valued JSON, partitions use differences of nested range matches, so documents matching multiple ranges appear once.
+All partitions preserve static and dynamic filters. Each source rechecks its index schema before querying and fails if the partition field has become unsafe.
+
+Pushed-down LIMIT, ORDER BY/top-N, grouping and reducers always use one split.
+Trino can still compute joins, unsupported expressions and exact DISTINCT from the parallel document sources.
+The normal cursor timeout, failure, exact BIGINT recovery and best-effort deletion behavior applies to each source.
+
+The pool bounds connections per worker; the split bound applies per query, not to the number of simultaneous queries.
+Configure Trino resource groups to bound overall analytical concurrency when sharing Redis with latency-sensitive traffic.
+Parallel scans do not provide snapshot isolation: keep the partition field stable during a scan, as moving a document across cut points during execution can cause omissions or repetitions.
+
 
 [[known-limitations]]
-=== Known limitations
+== Limitations
+
+The statement and pushdown references above describe the supported paths.
+Additional limits to keep in mind:
+
+* Redis Query Engine indexes define the table set; arbitrary keyspace structures are not SQL tables.
+* JSON writes are limited to document deletion; INSERT and UPDATE require HASH indexes.
+* GEO, GEOSHAPE and VECTOR fields read as VARCHAR. This connector does not translate SQL into native geospatial or vector-similarity queries.
+* Type discovery samples unindexed fields and does not infer an exhaustive schema from every document.
+* NUMERIC indexing and Redis aggregation use doubles; stored-value recovery does not make every pushed-down numeric computation exact.
+* Scans are not snapshots, and writes do not provide multi-row atomicity or automatic rollback of completed changes.
+* Flex limitations are deployment-specific and require execution-level validation before support can be claimed.
 
 Queries known to return wrong results or fail are tracked as {project-url}/issues?q=is%3Aissue+is%3Aopen+label%3Abug[open issues labeled bug].
 
 
+[[clients]]
 == Clients
 
-=== JDBC Driver
+=== JDBC driver
 
 The Trino JDBC driver allows users to access Trino from Java-based applications, and other non-Java applications running in a JVM.
 
@@ -411,45 +901,122 @@ The following is an example of a JDBC URL used to create a connection to {projec
 
 [source]
 ----
-jdbc:trino://example.net:8080/redisearch/default
+jdbc:trino://localhost:8080/redisearch/default
 ----
 
-=== Tableau
+The connection targets Trino, which then connects to Redis.
+The path selects the catalog and schema; change `redisearch` if you used another catalog filename.
+Use a JDBC driver matching the Trino server version for this deployment.
+For a secured Trino endpoint, configure the driver's TLS and authentication options separately from the Redis catalog's credentials.
 
-Refer to the https://help.tableau.com/current/pro/desktop/en-us/examples_presto.htm[Tableau documentation] for setup instructions.
+=== Tableau and other visualization clients
+
+Configure a supported Trino/Presto connection to the Trino coordinator host and port, then choose the Redis catalog and its configured schema.
+Redis's database port is not a JDBC endpoint.
+Refer to the https://help.tableau.com/current/pro/desktop/en-us/examples_presto.htm[Tableau connection instructions] for the driver's installation and connection fields.
+For Apache Superset or another SQL client, use its Trino integration and the same catalog/schema.
+Validate an ordinary SELECT in the Trino CLI first so that driver setup can be diagnosed separately from connector or Redis errors.
 
 === Trino CLI
 
-Refer to the https://trino.io/docs/current/client/cli.html[Trino CLI documentation] for setup instructions.
+Use the CLI bundled with the stock container, or download the executable CLI JAR for Trino {trino-version}.
+For a locally installed CLI:
 
-== Build
+[source,console]
+----
+trino --server http://localhost:8080 --catalog redisearch --schema default
+----
 
-Run these commands to build the Trino connector for RediSearch from source (requires Java 25+):
+[source,sql]
+----
+SHOW CATALOGS;
+SHOW SCHEMAS FROM redisearch;
+SHOW TABLES FROM redisearch.default;
+DESCRIBE redisearch.default.guide_beers;
+EXPLAIN SELECT name, abv FROM redisearch.default.guide_beers WHERE abv > 4;
+----
+
+The last two statements require the <<existing-data,example index>> or an equivalent table of your own.
+See https://trino.io/docs/current/client/cli.html[the Trino CLI reference] for TLS, authentication and output options.
+
+[[troubleshooting]]
+== Troubleshooting
+
+Start by identifying the failing layer: Trino startup, catalog discovery, query execution or the external client.
+Check Trino's startup log, query failure message and Redis endpoint reachability from the affected node.
+Test Redis commands with the same endpoint, TLS mode and service account used by Trino.
+Keep credentials out of diagnostic logs and shared reports.
+
+[cols="2,3",options="header"]
+|===
+|Symptom |What to check
+|Catalog fails to start |Confirm Trino {trino-version}, Java 25, all plugin dependency JARs and valid properties. Remove defunct settings. Check that each node sees the same catalog and certificates.
+|`Unknown command FT._LIST` or `FT.AGGREGATE` |Confirm the database has a compatible Query Engine. Plain Redis without Search and the documented Flex variants cannot satisfy these paths.
+|`SHOW TABLES` is empty |Check `FT._LIST` using the service account. Keys without an index do not create SQL tables. Check the catalog, schema and configured case matching.
+|Table exists but expected rows are absent |Inspect its key prefix, HASH/JSON key type and `FT.INFO num_docs`. `CREATE TABLE` skips the initial scan of existing keys. INSERT does not derive keys from ID columns.
+|`REDISEARCH_INDEX_NOT_READY` |Wait for `FT.INFO indexing=0`; inspect indexing failures and percent indexed if it does not finish. Do not disable the guard to accept incomplete results.
+|New columns do not appear |Check the index schema and saved type key, then allow the background metadata refresh to complete. The default refresh interval is 60 seconds; `0` disables caching.
+|`NOPERM`, authentication or TLS failure |Check both command/key permissions and credentials. Use `rediss://` for TLS; mount trusted CA/client certificate files at the configured paths on each node.
+|Cluster connection fails |Enable `redisearch.cluster` only for an OSS Cluster API endpoint, and verify every advertised node address is reachable from Trino.
+|Timeout or `REDISEARCH_INCOMPLETE_RESULT` |Inspect server warnings, load and timeout policy. Choose an appropriate query timeout; reject partial results and rerun the whole query after addressing the cause.
+|`REDISEARCH_SHARD_TOPOLOGY_UNAVAILABLE` |Check Redis coordinator and shard health; compare a fresh direct connection to the same database. Retry the complete query after topology health is restored.
+|`REDISEARCH_CURSOR_REPLY_LOST` |A cursor read may have consumed rows before its reply was lost. Restore connection health, discard the failed result and rerun the whole query rather than replaying a batch.
+|GROUP BY fails at the server limit |Keep `redisearch.aggregation-group-limit` within the server's group budget. Cache staleness or table growth can outgrow a previously valid plan. Disable aggregation pushdown to compare a Trino aggregation plan.
+|Unexpected type or invalid value |Check `__trino:columns:<index>` and values written by other clients. A saved BIGINT column containing `4.5` is an error, not a silently truncated integer.
+|SQL is slow but returns few rows |Use `EXPLAIN` to check for residual filters, unsupported aggregates or sorts. A small final output can still require a full scan. Compare source metrics and Redis/Trino CPU before changing batch or split settings.
+|===
+
+For a report, include connector and Trino versions, Redis/Search versions, HASH versus JSON, connection mode, a redacted catalog, the failing SQL and its plan/error, and a small reproducible dataset.
+Include concurrency and timeout settings for performance or intermittent failures.
+File the report in {project-url}/issues[the project issue tracker].
+
+[[build]]
+== Building from source
+
+Run these commands to build the Trino connector for RediSearch from source (requires Eclipse Temurin or Oracle JDK 25):
 
 [source,console,subs="verbatim,attributes"]
 ----
 git clone {project-url}.git
-cd {project-name}
+cd {github-repo}
 ./mvnw clean package -DskipTests
 ----
 
+The distribution is `target/{artifact-id}-{project-version}.zip`; the unpacked plugin directory is `target/{artifact-id}-{project-version}/`.
+The build above skips tests.
+Run `./mvnw test` with Docker available for the integration suite; the default test environment provisions Redis Software.
+The README's {project-url}/blob/master/README.adoc#building-from-source[build and benchmark instructions] describe profiles for alternate Redis targets and the query benchmark.
+A source build uses the version in `pom.xml`, which can differ from the release version printed in this published guide.
+Set `REDIS_SQL_TRINO_VERSION` to the actual built version before using the repository's Compose file, rather than relying on its default directory name.
+
+Generate this guide's HTML and PDF without running connector tests:
+
+[source,console]
+----
+./mvnw process-resources
+----
+
+Outputs are written to `target/generated-docs/`.
+The repository's Publish workflow builds this same source with a release version and deploys that directory to GitHub Pages.
 
 [[Walkthrough]]
-== Complete Walkthrough
+== Single-node Linux walkthrough
 
-Follow these step-by-step instructions to deploy a single-node Trino server on Ubuntu.
+This walkthrough installs a single-node Trino server from the release archives on Linux.
+It assumes an existing Query Engine database.
+Create the installation and data directories with administrator help if needed, then give the Trino service user read access to the installation and write access to the data directory.
+For a local trial with fewer host dependencies, use the <<quick-start,Docker quick start>>.
 
 === Install Java
 
 Trino requires a 64-bit version of Java 25.
-It is recommended to use https://www.azul.com/downloads/?package=jdk[Azul Zulu] as the JDK.
+Use https://adoptium.net/[Eclipse Temurin] Java 25, at least 25.0.1, consistent with Trino and the project build.
+Confirm that `JAVA_HOME` and `java` point to that JDK; Java 26 is not a supported substitute.
+See https://trino.io/docs/current/installation/deployment.html[Trino deployment requirements].
 
 [source,console]
 ----
-$ java -version
-openjdk version "25.0.1" 2025-10-21 LTS
-OpenJDK Runtime Environment Zulu25.30+17-CA (build 25.0.1+8-LTS)
-OpenJDK 64-Bit Server VM Zulu25.30+17-CA (build 25.0.1+8-LTS, mixed mode, sharing)
+java -version
 ----
 
 === Set up Trino
@@ -459,7 +1026,7 @@ Download the Trino server tarball and unpack it.
 [source,console,subs="verbatim,attributes"]
 ----
 wget https://repo1.maven.org/maven2/io/trino/trino-server/{trino-version}/trino-server-{trino-version}.tar.gz
-mkdir {trino-dir}
+mkdir -p {trino-dir}
 tar xzvf trino-server-{trino-version}.tar.gz --directory {trino-dir} --strip-components 1
 ----
 
@@ -476,7 +1043,7 @@ Create an `etc` directory inside the installation directory to hold configuratio
 
 [source,console,subs="verbatim,attributes"]
 ----
-mkdir {trino-dir}/etc
+mkdir -p {trino-dir}/etc
 ----
 
 Create a `node.properties` file.
@@ -484,20 +1051,20 @@ Create a `node.properties` file.
 .{trino-dir}/etc/node.properties
 [source,properties,subs="verbatim,attributes"]
 ----
-node.environment=production
-node.id=ffffffff-ffff-ffff-ffff-ffffffffffff
+node.environment=demo
+node.id=redis-trino-demo-1
 node.data-dir={trino-datadir}
 ----
 
 Create a JVM config file.
+The following uses a 4 GiB heap for a small trial; the host needs additional memory for native allocations, the operating system and other services.
+Size production heaps using Trino's deployment guidance.
 
 .{trino-dir}/etc/jvm.config
 [source,console]
 ----
 -server
--Xmx16G
--XX:InitialRAMPercentage=80
--XX:MaxRAMPercentage=80
+-Xmx4G
 -XX:G1HeapRegionSize=32M
 -XX:+ExplicitGCInvokesConcurrent
 -XX:+ExitOnOutOfMemoryError
@@ -512,6 +1079,8 @@ Create a JVM config file.
 ----
 
 Create a config properties file.
+This node acts as both coordinator and worker.
+The example HTTP endpoint has no authentication; use it only on a trusted local network and configure https://trino.io/docs/current/security/overview.html[Trino security] before exposing it to other users.
 
 .{trino-dir}/etc/config.properties
 [source,properties]
@@ -544,7 +1113,7 @@ Create a etc/catalog subdirectory:
 
 [source,console,subs="verbatim,attributes"]
 ----
-mkdir {trino-dir}/etc/catalog
+mkdir -p {trino-dir}/etc/catalog
 ----
 
 Create a RediSearch connector configuration file:
@@ -569,18 +1138,20 @@ Start the Trino server:
 
 === Run Trino CLI
 
-Download and run https://repo1.maven.org/maven2/io/trino/trino-cli/{trino-version}/trino-cli-{trino-version}-executable.jar[trino-cli-{trino-version}-executable.jar]:
+Download and run the CLI as the current user:
 
 [source,console,subs="verbatim,attributes"]
 ----
-wget https://repo1.maven.org/maven2/io/trino/trino-cli/{trino-version}/trino-cli-{trino-version}-executable.jar -O /usr/local/bin/trino
-chmod +x /usr/local/bin/trino
-trino --catalog redisearch --schema default
+wget https://repo1.maven.org/maven2/io/trino/trino-cli/{trino-version}/trino-cli-{trino-version}-executable.jar -O ./trino
+chmod +x ./trino
+./trino --catalog redisearch --schema default
 ----
 
-Run a SQL query:
+List tables and run a SQL query:
 
-[source,console]
+[source,sql]
 ----
-trino:default> select * from mySearchIndex;
+SHOW TABLES;
+-- Replace guide_beers with an index present in your database.
+SELECT __key, * FROM guide_beers LIMIT 10;
 ----
