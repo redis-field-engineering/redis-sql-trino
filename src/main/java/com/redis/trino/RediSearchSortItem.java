@@ -37,11 +37,16 @@ public class RediSearchSortItem {
 
 	private final String column;
 	private final boolean ascending;
+	private final boolean local;
+
+	public RediSearchSortItem(String column, boolean ascending) { this(column, ascending, false); }
 
 	@JsonCreator
-	public RediSearchSortItem(@JsonProperty("column") String column, @JsonProperty("ascending") boolean ascending) {
+	public RediSearchSortItem(@JsonProperty("column") String column, @JsonProperty("ascending") boolean ascending,
+			@JsonProperty("local") boolean local) {
 		this.column = requireNonNull(column, "column is null");
 		this.ascending = ascending;
+		this.local = local;
 	}
 
 	@JsonProperty
@@ -54,6 +59,9 @@ public class RediSearchSortItem {
 		return ascending;
 	}
 
+	@JsonProperty
+	public boolean isLocal() { return local; }
+
 	@Override
 	public boolean equals(Object obj) {
 		if (this == obj) {
@@ -63,12 +71,12 @@ public class RediSearchSortItem {
 			return false;
 		}
 		RediSearchSortItem other = (RediSearchSortItem) obj;
-		return column.equals(other.column) && ascending == other.ascending;
+		return column.equals(other.column) && ascending == other.ascending && local == other.local;
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(column, ascending);
+		return Objects.hash(column, ascending, local);
 	}
 
 	@Override

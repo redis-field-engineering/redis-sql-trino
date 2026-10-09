@@ -28,7 +28,7 @@ public class TestConfig {
                 .setScanSplits(0).setScanPartitionField(null).setScanPartitionBoundaries(java.util.List.of())
 				.setTableCacheRefresh(RediSearchConfig.DEFAULT_TABLE_CACHE_REFRESH.toSeconds()).setCluster(false)
 				.setCaCertPath(null).setKeyPassword(null).setKeyPath(null).setCertPath(null)
-				.setAggregationPushdownEnabled(true)
+				.setNarrowScanCursorCount(0).setAggregationGroupLimit(1000000).setAggregationPushdownEnabled(true)
 				.setDynamicFilteringEnabled(true)
 				.setDynamicFilteringWaitTimeout(RediSearchConfig.DEFAULT_DYNAMIC_FILTERING_WAIT_TIMEOUT));
 	}
@@ -41,6 +41,7 @@ public class TestConfig {
 				.put("redisearch.default-schema-name", defaultSchema).put("redisearch.resp2", "true")
 				.put("redisearch.aggregation-pushdown.enabled", "false")
 				.put("redisearch.query-timeout-ms", "1200000")
+				.put("redisearch.narrow-scan-cursor-count", "10000").put("redisearch.aggregation-group-limit", "100")
 				.put("redisearch.scan-splits", "8").put("redisearch.scan-partition-field", "id")
                 .put("redisearch.scan-partition-boundaries", "0,10,100")
                 .put("redisearch.scan-connections", "2").put("redisearch.dynamic-filtering.enabled", "false").put("redisearch.dynamic-filtering.wait-timeout", "3s")
@@ -59,6 +60,8 @@ public class TestConfig {
         assertThat(config.getScanPartitionField()).isEqualTo("id");
         assertThat(config.getScanPartitionBoundaries()).containsExactly(0.0, 10.0, 100.0);
 		assertThat(config.getQueryTimeoutMillis()).isEqualTo(1200000);
+		assertThat(config.getNarrowScanCursorCount()).isEqualTo(10000);
+		assertThat(config.getAggregationGroupLimit()).isEqualTo(100);
 		assertThat(config.isAggregationPushdownEnabled()).isFalse();
 		assertThat(config.isDynamicFilteringEnabled()).isFalse();
 		assertThat(config.getDynamicFilteringWaitTimeout()).isEqualTo(new Duration(3, TimeUnit.SECONDS));

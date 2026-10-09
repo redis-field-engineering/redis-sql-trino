@@ -72,6 +72,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	private final RediSearchRowReader reader;
 	private final RediSearchReadStats stats = new RediSearchReadStats();
 	private Iterator<String[]> rows;
+	private long batchRetainedBytes;
 	// The cursor the batches are read from, until one exhausts it
 	private Optional<Cursor> cursor;
 	// The reads of the next batches, oldest first
@@ -108,6 +109,11 @@ public class RediSearchPageSource implements ConnectorPageSource {
 
 	private void start(RediSearchSession.AggregateResult batch) {
 		rows = batch.getRows().iterator();
+		batchRetainedBytes = io.airlift.slice.SizeOf.estimatedSizeOf(batch.getRows(), row -> {
+			long bytes = io.airlift.slice.SizeOf.sizeOf(row);
+			for (String value : row) { bytes += io.airlift.slice.SizeOf.estimatedSizeOf(value); }
+			return bytes;
+		});
 		cursor = batch.getCursor();
 		if (cursor.isEmpty()) {
 			// Exhausted, and gone: the reads sent after this batch's fail ("Cursor not found"), and have no rows
@@ -125,7 +131,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	private void readAhead(Optional<Cursor> current) {
 		current.ifPresent(next -> {
 			while (reads.size() < READS_AHEAD) {
-				reads.add(session.cursorReadAsync(connection, table, next, stats));
+				reads.add(session.cursorReadAsync(connection, table, next, stats, reader.getCursorCount()));
 			}
 		});
 	}
@@ -133,6 +139,11 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	@Override
 	public long getCompletedBytes() {
 		return completedBytes;
+	}
+
+	@Override
+	public long getMemoryUsage() {
+		return batchRetainedBytes + pageBuilder.getRetainedSizeInBytes();
 	}
 
 	@Override
@@ -168,6 +179,8 @@ public class RediSearchPageSource implements ConnectorPageSource {
 				CompletableFuture<AggregationReply<String>> next = reads.peek();
 				if (next == null) {
 					finished = true;
+					batchRetainedBytes = 0;
+					rows = java.util.Collections.emptyIterator();
 					break;
 				}
 				if (!next.isDone()) {
@@ -218,6 +231,8 @@ public class RediSearchPageSource implements ConnectorPageSource {
 		reads.clear();
 		cursor = Optional.empty();
 		exactReader.close();
+		batchRetainedBytes = 0;
+		rows = java.util.Collections.emptyIterator();
 	}
 
 	static void deleteAfterReads(List<CompletableFuture<AggregationReply<String>>> pending, Runnable delete) {

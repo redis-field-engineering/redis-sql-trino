@@ -28,6 +28,7 @@ import static java.util.Objects.requireNonNull;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Map;
 import java.util.OptionalLong;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
@@ -50,10 +51,17 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	private final List<RediSearchAggregation> aggregations;
 	// A pushed-down ORDER BY, which keeps the first limit documents
 	private final List<RediSearchSortItem> sort;
+	private final Map<String, String> filters;
 
 	public RediSearchTableHandle(SchemaTableName schemaTableName, String index) {
 		this(schemaTableName, index, TupleDomain.all(), OptionalLong.empty(), Collections.emptyList(),
 				Collections.emptyList(), Collections.emptyList());
+	}
+
+	public RediSearchTableHandle(SchemaTableName schemaTableName, String index, TupleDomain<ColumnHandle> constraint,
+			OptionalLong limit, List<RediSearchAggregationTerm> terms, List<RediSearchAggregation> metrics,
+			List<RediSearchSortItem> sort) {
+		this(schemaTableName, index, constraint, limit, terms, metrics, sort, Map.of());
 	}
 
 	@JsonCreator
@@ -62,7 +70,8 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 			@JsonProperty("limit") OptionalLong limit,
 			@JsonProperty("aggTerms") List<RediSearchAggregationTerm> termAggregations,
 			@JsonProperty("aggregates") List<RediSearchAggregation> metricAggregations,
-			@JsonProperty("sort") List<RediSearchSortItem> sort) {
+			@JsonProperty("sort") List<RediSearchSortItem> sort,
+			@JsonProperty("filters") Map<String, String> filters) {
 		this.schemaTableName = requireNonNull(schemaTableName, "schemaTableName is null");
 		this.index = requireNonNull(index, "index is null");
 		this.constraint = requireNonNull(constraint, "constraint is null");
@@ -70,26 +79,39 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 		this.aggregationTerms = requireNonNull(termAggregations, "aggTerms is null");
 		this.aggregations = requireNonNull(metricAggregations, "aggregates is null");
 		this.sort = requireNonNull(sort, "sort is null");
+		this.filters = Map.copyOf(requireNonNull(filters, "filters is null"));
 	}
 
 	public RediSearchTableHandle withConstraint(TupleDomain<ColumnHandle> constraint) {
-		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort);
+		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort, filters);
 	}
 
 	public RediSearchTableHandle withLimit(long limit) {
 		return new RediSearchTableHandle(schemaTableName, index, constraint, OptionalLong.of(limit), aggregationTerms,
-				aggregations, sort);
+				aggregations, sort, filters);
 	}
 
 	public RediSearchTableHandle withAggregations(List<RediSearchAggregationTerm> terms,
 			List<RediSearchAggregation> metrics) {
-		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, terms, metrics, sort);
+		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, terms, metrics, sort, filters);
 	}
 
 	public RediSearchTableHandle withTopN(List<RediSearchSortItem> sort, long limit) {
 		return new RediSearchTableHandle(schemaTableName, index, constraint, OptionalLong.of(limit), aggregationTerms,
-				aggregations, sort);
+				aggregations, sort, filters);
 	}
+
+	public RediSearchTableHandle withoutTopN() {
+		return new RediSearchTableHandle(schemaTableName, index, constraint, OptionalLong.empty(), aggregationTerms,
+				aggregations, List.of(), filters);
+	}
+
+	public RediSearchTableHandle withFilters(Map<String, String> filters) {
+		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort, filters);
+	}
+
+	@JsonProperty
+	public Map<String, String> getFilters() { return filters; }
 
 	@JsonProperty
 	public SchemaTableName getSchemaTableName() {
@@ -128,7 +150,7 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort);
+		return Objects.hash(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort, filters);
 	}
 
 	@Override
@@ -143,12 +165,12 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 		return Objects.equals(this.schemaTableName, other.schemaTableName) && Objects.equals(this.index, other.index)
 				&& Objects.equals(this.constraint, other.constraint) && Objects.equals(this.limit, other.limit)
 				&& Objects.equals(this.aggregationTerms, other.aggregationTerms)
-				&& Objects.equals(this.aggregations, other.aggregations) && Objects.equals(this.sort, other.sort);
+				&& Objects.equals(this.aggregations, other.aggregations) && Objects.equals(this.sort, other.sort) && filters.equals(other.filters);
 	}
 
 	@Override
 	public String toString() {
 		return MoreObjects.toStringHelper(this).add("schemaTableName", schemaTableName).add("index", index)
-				.add("limit", limit).add("sort", sort).add("constraint", constraint).toString();
+				.add("filters", filters).add("limit", limit).add("sort", sort).add("constraint", constraint).toString();
 	}
 }

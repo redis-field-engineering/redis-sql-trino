@@ -86,6 +86,7 @@ import io.trino.spi.connector.SortItem;
 import io.trino.spi.connector.TableNotFoundException;
 import io.trino.spi.connector.TopNApplicationResult;
 import io.trino.spi.expression.Call;
+import io.trino.spi.expression.Constant;
 import io.trino.spi.expression.ConnectorExpression;
 import io.trino.spi.expression.Variable;
 import io.trino.spi.predicate.Domain;
@@ -371,16 +372,19 @@ public class RediSearchMetadata implements ConnectorMetadata {
 				.filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
 			return Optional.empty();
 		}
+		boolean local = sortItems.size() == 1 && topNCount <= 1000
+				&& assignments.get(sortItems.get(0).getName()) instanceof RediSearchColumnHandle candidate
+				&& candidate.getType() == io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
 		ImmutableList.Builder<RediSearchSortItem> sort = ImmutableList.builder();
 		for (SortItem sortItem : sortItems) {
 			RediSearchColumnHandle column = (RediSearchColumnHandle) assignments.get(sortItem.getName());
 			if (column == null || column.getFieldType() != RediSearchFieldType.NUMERIC || !column.isSupportsPredicates()
-					|| !SORTABLE_TYPES.contains(column.getType()) || !RediSearchQueryBuilder.isProperty(column.getName())) {
+					|| (!local && !SORTABLE_TYPES.contains(column.getType())) || !RediSearchQueryBuilder.isProperty(column.getName())) {
 				return Optional.empty();
 			}
 			switch (sortItem.getSortOrder()) {
-			case ASC_NULLS_LAST -> sort.add(new RediSearchSortItem(column.getName(), true));
-			case DESC_NULLS_LAST -> sort.add(new RediSearchSortItem(column.getName(), false));
+			case ASC_NULLS_LAST -> sort.add(new RediSearchSortItem(column.getName(), true, local));
+			case DESC_NULLS_LAST -> sort.add(new RediSearchSortItem(column.getName(), false, local));
 			default -> {
 				return Optional.empty();
 			}
@@ -394,11 +398,11 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			ConnectorTableHandle table, Constraint constraint) {
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
 		// The first rows of a sort, filtered, aren't the first of the filtered rows
-		if (!handle.getSort().isEmpty()) {
+		if (!handle.getSort().isEmpty() || handle.getLimit().isPresent()) {
 			return Optional.empty();
 		}
 
-		// Expressions such as LIKE stay with Trino: a wildcard query isn't guaranteed to return every matching row
+		// Only exact substring LIKE expressions on HASH fields are consumed; other wildcard shapes stay in Trino
 		Map<ColumnHandle, Domain> supported = new HashMap<>();
 		Map<ColumnHandle, Domain> unsupported = new HashMap<>();
 		Map<ColumnHandle, Domain> domains = constraint.getSummary().getDomains()
@@ -418,16 +422,39 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			}
 		}
 
+		Map<String, String> filters = new LinkedHashMap<>(handle.getFilters());
+		List<ConnectorExpression> remaining = new java.util.ArrayList<>();
+		for (ConnectorExpression expression : ConnectorExpressions.extractConjuncts(constraint.getExpression())) {
+			if (expression instanceof Call call
+					&& call.getFunctionName().equals(io.trino.spi.expression.StandardFunctions.LIKE_FUNCTION_NAME)
+					&& call.getArguments().size() == 2 && call.getArguments().get(0) instanceof Variable variable
+					&& call.getArguments().get(1) instanceof Constant constant && constant.getValue() instanceof Slice pattern
+					&& constraint.getAssignments().get(variable.getName()) instanceof RediSearchColumnHandle column
+					&& rediSearchSession.getTable(handle.getSchemaTableName()).getIndexInfo().getKeyType()
+							.filter(RediSearchIndexInfo.KeyType.HASH::equals).isPresent()) {
+				Optional<String> filter = RediSearchQueryBuilder.containsFilter(column, pattern.toStringUtf8());
+				if (filter.isPresent()) {
+					String previous = filters.get(column.getName());
+					if (previous == null) { filters.put(column.getName(), filter.get()); }
+					else if (!previous.equals(filter.get()) && !previous.contains("(" + filter.get() + ")")) {
+						filters.put(column.getName(), "(" + previous + ") && (" + filter.get() + ")");
+					}
+					continue;
+				}
+			}
+			remaining.add(expression);
+		}
+
 		TupleDomain<ColumnHandle> oldDomain = handle.getConstraint();
 		TupleDomain<ColumnHandle> newDomain = oldDomain.intersect(TupleDomain.withColumnDomains(supported));
-		if (oldDomain.equals(newDomain)) {
+		if (oldDomain.equals(newDomain) && handle.getFilters().equals(filters)) {
 			return Optional.empty();
 		}
 
-		handle = handle.withConstraint(newDomain);
+		handle = handle.withConstraint(newDomain).withFilters(filters);
 
 		return Optional.of(new ConstraintApplicationResult<>(handle, TupleDomain.withColumnDomains(unsupported),
-				constraint.getExpression(), false));
+				ConnectorExpressions.and(remaining), false));
 	}
 
 	/**
@@ -498,6 +525,19 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		if (!table.getTermAggregations().isEmpty() || table.getLimit().isPresent() || !table.getSort().isEmpty()) {
 			return Optional.empty();
 		}
+		if (groupingSets.size() != 1) {
+			return Optional.empty();
+		}
+		if (!groupingSets.get(0).isEmpty()) {
+			// No reliable distinct-cardinality statistic is available. Document count is an upper bound;
+			// unknown or over-budget tables aggregate in Trino, without runtime replay or partial output.
+			OptionalLong documents = rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo().getNumDocs();
+			if (!isGroupPushdownSafe(documents, rediSearchSession.getConfig().getAggregationGroupLimit())) {
+				log.debug("Rejecting GROUP BY pushdown: index %s document count %s exceeds group budget %s",
+						table.getIndex(), documents, rediSearchSession.getConfig().getAggregationGroupLimit());
+				return Optional.empty();
+			}
+		}
 		// Sums and averages count their values where Redis can, which a sharded database needs to compute them
 		boolean countValues = aggregates.stream().map(AggregateFunction::getFunctionName)
 				.anyMatch(name -> RediSearchAggregation.SUM.equals(name) || RediSearchAggregation.AVG.equals(name))
@@ -557,6 +597,10 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		RediSearchTableHandle tableHandle = table.withAggregations(termList, aggregationList);
 		return Optional.of(new AggregationApplicationResult<>(tableHandle, projections.build(),
 				resultAssignments.build(), Map.of(), false));
+	}
+
+	static boolean isGroupPushdownSafe(OptionalLong documents, long limit) {
+		return documents.isPresent() && documents.getAsLong() >= 0 && documents.getAsLong() <= limit;
 	}
 
 	private void setRollback(Runnable action) {

@@ -16,7 +16,7 @@ public class TestTableHandle {
 	@Test
 	public void testRoundTrip() {
 		RediSearchTableHandle expected = new RediSearchTableHandle(new SchemaTableName("schema", "table"), "table")
-				.withTopN(List.of(new RediSearchSortItem("price", false)), 10);
+				.withTopN(List.of(new RediSearchSortItem("price", false, true)), 10).withFilters(java.util.Map.of("url", "contains(@url, \"google\")"));
 
 		String json = codec.toJson(expected);
 		RediSearchTableHandle actual = codec.fromJson(json);

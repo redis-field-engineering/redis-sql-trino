@@ -130,7 +130,7 @@ public final class RediSearchPageSourceResultWriter {
 			return value -> LocalDate.from(DateTimeFormatter.ISO_DATE.parse(value)).toEpochDay();
 		}
 		if (type.equals(TIMESTAMP_MILLIS)) {
-			return value -> multiplyExact(parseInteger(type, value), MICROSECONDS_PER_MILLISECOND);
+			return RediSearchPageSourceResultWriter::timestampMicros;
 		}
 		if (type.equals(TIMESTAMP_TZ_MILLIS)) {
 			return value -> packDateTimeWithZone(parseInteger(type, value), UTC_KEY);
@@ -139,6 +139,10 @@ public final class RediSearchPageSourceResultWriter {
 		return value -> {
 			throw new TrinoException(GENERIC_INTERNAL_ERROR, message);
 		};
+	}
+
+	static long timestampMicros(String value) {
+		return multiplyExact(parseInteger(TIMESTAMP_MILLIS, value), MICROSECONDS_PER_MILLISECOND);
 	}
 
 	// Redis returns the results of reducers, and other clients may write integers, in other forms, e.g. 42.0 or 4.2e1

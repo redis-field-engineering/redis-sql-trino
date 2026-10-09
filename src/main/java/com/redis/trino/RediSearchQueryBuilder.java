@@ -151,7 +151,7 @@ public class RediSearchQueryBuilder {
 		Type type = column.getType();
 		switch (column.getFieldType()) {
 		case NUMERIC:
-			return isNumericType(type) && values.getRanges().getOrderedRanges().stream().allMatch(
+			return isBigintPrefilter(column, domain) || isNumericType(type) && values.getRanges().getOrderedRanges().stream().allMatch(
 					range -> (range.isLowUnbounded() || numericValue(type, range.getLowBoundedValue()).isPresent())
 							&& (range.isHighUnbounded() || numericValue(type, range.getHighBoundedValue()).isPresent()));
 		case TAG:
@@ -163,6 +163,17 @@ public class RediSearchQueryBuilder {
 		default:
 			return false;
 		}
+	}
+
+	/** Inclusive numeric envelopes for discrete BIGINTs; exact comparison remains in Trino. */
+	static boolean isBigintPrefilter(RediSearchColumnHandle column, Domain domain) {
+		return column.getFieldType() == RediSearchFieldType.NUMERIC && column.getType() == BIGINT
+				&& !domain.isNullAllowed() && !domain.getValues().isAll() && !domain.getValues().isNone()
+				&& domain.getValues().getRanges().getOrderedRanges().stream().allMatch(range ->
+						!range.isLowUnbounded() && !range.isHighUnbounded() && range.isLowInclusive() && range.isHighInclusive()
+						&& java.math.BigInteger.valueOf((Long) range.getHighBoundedValue())
+							.subtract(java.math.BigInteger.valueOf((Long) range.getLowBoundedValue()))
+							.compareTo(java.math.BigInteger.valueOf(1000)) <= 0);
 	}
 
 	/**
@@ -263,7 +274,9 @@ public class RediSearchQueryBuilder {
 	public static boolean isExact(RediSearchColumnHandle column, Domain domain) {
 		switch (column.getFieldType()) {
 		case NUMERIC:
-			return true;
+			return !isBigintPrefilter(column, domain) || domain.getValues().getRanges().getOrderedRanges().stream()
+					.allMatch(range -> isExactAsDouble((Long) range.getLowBoundedValue())
+							&& isExactAsDouble((Long) range.getHighBoundedValue()));
 		case TAG:
 		case TEXT:
 			// A FILTER would compare a CHAR value with the spaces it's padded with, which other clients may not write
@@ -332,6 +345,20 @@ public class RediSearchQueryBuilder {
 		return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
 	}
 
+	/** Exact substring LIKE, without wildcard expansion, normalization or tokenization. */
+	static Optional<String> containsFilter(RediSearchColumnHandle column, String pattern) {
+		if (!column.isFilterable() || !(column.getType() instanceof VarcharType) || !isProperty(column.getName())
+				|| pattern.length() < 3 || !pattern.startsWith("%") || !pattern.endsWith("%")) {
+			return Optional.empty();
+		}
+		String literal = pattern.substring(1, pattern.length() - 1);
+		if (literal.indexOf('%') >= 0 || literal.indexOf('_') >= 0 || FILTER_UNSUPPORTED_CHARACTERS.matcher(literal).find()) {
+			return Optional.empty();
+		}
+		return Optional.of("exists(@" + column.getName() + ") && contains(@" + column.getName() + ", "
+				+ stringLiteral(literal) + ") > 0");
+	}
+
 	/**
 	 * Whether a tag query for the value matches every document with that value. It matches nothing if the value is
 	 * empty, contains the field's separator, starts or ends with whitespace, or has a control character Redis can't
@@ -379,6 +406,15 @@ public class RediSearchQueryBuilder {
 		String columnName = escapeTag(column.getName());
 		checkArgument(domain.getType().isOrderable(), "Domain type must be orderable");
 		checkArgument(isSupported(column, domain), "Unsupported domain for %s: %s", column.getName(), domain);
+		if (isBigintPrefilter(column, domain) && !isExact(column, domain)) {
+			// Decimal parsing and long->double conversion may collapse neighboring IDs. Widen by one ULP
+			// on both sides, including signed extremes, and retain the original exact residual domain.
+			return Optional.of(union(domain.getValues().getRanges().getOrderedRanges().stream().map(range -> {
+				double low = (double) (Long) range.getLowBoundedValue();
+				double high = (double) (Long) range.getHighBoundedValue();
+				return field(columnName, numericRange(Math.nextDown(low), true, Math.nextUp(high), true));
+			}).toList()));
+		}
 		Set<Object> singleValues = new LinkedHashSet<>();
 		List<String> disjuncts = new ArrayList<>();
 		if (column.getFieldType() != RediSearchFieldType.NUMERIC) {

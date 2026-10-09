@@ -278,19 +278,19 @@ public class TestQueryBuilder {
 		// stored, and the DOUBLE isn't loaded by name, which would round it again
 		RediSearchTranslator.Aggregation aggregation = translator.aggregate(table, List.of(style, abv, ibu),
 				Optional.of(hashIndex()));
-		assertThat(commandString(aggregation)).isEqualTo("LOAD * LOAD 3 @__key @style @ibu "
-				+ "FILTER exists(@style) && @style == \"Wheat\" WITHCURSOR COUNT 1000 DIALECT 2");
+		assertThat(commandString(aggregation)).isEqualTo("LOAD 1 @style FILTER exists(@style) && @style == \"Wheat\" DIALECT 2 LOAD * LOAD 3 @__key @style @ibu "
+				+ "WITHCURSOR COUNT 1000 DIALECT 2");
 		// LOAD * names a field indexed AS another name by its hash field
 		assertThat(aggregation.getReader().read(Map.of("raw_abv", value("4.123456789012345"), "style", value("Wheat"),
 				"name", value("Other field"))))
 				.containsExactly("Wheat", "4.123456789012345", null);
 		// INTEGER values are exact as doubles
 		assertThat(commandString(translator.aggregate(table, List.of(style, ibu), Optional.of(hashIndex()))))
-				.startsWith("LOAD 3 @__key @style @ibu ");
+				.contains("LOAD 3 @__key @style @ibu ");
 		// With LOAD *, a BIGINT is read as stored too
 		RediSearchColumnHandle id = numeric("id", BIGINT);
 		assertThat(commandString(translator.aggregate(table, List.of(id, abv), Optional.of(hashIndex()))))
-				.startsWith("LOAD * LOAD 2 @__key @style ");
+				.contains("LOAD * LOAD 2 @__key @style ");
 		// Without FT.INFO, columns are loaded by name
 		assertThat(commandString(translator.aggregate(table, List.of(style, abv), Optional.empty())))
 				.startsWith("LOAD 3 @__key @style @abv ");
@@ -339,8 +339,8 @@ public class TestQueryBuilder {
 		RediSearchTranslator translator = new RediSearchTranslator(new RediSearchConfig());
 		// SORTBY runs after FILTER, on copies loaded AS other names: next to LOAD *, abv would sort as text
 		assertThat(commandString(translator.aggregate(table, List.of(style, abv, ibu), Optional.of(hashIndex()))))
-				.isEqualTo("LOAD * LOAD 9 @__key @style @ibu @abv AS __sort_0 @ibu AS __sort_1 "
-						+ "FILTER exists(@style) && @style == \"Wheat\" SORTBY 4 @__sort_0 DESC @__sort_1 ASC MAX 10 "
+				.isEqualTo("LOAD 1 @style FILTER exists(@style) && @style == \"Wheat\" DIALECT 2 LOAD * LOAD 9 @__key @style @ibu @abv AS __sort_0 @ibu AS __sort_1 "
+						+ "SORTBY 4 @__sort_0 DESC @__sort_1 ASC MAX 10 "
 						+ "LIMIT 0 10 WITHCURSOR COUNT 1000 DIALECT 2");
 	}
 
@@ -354,9 +354,9 @@ public class TestQueryBuilder {
 				new RediSearchConfig().setQueryTimeoutMillis(1200000)).aggregate(table,
 				List.of(style, numeric("abv", DoubleType.DOUBLE)), Optional.of(hashIndex()));
 		assertThat(aggregation.getCommandArguments()).containsExactly("FT.AGGREGATE", "beers",
-				new RediSearchQueryBuilder().buildQuery(table.getConstraint()), "LOAD", "*", "LOAD", "5", "@__key",
-				"@style", "@abv", "AS", "__sort_0", "TIMEOUT", "1200000", "FILTER",
-				"exists(@style) && @style == \"say \\\"hi\\\"\"", "SORTBY", "2", "@__sort_0", "DESC", "MAX", "10",
+				new RediSearchQueryBuilder().buildQuery(table.getConstraint()), "LOAD", "1", "@style", "FILTER",
+				"exists(@style) && @style == \"say \\\"hi\\\"\"", "DIALECT", "2", "LOAD", "*", "LOAD", "5", "@__key",
+				"@style", "@abv", "AS", "__sort_0", "TIMEOUT", "1200000", "SORTBY", "2", "@__sort_0", "DESC", "MAX", "10",
 				"LIMIT", "0", "10", "WITHCURSOR", "COUNT", "1000", "DIALECT", "2");
 		assertThat(String.join(" ", aggregation.getCommandArguments().subList(3, aggregation.getCommandArguments().size())))
 				.isEqualTo(commandString(aggregation));
@@ -606,6 +606,31 @@ public class TestQueryBuilder {
 	}
 
 	@Test
+	public void testBigintEnvelopesAndResiduals() {
+		for (long id : new long[] { (1L << 53) + 1, -(1L << 53) - 1, Long.MIN_VALUE, Long.MAX_VALUE }) {
+			Domain domain = Domain.singleValue(BIGINT, id);
+			assertThat(RediSearchQueryBuilder.isSupported(COL1, domain)).isTrue();
+			assertThat(RediSearchQueryBuilder.isExact(COL1, domain)).isFalse();
+			assertThat(new RediSearchQueryBuilder().buildQuery(TupleDomain.withColumnDomains(Map.of(COL1, domain))))
+					.isEqualTo("@col1:[" + Math.nextDown((double) id) + " " + Math.nextUp((double) id) + "]");
+		}
+		Domain adjacent = Domain.multipleValues(BIGINT, List.of(9007199254740992L, 9007199254740993L));
+		assertThat(RediSearchQueryBuilder.isSupported(COL1, adjacent)).isTrue();
+		assertThat(RediSearchQueryBuilder.isExact(COL1, adjacent)).isFalse();
+	}
+
+	@Test
+	public void testTimestampTopNComparison() {
+		var ascending = RediSearchLocalTopN.comparator(true);
+		assertThat(ascending.compare(new String[] { "a", "9007199254740992" },
+				new String[] { "b", "9007199254740993" })).isNegative();
+		assertThat(ascending.compare(new String[] { "a", null }, new String[] { "b", "1" })).isPositive();
+		assertThat(RediSearchLocalTopN.comparator(false).compare(new String[] { "a", null },
+				new String[] { "b", "1" })).isPositive();
+		assertThat(ascending.compare(new String[] { "a", "1" }, new String[] { "b", "1" })).isZero();
+	}
+
+	@Test
 	public void testTextTerms() {
 		assertThat(RediSearchQueryBuilder.textTerms("Hocus Pocus")).contains(List.of("Hocus", "Pocus"));
 		assertThat(RediSearchQueryBuilder.textTerms("foo@bar.com\t4.5")).contains(List.of("foo", "bar", "com", "4", "5"));
@@ -628,7 +653,7 @@ public class TestQueryBuilder {
 				Domain.create(ValueSet.ofRanges(greaterThan(BIGINT, 200L)), true))).isFalse();
 		// BIGINT bounds that NUMERIC fields, which hold doubles, can't compare exactly
 		assertThat(RediSearchQueryBuilder.isSupported(COL1, Domain.singleValue(BIGINT, (1L << 53) - 1))).isTrue();
-		assertThat(RediSearchQueryBuilder.isSupported(COL1, Domain.singleValue(BIGINT, 1L << 53))).isFalse();
+		assertThat(RediSearchQueryBuilder.isSupported(COL1, Domain.singleValue(BIGINT, 1L << 53))).isTrue();
 		assertThat(RediSearchQueryBuilder.isSupported(COL1,
 				Domain.create(ValueSet.ofRanges(greaterThan(BIGINT, -(1L << 53))), false))).isFalse();
 		assertThat(RediSearchQueryBuilder.isSupported(COL1,
