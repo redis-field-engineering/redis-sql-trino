@@ -1,4 +1,67 @@
-# Redis Cloud ClickBench: initial results and comparisons
+# Redis Cloud ClickBench results and comparisons
+
+## Completed full-data sweep: October 8, 2026 Pacific
+
+The OSS Cluster API sweep completed all 43 queries, three attempts each, on **99,997,497 rows**. Independent DuckDB references validated **123 attempts**; Q24 timed out at 1200 seconds on all three attempts and Q34 exceeded Redis's 1,000,000 aggregate-group limit on all three attempts. Failed attempts are null timings. This run supersedes the partial status below; historical results remain separate.
+
+Connector `dbcb518c541b3eba22b4471cb71509233ab09efa` was built from a clean Git archive. Production JAR SHA256: `80e92f3bc3462c278b7feda9218c00b90c6f5cc1183a5147b2fa01fcdfce91ea`. Redis 8.6.2, Trino 483, RESP3, configured 40 shards and 1000 GB all RAM, Standard QPF, no replication, noeviction, AOF every second; three r8g.16xlarge Redis hosts and an r7a.4xlarge Trino runner, co-located in AWS us-east-1 / physical AZ use1-az6. Data disks use 16,000 IOPS and 1000 MiB/s. Redis remains running; Trino restarts and runner page cache clears before each query block, so **no-cold** applies.
+
+Fresh full-data Arrow ingestion plus indexing took **1036.954 seconds (17m 17s)**, approximately 96,434 rows/s. This excludes source download and table creation. Separate alternating 10M diagnostics measured legacy 151.540/147.753 seconds and Arrow 110.458/110.989 seconds: mean end-to-end speedup **1.35x** (26% less elapsed time). These compare encoders within the same batched loader, not the entire old loader architecture, and are not public ClickBench query results.
+
+The first diagnostic failed only after writing/indexing 10M rows because FT.INFO returned a RESP3 map. It was preserved and excluded, the response parser was corrected, and all four trials ran on fresh tables. The connector JAR, SQL and encoders stayed pinned. Harness patch hashes are retained.
+
+An actual default API server switch failed again with PROVISION_FAILURE; the server remained OSS-enabled. [Issue 126](https://github.com/redis-field-engineering/redis-sql-trino/issues/126#issuecomment-6073461815) records task evidence. There is no valid default-versus-OSS comparison. This is a four-instance deployment; the historical product comparisons below use different hardware and must not be treated as a current overall ranking.
+
+[Machine-readable result and validation evidence](benchmarks/clickbench/reports/latest-20261008/). CSV checksums and the retained archive checksum were verified; public artifacts were scanned against private credentials. Persistent AOF data size was not measured.
+
+| Query | Attempt 1 (s) | Attempt 2 (s) | Attempt 3 (s) | Best warm (s) | Status |
+|---|---:|---:|---:|---:|---|
+| Q1 | 3.832767 | 3.731575 | 3.743327 | 3.731575 | 3 reference-validated outputs |
+| Q2 | 0.293565 | 0.206764 | 0.194698 | 0.194698 | 3 reference-validated outputs |
+| Q3 | 7.483404 | 7.436010 | 7.417720 | 7.417720 | 3 reference-validated outputs |
+| Q4 | 5.077072 | 5.034888 | 5.050787 | 5.034888 | 3 reference-validated outputs |
+| Q5 | 107.652407 | 98.884259 | 100.012283 | 98.884259 | 3 reference-validated outputs |
+| Q6 | 68.357893 | 58.657447 | 58.357384 | 58.357384 | 3 reference-validated outputs |
+| Q7 | 70.852863 | 57.088298 | 57.611882 | 57.088298 | 3 reference-validated outputs |
+| Q8 | 0.316646 | 0.220289 | 0.206302 | 0.206302 | 3 reference-validated outputs |
+| Q9 | 110.567296 | 108.150800 | 103.201975 | 103.201975 | 3 reference-validated outputs |
+| Q10 | 115.977695 | 100.087744 | 99.589758 | 99.589758 | 3 reference-validated outputs |
+| Q11 | 110.140409 | 100.429488 | 99.507256 | 99.507256 | 3 reference-validated outputs |
+| Q12 | 109.361463 | 100.587360 | 104.332689 | 100.587360 | 3 reference-validated outputs |
+| Q13 | 70.848580 | 60.113362 | 59.159377 | 59.159377 | 3 reference-validated outputs |
+| Q14 | 111.863989 | 101.014802 | 102.937841 | 101.014802 | 3 reference-validated outputs |
+| Q15 | 81.741882 | 68.700690 | 70.061985 | 68.700690 | 3 reference-validated outputs |
+| Q16 | 107.692175 | 99.677764 | 98.988101 | 98.988101 | 3 reference-validated outputs |
+| Q17 | 111.369929 | 103.822758 | 100.857107 | 100.857107 | 3 reference-validated outputs |
+| Q18 | 109.698586 | 100.120761 | 100.855060 | 100.120761 | 3 reference-validated outputs |
+| Q19 | 109.871893 | 108.598808 | 107.456444 | 107.456444 | 3 reference-validated outputs |
+| Q20 | 109.641855 | 99.968368 | 100.298755 | 99.968368 | 3 reference-validated outputs |
+| Q21 | 73.541089 | 63.090782 | 63.000734 | 63.000734 | 3 reference-validated outputs |
+| Q22 | 79.482919 | 71.005822 | 78.904122 | 71.005822 | 3 reference-validated outputs |
+| Q23 | 118.720715 | 110.889096 | 106.121431 | 106.121431 | 3 reference-validated outputs |
+| Q24 | null | null | null | null | 3 timeouts |
+| Q25 | 85.790605 | 70.890275 | 70.546872 | 70.546872 | 3 reference-validated outputs |
+| Q26 | 66.661776 | 58.224253 | 58.945083 | 58.224253 | 3 reference-validated outputs |
+| Q27 | 89.616702 | 66.464186 | 68.850166 | 66.464186 | 3 reference-validated outputs |
+| Q28 | 92.729550 | 75.951426 | 74.116397 | 74.116397 | 3 reference-validated outputs |
+| Q29 | 72.968122 | 62.819798 | 62.549552 | 62.549552 | 3 reference-validated outputs |
+| Q30 | 70.917921 | 63.769079 | 58.638641 | 58.638641 | 3 reference-validated outputs |
+| Q31 | 121.650860 | 102.327436 | 101.062267 | 101.062267 | 3 reference-validated outputs |
+| Q32 | 125.575019 | 109.074141 | 109.851205 | 109.074141 | 3 reference-validated outputs |
+| Q33 | 114.573551 | 109.594823 | 103.893837 | 103.893837 | 3 reference-validated outputs |
+| Q34 | null | null | null | null | 3 aggregate-group errors |
+| Q35 | 73.332704 | 69.128806 | 64.086092 | 64.086092 | 3 reference-validated outputs |
+| Q36 | 70.617349 | 64.813536 | 59.369522 | 59.369522 | 3 reference-validated outputs |
+| Q37 | 2.425337 | 2.125027 | 1.925666 | 1.925666 | 3 reference-validated outputs |
+| Q38 | 2.420162 | 2.056889 | 1.987625 | 1.987625 | 3 reference-validated outputs |
+| Q39 | 0.453552 | 0.275276 | 0.260027 | 0.260027 | 3 reference-validated outputs |
+| Q40 | 4.304982 | 3.681698 | 3.692690 | 3.681698 | 3 reference-validated outputs |
+| Q41 | 3.777505 | 3.367676 | 3.210796 | 3.210796 | 3 reference-validated outputs |
+| Q42 | 3.277723 | 2.721035 | 2.697576 | 2.697576 | 3 reference-validated outputs |
+| Q43 | 2.332001 | 1.938546 | 1.934694 | 1.934694 | 3 reference-validated outputs |
+
+## Historical partial runs
+
 
 > **Historical baseline, superseded on 2026-10-07.** The timings and product comparisons below measure connector `83d05fc44627ccb9971a40e44e67a78f702bf2e6`. They predate merged safe integer-widening aggregation pushdown [#131](https://github.com/redis-field-engineering/redis-sql-trino/pull/131) and per-query scan metrics [#132](https://github.com/redis-field-engineering/redis-sql-trino/pull/132). A fresh 43-query, three-attempt sweep is running at `4aa71cea12abe7e2f1dc93a8f276418292edd915`, using the same full dataset, hardware, settings and timeouts. Do not interpret these older comparisons as the patched connector's performance.
 

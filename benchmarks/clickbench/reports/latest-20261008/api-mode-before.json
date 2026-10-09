@@ -1,0 +1,10 @@
+{
+  "databaseId": 14679501,
+  "name": "clickbench-latest-ram",
+  "status": "active",
+  "supportOSSClusterApi": true,
+  "useExternalEndpointForOSSClusterApi": false,
+  "respVersion": "resp3",
+  "memoryLimitInGb": 1000.0,
+  "numberOfShards": null
+}
