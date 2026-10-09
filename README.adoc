@@ -346,6 +346,20 @@ DEBUG logging from `com.redis.trino.RediSearchMetadata` reports unsupported aggr
 
 For Redis Cloud Pro default-versus-OSS API comparisons, see link:benchmarks/issue-126/README.adoc[the configuration checks, provisioning evidence, and comparison procedure].
 
+=== Retained benchmark reports
+
+Use the controlled Redis Software report for the current QPF, split and concurrency recommendation.
+The earlier reports validate specific fixes or configurations; their different datasets, hardware and connector revisions prevent direct timing comparisons across reports.
+
+[cols="2,2,3",options="header"]
+|===
+|Report |Dataset and deployment |What it establishes
+|link:benchmarks/qpf/README.adoc[Controlled QPF, splits and concurrency] |5 million rows, all 105 columns; Redis Software |432 correct measured queries across 12 configurations; Standard versus 2x QPF, one versus automatic splits, and 1/4/8 SQL clients, with CPU measurements and independent audit.
+|link:benchmarks/issue-135-136/README.adoc[Redis Cloud acceptance and exploratory QPF] |Final acceptance: 5 million rows, all 105 columns; Redis Cloud |129 correct SQL runs covering all 43 ClickBench queries; parser, topology and cursor recovery validation. Its separate QPF samples use the earlier single-split connector and are not a controlled comparison.
+|link:benchmarks/issue-142/README.adoc[Parallel scan validation] |5 million rows, projected columns; explicit Redis Open Source compatibility run |Partition correctness, automatic selection and scan tradeoffs; query workers held at zero.
+|link:benchmarks/issue-133/README.adoc[Exact BIGINT scan measurements] |100,000-row local Q5 comparison; Redis Software |Correct exact DISTINCT beyond 2^53 and a measured 6.9% local median Q5 improvement; not a full-dataset speedup claim.
+|===
+
 == Documentation
 
 {name} documentation is available at https://{project-owner}.github.io/{project-name}
@@ -720,6 +734,24 @@ All 432 measured queries were correct.
 With automatic splits, 2x QPF improved median throughput by 53% to 62%; the best measured balance was 2x QPF with four concurrent clients, which matched the highest throughput while avoiding the latency increase at eight clients.
 For one client, automatic splits plus 2x QPF completed the query mix about 2.0x as fast as one source plus 2x QPF; the pushed-down Q3 remained one source and did not gain from connector splits.
 See link:benchmarks/qpf/README.adoc[the controlled QPF, split and concurrency benchmark] for the full matrix, CPU measurements, limitations and retained evidence.
+
+Median throughput for the same 12-query mix, measured over three rounds per configuration:
+
+[cols="1,1,1,1,1",options="header"]
+|===
+|Scan mode |Concurrent SQL clients |Standard QPS |2x QPF QPS |2x / Standard
+|One source |1 |0.061 |0.065 |1.05x
+|One source |4 |0.100 |0.111 |1.11x
+|One source |8 |0.114 |0.143 |1.25x
+|Automatic |1 |0.085 |0.130 |1.53x
+|Automatic |4 |0.088 |0.143 |1.62x
+|Automatic |8 |0.087 |0.139 |1.60x
+|===
+
+For this workload, start with 2x QPF, the connector settings above, and a Trino resource-group limit near four concurrent analytical queries, then retest with the production query mix and latency objective.
+With Standard QPF, automatic splits were slower than one source at four and eight clients; added parallelism needs enough server worker capacity to absorb partition overhead.
+The link:benchmarks/qpf/software-2026-10-08/summary.json[machine-readable summary], link:benchmarks/qpf/software-2026-10-08/independent-audit.json[independent audit] and link:benchmarks/qpf/software-2026-10-08/cleanup.json[teardown proof] are retained with the report.
+The temporary benchmark instance, volume, security group, cleanup automation and IAM resources were deleted after testing.
 
 For mixed analytical and latency-sensitive workloads, evaluate https://redis.io/docs/latest/operate/oss_and_stack/stack-with-enterprise/search/query-performance-factor/[Redis Software query performance factor].
 A local issue #115 experiment with Software 8.2.0-78.18 (Redis/Search 8.6) found that the 2x factor configured three query workers and reduced lookup latency during two concurrent aggregations.
