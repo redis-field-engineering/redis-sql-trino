@@ -1,0 +1,19 @@
+{
+  "connector_revision": "dbcb518c541b3eba22b4471cb71509233ab09efa",
+  "build_method": "clean Maven package of git archive",
+  "artifact_sha256": "80e92f3bc3462c278b7feda9218c00b90c6f5cc1183a5147b2fa01fcdfce91ea",
+  "query_limit_seconds": 1200,
+  "redis_api": "OSS Cluster API",
+  "loader": "Arrow/NumPy",
+  "dataset_rows_full": 99997497,
+  "dataset_rows_diagnostic": 10000000,
+  "subscription_id": 3443639,
+  "database_id": 14679501,
+  "expires": "2026-10-09T10:55:11.800567+00:00",
+  "source_sample_sha256": "02c0c863c00f8fb24aa9d9ed73434c3281eae1e176e765aa12ad1361d22da5e2",
+  "source": {
+    "sha256": "a390f6cb782f6aaef278c72fc1dd86c4f30bc843ebab3c159e9bd4d45ddb079f",
+    "rows": 99997497,
+    "bytes": 14779976446
+  }
+}

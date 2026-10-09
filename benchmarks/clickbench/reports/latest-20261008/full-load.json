@@ -1,0 +1,32 @@
+{
+  "mode": "redis-load",
+  "source": "/opt/clickbench/hits.parquet",
+  "source_rows": 99997497,
+  "target_rows": 99997497,
+  "options": {
+    "limit": null,
+    "workers": 16,
+    "batch_rows": 5000,
+    "pipeline_rows": 5000,
+    "max_pipeline_bytes": 16777216,
+    "encoder": "arrow",
+    "table": "hits",
+    "encode_only": false,
+    "index_timeout": 3600
+  },
+  "ingestion_seconds": 1036.9372167689999,
+  "index_wait_seconds": 0.016876314999990427,
+  "elapsed_seconds": 1036.9540470840002,
+  "rows_per_second": 96433.87504123367,
+  "worker_totals": {
+    "rows": 99997497,
+    "decode_seconds": 117.24116681201394,
+    "encode_seconds": 745.1118000209885,
+    "enqueue_seconds": 2079.45067897259,
+    "write_seconds": 12635.913780418981,
+    "pipelines": 36322,
+    "estimated_wire_bytes": 607309812442,
+    "oversized_rows": 0
+  },
+  "correctness": "exact indexed count; query validation required"
+}
