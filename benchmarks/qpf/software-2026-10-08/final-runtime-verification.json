@@ -1,0 +1,165 @@
+{
+  "connectorJarSha256": "34cc1768d73322dd2b8b5f1f5a0bd3c087eb2f5a95ae5c9a5d979c5e6cc3e180",
+  "containers": [
+    {
+      "name": "qpf-redis-software",
+      "imageId": "sha256:a6e52eea1157c836d5eebbea9aae1aa64aaee91522f82791c8799b7b9ec964d9",
+      "cpuSet": "0-7",
+      "memoryLimitBytes": 51539607552,
+      "oomKilled": false,
+      "restartCount": 0,
+      "startedAt": "2026-10-08T22:55:39.771274131Z"
+    },
+    {
+      "name": "qpf-trino",
+      "imageId": "sha256:db58cc93e593a2706553745f276bb119c9810e69918be56ecde088ba7ccb0534",
+      "cpuSet": "8-15",
+      "memoryLimitBytes": 12884901888,
+      "oomKilled": false,
+      "restartCount": 0,
+      "startedAt": "2026-10-09T00:49:51.079079793Z"
+    }
+  ],
+  "database": {
+    "uid": 2,
+    "name": "qpf-controlled-5m",
+    "status": "active",
+    "memory_size": 38654705664,
+    "redis_version": "8.6",
+    "shards_count": 2,
+    "replication": false,
+    "data_persistence": "aof",
+    "aof_policy": "appendfsync-every-sec",
+    "query_performance_factor": {
+      "active": false,
+      "scaling_factor": 0
+    },
+    "oss_cluster": true,
+    "module_list": [
+      {
+        "module_args": "",
+        "module_id": "30992425191e7f4170d6495c0970ddf9",
+        "module_name": "search",
+        "semantic_version": "8.6.11"
+      },
+      {
+        "module_args": "",
+        "module_id": "d98befb0dee1336a498f3ec5bb82493b",
+        "module_name": "ReJSON",
+        "semantic_version": "8.6.6"
+      },
+      {
+        "module_args": "",
+        "module_id": "ea2cb38fd9f84531377fb4546c0f67be",
+        "module_name": "bf",
+        "semantic_version": "8.6.4"
+      },
+      {
+        "module_args": "",
+        "module_id": "d77ea295188e8a2e17adbdd8af0dc98d",
+        "module_name": "timeseries",
+        "semantic_version": "8.6.1"
+      }
+    ],
+    "port": 12000,
+    "eviction_policy": "noeviction",
+    "conns": 32,
+    "sched_policy": "mnp"
+  },
+  "shards": [
+    {
+      "shardId": "1",
+      "processId": 1911,
+      "redisVersion": "8.6.2",
+      "workers": 0,
+      "workerSettingSource": "Software extended database configuration",
+      "cpuUserSeconds": 6326.61,
+      "cpuSystemSeconds": 239.19,
+      "cpuSampleMonotonic": 13298.636809772,
+      "threadNames": [
+        "bio_aof",
+        "bio_close_file",
+        "bio_lazy_free",
+        "ccomp",
+        "coord-0203",
+        "coord-0473",
+        "coord-1573",
+        "coord-2172",
+        "coord-2831",
+        "coord-2846",
+        "coord-4375",
+        "coord-4423",
+        "coord-4535",
+        "coord-5539",
+        "coord-5748",
+        "coord-6133",
+        "coord-6779",
+        "coord-7802",
+        "coord-8122",
+        "coord-8192",
+        "coord-8251",
+        "coord-8657",
+        "coord-8682",
+        "coord-9653",
+        "gc-1343",
+        "jemalloc_bg_thd",
+        "jemalloc_bg_thd",
+        "jemalloc_bg_thd",
+        "jemalloc_bg_thd",
+        "redis-server-8.",
+        "search-uv-1",
+        "timeseries-el"
+      ],
+      "aofRewriteInProgress": 0,
+      "rdbSaveInProgress": 0
+    },
+    {
+      "shardId": "2",
+      "processId": 1944,
+      "redisVersion": "8.6.2",
+      "workers": 0,
+      "workerSettingSource": "Software extended database configuration",
+      "cpuUserSeconds": 6924.86,
+      "cpuSystemSeconds": 266.04,
+      "cpuSampleMonotonic": 13298.637613379,
+      "threadNames": [
+        "bio_aof",
+        "bio_close_file",
+        "bio_lazy_free",
+        "ccomp",
+        "coord-1673",
+        "coord-1941",
+        "coord-2064",
+        "coord-2419",
+        "coord-2531",
+        "coord-3522",
+        "coord-3539",
+        "coord-3572",
+        "coord-4044",
+        "coord-4244",
+        "coord-4829",
+        "coord-5025",
+        "coord-5439",
+        "coord-5682",
+        "coord-7015",
+        "coord-7768",
+        "coord-8518",
+        "coord-9008",
+        "coord-9589",
+        "coord-9745",
+        "gc-5497",
+        "jemalloc_bg_thd",
+        "jemalloc_bg_thd",
+        "jemalloc_bg_thd",
+        "jemalloc_bg_thd",
+        "redis-server-8.",
+        "search-uv-1",
+        "timeseries-el"
+      ],
+      "aofRewriteInProgress": 0,
+      "rdbSaveInProgress": 0
+    }
+  ],
+  "pythonVersion": "3.12.3",
+  "os": "Linux-7.0.0-1014-aws-aarch64-with-glibc2.39"
+}

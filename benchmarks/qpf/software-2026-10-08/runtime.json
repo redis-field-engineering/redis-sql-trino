@@ -1,0 +1,31 @@
+{
+  "connectorRevision": "dbcb518c541b3eba22b4471cb71509233ab09efa",
+  "connectorJarSha256": "34cc1768d73322dd2b8b5f1f5a0bd3c087eb2f5a95ae5c9a5d979c5e6cc3e180",
+  "connectorZipSha256": "3ff41b1b0f9447c1895f59b12f4fa24d381926b55778c015641cbd0da7cccf45",
+  "datasetSha256": "78aecd305590b48cc3524ea93010eb0806a415de828478d261617383cd3a2eaf",
+  "datasetRows": 5000000,
+  "datasetColumns": 105,
+  "trinoImage": "sha256:db58cc93e593a2706553745f276bb119c9810e69918be56ecde088ba7ccb0534",
+  "redisImage": "sha256:a6e52eea1157c836d5eebbea9aae1aa64aaee91522f82791c8799b7b9ec964d9",
+  "deployment": "Redis Software",
+  "instanceType": "m8g.4xlarge",
+  "redisCpuSet": "0-7",
+  "trinoCpuSet": "8-15",
+  "redisMemoryGiB": 48,
+  "databaseMemoryGiB": 36,
+  "trinoMemoryGiB": 12,
+  "trinoHeapGiB": 8,
+  "shards": 2,
+  "replication": false,
+  "persistence": "AOF every second",
+  "bucket": "trino-qpf2-3443582-735486936198",
+  "prefix": "controlled-20261008/",
+  "redisImageId": "sha256:a6e52eea1157c836d5eebbea9aae1aa64aaee91522f82791c8799b7b9ec964d9",
+  "redisImageRepoDigests": [
+    "redislabs/redis@sha256:a6e52eea1157c836d5eebbea9aae1aa64aaee91522f82791c8799b7b9ec964d9"
+  ],
+  "trinoImageId": "sha256:db58cc93e593a2706553745f276bb119c9810e69918be56ecde088ba7ccb0534",
+  "trinoImageRepoDigests": [
+    "trinodb/trino@sha256:db58cc93e593a2706553745f276bb119c9810e69918be56ecde088ba7ccb0534"
+  ]
+}

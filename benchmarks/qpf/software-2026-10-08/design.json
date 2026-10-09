@@ -1,0 +1,77 @@
+{
+  "seed": 20261008,
+  "cells": [
+    [
+      2,
+      0,
+      8
+    ],
+    [
+      0,
+      0,
+      8
+    ],
+    [
+      2,
+      1,
+      8
+    ],
+    [
+      2,
+      1,
+      1
+    ],
+    [
+      0,
+      1,
+      4
+    ],
+    [
+      2,
+      0,
+      4
+    ],
+    [
+      2,
+      0,
+      1
+    ],
+    [
+      0,
+      1,
+      8
+    ],
+    [
+      0,
+      0,
+      1
+    ],
+    [
+      2,
+      1,
+      4
+    ],
+    [
+      0,
+      1,
+      1
+    ],
+    [
+      0,
+      0,
+      4
+    ]
+  ],
+  "roundsPerCell": 3,
+  "queriesPerRound": 12,
+  "workload": [
+    3,
+    5,
+    6,
+    30
+  ],
+  "deployment": "Redis Software",
+  "warmup": "One untimed execution of each query after each Trino restart; Redis stays running.",
+  "cpuMeaning": "cgroup v2 CPU seconds / wall seconds, including all Redis Software services or the whole Trino container.",
+  "tailCaution": "Small-sample latency quantiles are descriptive, not a production SLO."
+}

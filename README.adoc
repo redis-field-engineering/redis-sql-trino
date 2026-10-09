@@ -715,6 +715,12 @@ Additional cores can reduce retrieval and conversion time when a scan is partiti
 The benefit to an individual query depends on its bottleneck; see the parallel document scan section below for eligibility, discovery costs and measured results.
 The Cloud acceptance and QPF samples in link:benchmarks/issue-135-136/README.adoc[the issue report] pin the earlier single-split build with four connections and do not validate the later automatic planner.
 
+A controlled Redis Software run on 5 million rows and all 105 ClickBench columns measured Standard/2x QPF, one/automatic splits and 1/4/8 SQL clients.
+All 432 measured queries were correct.
+With automatic splits, 2x QPF improved median throughput by 53% to 62%; the best measured balance was 2x QPF with four concurrent clients, which matched the highest throughput while avoiding the latency increase at eight clients.
+For one client, automatic splits plus 2x QPF completed the query mix about 2.0x as fast as one source plus 2x QPF; the pushed-down Q3 remained one source and did not gain from connector splits.
+See link:benchmarks/qpf/README.adoc[the controlled QPF, split and concurrency benchmark] for the full matrix, CPU measurements, limitations and retained evidence.
+
 For mixed analytical and latency-sensitive workloads, evaluate https://redis.io/docs/latest/operate/oss_and_stack/stack-with-enterprise/search/query-performance-factor/[Redis Software query performance factor].
 A local issue #115 experiment with Software 8.2.0-78.18 (Redis/Search 8.6) found that the 2x factor configured three query workers and reduced lookup latency during two concurrent aggregations.
 The 4x factor configured six workers but did not improve that experiment further.
@@ -739,7 +745,7 @@ redisearch.aggregation-pushdown.enabled=false
 Trino then computes aggregates from cursor batches, while Redis still applies supported filters.
 Disabling pushdown transfers more rows and can make aggregations substantially slower, but lets Redis process cursor batches between other commands.
 Aggregation pushdown remains enabled by default.
-The measurements above predate automatic split selection. The current defaults use automatic splits, eight pooled scan connections and `redisearch.cursor-count=1000`; compare configurations with the benchmark when tuning a shared deployment.
+The issue #115 measurements predate automatic split selection. The current defaults use automatic splits, eight pooled scan connections and `redisearch.cursor-count=1000`; compare configurations with the controlled benchmark when tuning a shared deployment.
 See link:benchmarks/issue-115/README.adoc[the experiment report] for the configurations, timing variability, reproduction command and raw samples.
 
 === Parallel document scans

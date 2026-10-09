@@ -1,0 +1,23 @@
+{
+  "run": "trino-qpf-control-20261008-2250",
+  "instanceId": "i-07504982e7357181a",
+  "instanceState": "terminated",
+  "rootVolumesDeleted": [
+    "vol-0194e7ef97295aa33"
+  ],
+  "securityGroupDeleted": "sg-0877b3f8b4d6745c8",
+  "cleanupRuleDeleted": "trino-qpf-control-20261008-2250-deadline",
+  "cleanupFunctionDeleted": "trino-qpf-control-20261008-2250-cleanup",
+  "iamRolesDeleted": [
+    "trino-qpf-control-20261008-2250-runner",
+    "trino-qpf-control-20261008-2250-cleanup"
+  ],
+  "instanceProfileDeleted": "trino-qpf-control-20261008-2250-runner",
+  "retainedEvidence": {
+    "bucket": "trino-qpf2-3443582-735486936198",
+    "prefix": "controlled-20261008/",
+    "private": true,
+    "lifecycle": "Existing 30-day lifecycle retained"
+  },
+  "verifiedUtc": "2026-10-09T02:39:57Z"
+}
