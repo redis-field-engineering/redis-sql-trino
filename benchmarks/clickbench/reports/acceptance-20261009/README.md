@@ -19,4 +19,3 @@ This is a targeted acceptance cohort, not a new 43-query leaderboard result. The
 Backup/restore speed testing is queued after the acceptance measurements. It has no measured speedup yet. The private S3 snapshot is configured for 30-day retention; compute teardown follows the diagnostic, with a verified fallback deadline of October 9 at 9:15 PM Pacific.
 
 Original CSVs, samples, query plans, connector metrics, provenance, and independent correctness records are in `snapshot/out`.
-
