@@ -300,3 +300,5 @@ termination. Redis RAM measured after loading was 487,413,933,024 bytes, includi
 indexes. Persistent AOF size is unavailable, so this is not a complete storage-size
 measurement. Submitted `load_time` and `data_size` remain null. The finishing
 workflow removes dedicated infrastructure after retaining the results.
+
+Dedicated Redis Cloud subscription/database, all four EC2 instances, security group, data volumes, ephemeral artifact bucket, deadline Lambda/rule, IAM roles and instance profile are confirmed deleted. The private encrypted 40-file backup is confirmed retained with 30-day object expiry; local raw archives and validation records remain retained.
