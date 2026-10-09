@@ -1,0 +1,61 @@
+= ClickBench follow-ups: issues 149–152
+
+This change addresses query planning, wide-row hydration and cursor overhead observed in issues #149–#152. It does not claim that the deleted 100M-row Cloud environment's acceptance trials have passed.
+
+== Implementation and capability decisions
+
+* #149: HASH `LIKE '%literal%'` filters use `contains` against loaded raw string fields before loading the projection. No indexed wildcard expansion is used. Other wildcard shapes, ESCAPE clauses, literal control characters and JSON LIKE retain Trino evaluation. Single-column TIMESTAMP(3) HASH TopN with NULLS LAST and LIMIT <= 1000 scans keys/exact timestamps, keeps a bounded heap, then hydrates the winning projected fields with one HMGET per key. Exact timestamp parsing includes integral decimal/scientific spellings and range validation, even for discarded candidates. Ties may choose any valid boundary subset, as SQL permits. Selection must finish before any output; incomplete replies fail and delete the live cursor. The configured query timeout is checked across selection, rather than giving every cursor batch a fresh selection budget. Other sort shapes retain Trino TopN.
+* #150: absent distinct-cardinality statistics, unfiltered cached document count is a conservative group-count upper bound. Unknown counts and counts above `redisearch.aggregation-group-limit` reject grouped pushdown during planning. The default budget is 1,000,000; it must not exceed the deployment's actual MAX_AGGREGATE_GROUPS. Global aggregates remain eligible. This avoids execution-time fallback/replay and does not change server limits. A growing index or stale metadata can still cause a server error; refresh metadata/lower the budget when needed. Exact distinct counts remain in Trino.
+* #151: large BIGINT equality/IN uses inclusive numeric envelopes widened by one double ULP on each side. Trino retains the original exact domain. Decimal parsing and adjacent signed IDs cannot cause false negatives; neighboring IDs may be received and rejected. Adjacent IN values merged into short inclusive ranges are handled, with a maximum endpoint span of 1000 per range. Larger/unbounded unsafe ranges, nullable domains and tables without a queryable NUMERIC field retain their existing fallback. HASH values use exact recovery; JSON numbers use their stored representation. There is no companion index, new stored field or migration cost.
+* #152: `redisearch.narrow-scan-cursor-count` optionally increases initial and later cursor batches for unbounded scans of at most two input fields, including exact distinct scans. Default 0 preserves `cursor-count`; the maximum is 10,000. Grouped operations and wide scans retain their existing count. Only one cursor request is prefetched, hash reads remain buffered per batch, and current converted batch retention is reported to Trino. Larger responses and hash-command batches cost memory; strings have no fixed byte-length bound, so measure the target workload before enabling this. No approximation or unsafe server-side distinct strategy is introduced.
+
+The timestamp path uses the connector's existing weak read consistency. It provides no snapshot across selection and hydration under concurrent updates/deletes. NULLS FIRST, multi-column timestamp ordering, JSON ordering and larger LIMITs fall back. No default-versus-OSS performance claim is made.
+
+== Validation
+
+`./mvnw -q package` passed 368 tests with zero failures/errors and 18 skips. The additional JSON BIGINT equality/IN assertions passed on both local topologies. The packaged-plugin product suite passed on both catalogs. Both final-source distinct measurement invocations passed all six expected-count assertions. `git diff --check` was clean.
+
+== Local correctness and measurement protocol
+
+The bounded fixture in `TestClickBenchFollowUps` has 10,000 HASH rows and 105 columns: 10,000 adjacent UserIDs starting at 2^53, 10,000 unique URLs (1,000 contain lowercase `google`), monotonically increasing timestamp milliseconds, and 102 DOUBLE fields with an exact stored decimal spelling. The fixture hash in `fixture.sha256` uses sorted-key compact JSONL objects with `key` and `fields`, one newline per row. `source.sha256` fingerprints the Java paths/contents used for the final runs.
+
+Single-shard and two-shard OSS Cluster API correctness fixtures use local Redis Enterprise Software `8.2.0-78.18`, Trino 483 and Java 25 on an aarch64 host. The local Docker VM exposes 10 CPUs and 8,319,500,288 bytes of memory. The arm64 Linux Redis image ID is `sha256:d65d3551ac59f000ee284b296e4cadff4714bab10764d6db5fac7c4fc05d8d6b`, with repository digest `sha256:a6e52eea1157c836d5eebbea9aae1aa64aaee91522f82791c8799b7b9ec964d9`.
+
+Additional fixtures cover duplicate/missing IDs, both signed extremes, adjacent IDs above 2^53, exact DISTINCT with NULL/empty/case-sensitive strings, timestamp ties/NULLs/large adjacent values/integral spellings, invalid timestamp overflow, and equal grouping intents with a constant grouping column. Cursor tests inject a timeout warning after selection has consumed a real batch and prove failure without candidate output plus deletion on the actual owning node. Existing HASH/JSON range, aggregation and cursor regressions are retained.
+
+For the 105-column filtered TopN fixture, received candidates = 1,000, hydrated fields = 1,050, HMGET commands = 10, final output = 10 rows. All 105 fields are checked against independently generated fixture values. For the equality lookup of 9007199254740993, received rows/exact HGETs = 3, and the exact residual returns one row. These are bounded-fixture counts, not full-data results or a wall-time speedup comparison.
+
+The distinct measurement compares cursor sizes 1,000 and 10,000 on unchanged source/data. Each configuration starts a fresh test JVM/database, writes identical rows and runs three attempts per query with Redis kept running. Attempts 1 include first-query/JIT/planning effects; attempts 2/3 are warm. UserID and URL distinct results must both equal the independent generated count of 10,000. URL is a local string-distinct surrogate, not the full ClickBench SearchPhrase distribution. No page-cache clearing or full-data cold-state claim is made.
+
+[source,shell]
+----
+./mvnw -q -Dtest='TestClickBenchFollowUps#benchmarkNarrowScans' \
+  -Dfollowups.benchmark=true -Dfollowups.cursor-count=1000 test
+./mvnw -q -Dtest='TestClickBenchFollowUps#benchmarkNarrowScans' \
+  -Dfollowups.benchmark=true -Dfollowups.cursor-count=10000 test
+----
+
+Run these sequentially without other test workloads. Retain every `FOLLOWUPS_BENCH` line, not just the best timing. `distinct.csv` records wall time, total Trino operator CPU, physical input bytes/positions, peak tracked Trino user memory, received rows, aggregate/cursor requests, exact hash fields/commands/batches, Redis request time, exact wait and row-conversion time. Physical bytes are Trino page bytes, not Redis wire bytes. CPU/connector durations are summed component times, not query elapsed time. Peak tracked Trino memory is not process RSS and excludes some transport/temporary selection allocations. Failures must retain null elapsed values; these local runs are not statistical evidence for production speedups.
+
+== Retained local results (2026-10-09)
+
+All twelve measured outputs passed the generated exact 10,000-distinct reference; there were no failed attempts in these final runs. See `distinct.csv`, `distinct-1000.log` and `distinct-10000.log` for all metrics and attempts.
+
+[cols="1,1,1,1,1",options="header"]
+|===
+|Column |Cursor rows |Attempt 1 (ms) |Attempt 2 (ms) |Attempt 3 (ms)
+|UserID |1000 |5305.74 |1392.41 |805.05
+|UserID |10000 |2359.39 |558.17 |351.81
+|URL |1000 |567.87 |468.05 |467.05
+|URL |10000 |322.96 |744.61 |296.19
+|===
+
+Every attempt received 10,000 rows. Aggregate requests remained 1. Cursor requests fell from 10 to 1 for both columns. UserID still required 10,000 exact HGET commands/fields, but their batches fell from 10 to 1; URL required no exact hash reads. Physical Trino page bytes remained 90,000 (UserID) and 157,890 (URL). The URL second attempt regressed while the third improved; these small, separately started JVM runs justify measuring the opt-in setting, not changing defaults or claiming a production speedup. Peak tracked Trino memory was 108,208–1,181,016 bytes for UserID and 189,680 bytes for URL; these sampled query values do not measure the full transport/JVM memory cost of larger batches.
+
+== Remaining full-data acceptance plan
+
+Do not recreate paid resources as part of this PR. A separate reviewed measurement run must pin the original 99,997,497-row / 105-column source SHA256 `a390f6cb782f6aaef278c72fc1dd86c4f30bc843ebab3c159e9bd4d45ddb079f`, clean baseline/candidate archives and JAR hashes, Redis version/topology/QPF/group budget, host/disk/network placement, Trino settings and connector settings.
+
+Use the retained #148 methodology: unchanged dataset, three attempts for Q20/Q24/Q34/Q35/Q5/Q6, the existing 1200-second limit, Trino restart/runner page-cache clear before each query block, Redis left running, retained CSV checksums, independent full-data DuckDB references and valid LIMIT-boundary tie validation. Start with narrow batching disabled, then compare the opt-in count without changing other settings. Capture EXPLAIN, elapsed/CPU/physical rows/page bytes, received candidates, cursor/hash fields/commands/batches, component timings, process RSS/heap and peak Trino memory. Separately capture Redis/server and network telemetry to quantify wire bytes and resource costs.
+
+Q24 must finish all three attempts and hydrate only final candidates while preserving its original wildcard and timestamp semantics. Q20 must receive substantially fewer than all table rows. Q34 must remain a Trino aggregation under the original group budget, and Q35 must remain exact. Q5/Q6 must remain exact, including large adjacent UserIDs and string/NULL semantics. Retain every failure as null; do not increase the time limit or replace exact counts with approximate results. Full-data acceptance for #149/#151/#152 remains outstanding until that evidence exists.

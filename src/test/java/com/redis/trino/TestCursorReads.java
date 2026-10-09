@@ -89,25 +89,65 @@ public class TestCursorReads extends AbstractTestQueryFramework {
                             failure -> assertThat(failure.getErrorCode())
                                     .isEqualTo(RediSearchErrorCode.REDISEARCH_INCOMPLETE_RESULT.toErrorCode()));
             assertThat(initialCursor.get().getCursorId()).isPositive();
-            // Use the actual owning node; the other shard's FT.INFO cannot prove this cursor was deleted.
-            var connection = session.getConnection();
-            StatefulRedisConnection<String, String> owner = connection instanceof StatefulRedisClusterConnection<String, String> cluster
-                    ? cluster.getConnection(initialCursor.get().getNodeId().orElseThrow())
-                    : (StatefulRedisConnection<String, String>) connection;
-            long deadline = System.nanoTime() + TIMEOUT.toNanos();
-            while (true) {
-                List<Object> info = owner.sync().dispatch(FT_INFO,
-                        new NestedMultiOutput<>(StringCodec.UTF8), new CommandArgs<>(StringCodec.UTF8).add("warned_initial"));
-                List<?> stats = (List<?>) info.get(info.indexOf("cursor_stats") + 1);
-                if ((Long) stats.get(stats.indexOf("index_total") + 1) == 0) { break; }
-                assertThat(System.nanoTime()).as("initial cursor deleted within %s", TIMEOUT).isLessThan(deadline);
-                Thread.sleep(10);
-            }
-            assertThatThrownBy(() -> owner.sync().ftCursorread("warned_initial", initialCursor.get(), 1))
-                    .isInstanceOf(RedisCommandExecutionException.class).hasMessageContaining("Cursor not found");
+            assertCursorDeleted(session, "warned_initial", initialCursor.get());
         } finally {
             session.shutdown();
         }
+    }
+
+    @Test
+    public void testTopNRejectsLaterWarningWithoutOutputAndDeletesCursor() throws InterruptedException {
+        String index = "warned_topn";
+        redisearch.getConnection().sync().ftCreate(index, CreateArgs.builder().withPrefix(index + ":").build(),
+                List.of(NumericFieldArgs.builder().name("id").build()));
+        redisearch.writeHashes(index + ":", 100);
+        RediSearchColumnTypes.write(redisearch.getConnection().sync(), index,
+                Map.of("id", io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS));
+        redisearch.awaitIndexed(index);
+        TypeManager types = (TypeManager) java.lang.reflect.Proxy.newProxyInstance(
+                TypeManager.class.getClassLoader(), new Class<?>[] {TypeManager.class},
+                (proxy, method, args) -> io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS);
+        AtomicReference<Cursor> live = new AtomicReference<>();
+        java.util.concurrent.atomic.AtomicInteger batches = new java.util.concurrent.atomic.AtomicInteger();
+        RediSearchSession session = new RediSearchSession(types, new RediSearchConfig()
+                .setUri(redisearch.getRedisURI()).setCluster(deployment().isCluster()).setCursorCount(7)) {
+            @Override
+            public AggregateResult result(ExactHashReader exactReader, RediSearchRowReader reader, Optional<Cursor> cursor,
+                    AggregationReply<String> reply, RediSearchReadStats stats) {
+                reply.getCursor().ifPresent(current -> live.compareAndSet(null, current));
+                if (batches.incrementAndGet() == 2) { reply.getReplies().getFirst().getWarnings().add("Timeout limit was reached"); }
+                return super.result(exactReader, reader, cursor, reply, stats);
+            }
+        };
+        try (var reader = session.exactHashReader()) {
+            var table = new RediSearchTableHandle(new SchemaTableName("default", index), index)
+                    .withTopN(List.of(new RediSearchSortItem("id", true, true)), 10);
+            assertThatThrownBy(() -> session.aggregate(session.scanConnection(), table,
+                    List.of(RediSearchBuiltinField.KEY.getColumnHandle()), reader, new RediSearchReadStats()))
+                    .isInstanceOfSatisfying(TrinoException.class, failure -> assertThat(failure.getErrorCode())
+                            .isEqualTo(RediSearchErrorCode.REDISEARCH_INCOMPLETE_RESULT.toErrorCode()));
+            assertThat(batches.get()).isEqualTo(2);
+            assertCursorDeleted(session, index, live.get());
+        } finally { session.shutdown(); }
+    }
+
+    private void assertCursorDeleted(RediSearchSession session, String index, Cursor cursor) throws InterruptedException {
+        // Use the actual owning node; the other shard's FT.INFO cannot prove this cursor was deleted.
+        var connection = session.getConnection();
+        StatefulRedisConnection<String, String> owner = connection instanceof StatefulRedisClusterConnection<String, String> cluster
+                ? cluster.getConnection(cursor.getNodeId().orElseThrow())
+                : (StatefulRedisConnection<String, String>) connection;
+        long deadline = System.nanoTime() + TIMEOUT.toNanos();
+        while (true) {
+            List<Object> info = owner.sync().dispatch(FT_INFO,
+                new NestedMultiOutput<>(StringCodec.UTF8), new CommandArgs<>(StringCodec.UTF8).add(index));
+            List<?> stats = (List<?>) info.get(info.indexOf("cursor_stats") + 1);
+            if ((Long) stats.get(stats.indexOf("index_total") + 1) == 0) { break; }
+            assertThat(System.nanoTime()).as("initial cursor deleted within %s", TIMEOUT).isLessThan(deadline);
+            Thread.sleep(10);
+        }
+        assertThatThrownBy(() -> owner.sync().ftCursorread(index, cursor, 1))
+                .isInstanceOf(RedisCommandExecutionException.class).hasMessageContaining("Cursor not found");
     }
 
 	protected Map<String, String> scanProperties() {

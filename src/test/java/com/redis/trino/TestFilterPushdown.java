@@ -165,6 +165,12 @@ public class TestFilterPushdown extends AbstractTestQueryFramework {
 	}
 
 	@Test
+	public void testJsonSubstringLikeRetainsResidual() {
+		assertThat(query("SELECT id FROM jsonstyles WHERE style LIKE '%\"%'"))
+				.isNotFullyPushedDown(FilterNode.class).matches("VALUES VARCHAR '3'");
+	}
+
+	@Test
 	public void testJsonEquality() {
 		// Scans keep the equal rows themselves, since FILTER can't compare the arrays DIALECT 3 loads
 		assertThat(query("SELECT id FROM jsonstyles WHERE style = 'Wheat'")).isFullyPushedDown()

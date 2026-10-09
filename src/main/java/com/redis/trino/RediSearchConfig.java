@@ -122,6 +122,28 @@ public class RediSearchConfig {
         return this;
     }
 
+    private int narrowScanCursorCount;
+
+    @Min(0)
+    @Max(10000)
+    public int getNarrowScanCursorCount() { return narrowScanCursorCount; }
+
+    @Config("redisearch.narrow-scan-cursor-count")
+    @ConfigDescription("Optional batch size for unbounded scans of at most two fields; 0 uses cursor-count, maximum 10000")
+    public RediSearchConfig setNarrowScanCursorCount(int count) { this.narrowScanCursorCount = count; return this; }
+
+    private long aggregationGroupLimit = 1000000;
+
+    @Min(1)
+    public long getAggregationGroupLimit() { return aggregationGroupLimit; }
+
+    @Config("redisearch.aggregation-group-limit")
+    @ConfigDescription("Conservative GROUP BY pushdown budget; must not exceed the server MAX_AGGREGATE_GROUPS")
+    public RediSearchConfig setAggregationGroupLimit(long limit) {
+        this.aggregationGroupLimit = limit;
+        return this;
+    }
+
     private boolean aggregationPushdownEnabled = true;
     private boolean dynamicFilteringEnabled = true;
     private io.airlift.units.Duration dynamicFilteringWaitTimeout = DEFAULT_DYNAMIC_FILTERING_WAIT_TIMEOUT;

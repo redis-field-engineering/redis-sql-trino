@@ -648,6 +648,9 @@ public class RediSearchSession {
 
     public AggregateResult aggregate(Connection scan, RediSearchTableHandle table, List<RediSearchColumnHandle> columns,
             ExactHashReader exactReader, RediSearchReadStats stats, Optional<RediSearchScanPartition> partition) {
+        if (table.getSort().stream().anyMatch(RediSearchSortItem::isLocal)) {
+            return RediSearchLocalTopN.read(this, scan, table, columns, exactReader, stats);
+        }
         Optional<RediSearchIndexInfo> indexInfo = stats.redisRequest(() -> indexInfo(scan.sync, table.getIndex()));
         indexInfo.ifPresent(info -> verifyIndexed(table.getIndex(), info));
         Aggregation aggregation = translator.aggregate(table, columns, indexInfo, partition);
@@ -665,7 +668,8 @@ public class RediSearchSession {
             while (result.getRows().isEmpty() && result.getCursor().isPresent()) {
                 Cursor cursor = result.getCursor().get();
                 stats.cursorRequests.increment();
-                reply = stats.redisRequest(() -> cursorCommands(scan, cursor).read(table, cursor));
+                long count = result.getReader().getCursorCount();
+                reply = stats.redisRequest(() -> cursorCommands(scan, cursor).read(table, cursor, count));
                 liveCursor = nextCursor(reply, Optional.of(cursor));
                 result = result(exactReader, result.getReader(), Optional.of(cursor), reply, stats);
             }
@@ -699,8 +703,13 @@ public class RediSearchSession {
      */
     public CompletableFuture<AggregationReply<String>> cursorReadAsync(Connection scan, RediSearchTableHandle table,
             Cursor cursor, RediSearchReadStats stats) {
+        return cursorReadAsync(scan, table, cursor, stats, config.getCursorCount());
+    }
+
+    public CompletableFuture<AggregationReply<String>> cursorReadAsync(Connection scan, RediSearchTableHandle table,
+            Cursor cursor, RediSearchReadStats stats, long count) {
         stats.cursorRequests.increment();
-        return stats.redisRequestAsync(() -> cursorCommands(scan, cursor).readAsync(table, cursor));
+        return stats.redisRequestAsync(() -> cursorCommands(scan, cursor).readAsync(table, cursor, count));
     }
 
     /**
@@ -724,6 +733,7 @@ public class RediSearchSession {
                         // Recover the stored integer whenever the indexed double may have rounded it.
                         String key = result.getFields().get(RediSearchBuiltinField.KEY.getName()).asString();
                         stats.exactHashReads.increment();
+                        stats.exactHashCommands.increment();
                         exactReads.add(exactReader.read(key, reader.getExactField(position))
                                 .thenAccept(value -> row[position] = value));
                     }
@@ -772,10 +782,10 @@ public class RediSearchSession {
             this.async = async;
         }
 
-        AggregationReply<String> read(RediSearchTableHandle table, Cursor cursor) {
+        AggregationReply<String> read(RediSearchTableHandle table, Cursor cursor, long count) {
             try {
-                if (config.getCursorCount() > 0) {
-                    return sync.ftCursorread(table.getIndex(), cursor, Math.toIntExact(config.getCursorCount()));
+                if (count > 0) {
+                    return sync.ftCursorread(table.getIndex(), cursor, Math.toIntExact(count));
                 }
                 return sync.ftCursorread(table.getIndex(), cursor);
             } catch (RuntimeException failure) {
@@ -783,10 +793,10 @@ public class RediSearchSession {
             }
         }
 
-        CompletableFuture<AggregationReply<String>> readAsync(RediSearchTableHandle table, Cursor cursor) {
+        CompletableFuture<AggregationReply<String>> readAsync(RediSearchTableHandle table, Cursor cursor, long count) {
             try {
-                CompletableFuture<AggregationReply<String>> read = config.getCursorCount() > 0
-                        ? async.ftCursorread(table.getIndex(), cursor, Math.toIntExact(config.getCursorCount())).toCompletableFuture()
+                CompletableFuture<AggregationReply<String>> read = count > 0
+                        ? async.ftCursorread(table.getIndex(), cursor, Math.toIntExact(count)).toCompletableFuture()
                         : async.ftCursorread(table.getIndex(), cursor).toCompletableFuture();
                 return read.exceptionally(failure -> { throw RediSearchCursorRecovery.readFailure(failure); });
             } catch (RuntimeException failure) {
@@ -901,12 +911,21 @@ public class RediSearchSession {
 
         private ExactHashReader() {}
 
-        CompletableFuture<String> read(String key, String field) {
+        private void open() {
             if (reads == null) {
                 reads = connect();
                 reads.connection.setAutoFlushCommands(false);
             }
+        }
+
+        CompletableFuture<String> read(String key, String field) {
+            open();
             return reads.async.hget(key, field).toCompletableFuture();
+        }
+
+        CompletableFuture<List<io.lettuce.core.KeyValue<String, String>>> readFields(String key, List<String> fields) {
+            open();
+            return reads.async.hmget(key, fields.toArray(String[]::new)).toCompletableFuture();
         }
 
         void flush() {

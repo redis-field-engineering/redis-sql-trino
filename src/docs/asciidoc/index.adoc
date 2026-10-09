@@ -57,6 +57,14 @@ redisearch.uri=redis://localhost:6379
 |Number of rows read during each https://redis.io/docs/stack/search/reference/aggregations/#cursor-api[aggregation cursor] fetch.
 |`1000`
 
+|`redisearch.narrow-scan-cursor-count`
+|Optional batch size for unbounded document scans of at most two input fields. Maximum 10000; 0 uses `cursor-count`. Applies to the initial request and later cursor reads. Larger batches increase response/hydration memory; only one cursor read is prefetched.
+|`0`
+
+|`redisearch.aggregation-group-limit`
+|Conservative GROUP BY budget; must not exceed the server MAX_AGGREGATE_GROUPS. Unknown or over-budget document counts retain Trino aggregation. Global aggregates remain eligible.
+|`1000000`
+
 |`redisearch.scan-connections`
 |Number of Redis connections each Trino node's scans take turns on, so that one scan's batches don't hold up other queries' commands.
 |`8`
@@ -333,7 +341,7 @@ The types in the key don't apply to:
 
 [[numeric-values]]
 Redis returns a NUMERIC field loaded by name formatted as a double, rounded to 12 significant digits unless it's an integer.
-So when a query reads DOUBLE, BIGINT or DECIMAL columns, the connector loads hashes with `LOAD *`, which returns every field of each hash, and JSON documents with `DIALECT 3`, and reads the values as they're stored.
+DOUBLE and DECIMAL scans use `LOAD *` on HASH tables to retain exact stored values. BIGINT and TIMESTAMP(3) scans load named fields and recover possibly rounded large values with exact HGETs. JSON scans use `DIALECT 3` to read numbers as stored.
 NUMERIC fields still hold doubles for queries and aggregations in Redis: see <<pushdown,Pushdown>>.
 
 A value its column's type can't hold, such as `4.5` written by another client to a BIGINT column, fails the query with `Value '4.5' is not a valid bigint`.
@@ -348,7 +356,7 @@ Redis evaluates these parts of a query. Trino evaluates everything else on the r
 
 * Filters on indexed fields, combined with `AND`:
 ** `=`, `IN`, `<`, `\<=`, `>`, `>=` and `BETWEEN` on NUMERIC fields of BIGINT, INTEGER, SMALLINT, TINYINT, DOUBLE, REAL, DECIMAL, TIMESTAMP(3) and TIMESTAMP(3) WITH TIME ZONE columns.
-NUMERIC fields hold doubles, so Trino evaluates filters with BIGINT and timestamp values of 2^53 or more (timestamps as epoch milliseconds), and on DECIMAL columns of more than 15 digits, which they can't compare exactly.
+NUMERIC fields hold doubles. Large BIGINT equality/IN values (including short inclusive ranges Trino merges from adjacent IN values) use widened numeric envelopes, retaining exact residual verification in Trino. The envelopes include every matching signed 64-bit value and may include neighboring IDs. Large/unbounded unsafe BIGINT ranges, unsafe timestamp bounds, nullable domains and DECIMAL columns of more than 15 digits retain the existing fallback; no extra index is needed.
 Redis compares a REAL value as the double it parses from the text the connector writes, so `REAL '1.1'` as 1.1 rather than 1.100000023841858.
 ** `=` and `IN` on TAG fields, as a tag query, for VARCHAR, CHAR, BOOLEAN, DATE and UUID columns, whose values are compared as the connector writes them (`true`, `2024-01-02`, a lowercase UUID).
 On DATE columns, a range of up to 1,000 days, such as `BETWEEN`, is queried as the list of its dates. Redis splits stored values into tags on the field's `SEPARATOR` (by default `,` on hashes and none on JSON), trims whitespace around each tag, and ignores case unless the field is `CASESENSITIVE`.
@@ -365,7 +373,7 @@ Trino keeps the equal rows itself, instead of a `FILTER`, when a value has a con
 +
 Redis can't match a missing field or compare strings, so Trino evaluates `IS NULL`, `IS NOT NULL`, a condition combined with `OR \... IS NULL`, and `<>`, `<`, `>` and `BETWEEN` on VARCHAR columns.
 +
-Trino also evaluates `LIKE`. A Redis wildcard query matches single words of a TEXT field, ignores case on a TAG field without `CASESENSITIVE`, and leaves out documents once it has matched `MAXEXPANSIONS` (200 by default) distinct values.
+On HASH fields with supported property names, `LIKE '%literal%'` without additional `%`/`_` wildcards, an ESCAPE clause or literal control characters uses an exact `contains` filter before loading the full projection. Trino evaluates other LIKE shapes and JSON LIKE. A Redis wildcard query matches single words of a TEXT field, ignores case on a TAG field without `CASESENSITIVE`, and leaves out documents once it has matched `MAXEXPANSIONS` (200 by default) distinct values.
 * With `redisearch.aggregation-pushdown.enabled=true` (the default), `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, and `min` and `max` on TIMESTAMP(3) and TIMESTAMP(3) WITH TIME ZONE columns, with or without `GROUP BY`, as `FT.AGGREGATE` with `GROUPBY` and `REDUCE`.
 If any aggregate in a query can't be pushed down, such as `count(DISTINCT \...)` or `count(column)`, or Trino filters the rows itself, Trino computes all of them.
 `count(column)` skips nulls, but Redis's `COUNT` counts documents, so only `count(*)` is pushed down.
@@ -378,11 +386,12 @@ Over RESP2 (`redisearch.resp2`, or a database without RESP3), the shards of a sh
 On a BIGINT column, results and keys are exact only for values and sums below 2^53.
 Trino groups DECIMAL columns itself, and DOUBLE and REAL columns whose names aren't made of letters, digits and `_`.
 Trino evaluates `HAVING` on the groups Redis returns.
+GROUP BY pushdown requires a known cached document count no greater than `redisearch.aggregation-group-limit`, since distinct cardinality is unknown. The count is an upper bound even for filtered queries. Cache staleness/index growth can still trigger a server error; failures are not replayed after delivering output.
 * `sum` and `avg` of arithmetic on hash indexes, such as `sum(quantity * extendedprice)`: `+`, `-`, `*`, `/` and unary `-` on DOUBLE NUMERIC columns, on integer NUMERIC columns cast to DOUBLE, and on DOUBLE constants.
 An `APPLY` step computes the arithmetic before `GROUPBY`, for the documents that have all of its columns (`+APPLY "case(exists(@quantity) && exists(@extendedprice), (@quantity * @extendedprice), 0)"+`), so it needs `case()` too.
 A scan that returns the arithmetic computes it in the connector, from the values as stored.
 Trino computes arithmetic on integers, which SQL fails on when it overflows, on REAL values, which Redis would compute as doubles, and `min` and `max` of arithmetic, since Trino orders nan above other doubles.
-* `LIMIT`, unless Trino filters the rows itself. Trino sorts `ORDER BY \... LIMIT` itself.
+* `LIMIT`, unless Trino filters the rows itself. Eligible numeric HASH TopN uses Redis SORTBY. Single-column TIMESTAMP(3) HASH TopN with NULLS LAST and LIMIT up to 1000 scans only keys/order values and retains exact candidates before pipelined HMGET hydration of their projected fields. Other sort shapes remain in Trino. Timestamp selection checks the configured query timeout over the entire scan and deletes a live cursor on failure; it emits no partial candidates. As with ordinary scans, concurrent writes have no snapshot guarantee.
 
 [[known-limitations]]
 === Known limitations

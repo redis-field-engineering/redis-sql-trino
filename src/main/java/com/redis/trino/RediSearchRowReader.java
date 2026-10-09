@@ -58,6 +58,10 @@ public class RediSearchRowReader {
 	private static final JsonFactory JSON = new JsonFactory();
 
 	private final List<String> columns;
+	private long cursorCount;
+
+	public long getCursorCount() { return cursorCount; }
+	RediSearchRowReader withCursorCount(long count) { this.cursorCount = count; return this; }
 	// The field each column is read from
 	private final String[] fields;
 	private final boolean[] jsonArrays;

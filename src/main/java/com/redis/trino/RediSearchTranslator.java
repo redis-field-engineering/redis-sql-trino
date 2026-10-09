@@ -168,7 +168,8 @@ public class RediSearchTranslator {
 		boolean json = scan && keyType.filter(RediSearchIndexInfo.KeyType.JSON::equals).isPresent();
 		boolean hashScan = scan && keyType.filter(RediSearchIndexInfo.KeyType.HASH::equals).isPresent();
 		// DIALECT 3 loads JSON values as arrays, which FILTER can't compare, so the reader keeps a scan's equal rows
-		Map<String, String> filters = json ? Map.of() : queryBuilder.filters(equalities);
+		Map<String, String> filters = new LinkedHashMap<>(json ? Map.of() : queryBuilder.filters(equalities));
+		table.getFilters().forEach((field, filter) -> filters.merge(field, filter, (left, right) -> "(" + left + ") && (" + right + ")"));
 		// LOAD * returns every field of each hash, so only scans that can't tell a rounded value from an exact one use it
 		boolean loadAll = hashScan && columns.stream().anyMatch(RediSearchTranslator::isRoundedUndetectably);
 		AggregateArgs.Builder args = AggregateArgs.builder().dialect(json ? JSON_DIALECT : DIALECT);
@@ -179,6 +180,7 @@ public class RediSearchTranslator {
 		Set<String> loads = new LinkedHashSet<>();
 		loads.add(RediSearchBuiltinField.KEY.getName());
 		loads.addAll(equalities.keySet());
+		loads.addAll(filters.keySet());
 		// Sums and averages counting values, whose APPLY steps refer to their columns
 		List<RediSearchAggregation> countingValues = table.getMetricAggregations().stream()
 				.filter(RediSearchAggregation::isCountingValues).toList();
@@ -214,7 +216,9 @@ public class RediSearchTranslator {
 		}
 		// Steps run in the order they're added: GROUPBY leaves only the groups, SORTBY keeps the first LIMIT of the
 		// filtered rows, and LIMIT counts the filtered rows
-		filters.values().forEach(args::filter);
+		// HASH filters only need their own fields. Execute these before loading a wide projection.
+		boolean earlyFilters = hashScan && !filters.isEmpty();
+		if (!earlyFilters) { filters.values().forEach(args::filter); }
 		for (RediSearchAggregation metric : countingValues) {
 			args.apply(metric.valueExpression(), metric.getValueField());
 			args.apply(metric.hasValueExpression(), metric.getHasValueField());
@@ -252,7 +256,9 @@ public class RediSearchTranslator {
 		}
 		// Only a pushed-down SQL LIMIT caps the results; otherwise the cursor streams every matching document
 		table.getLimit().ifPresent(limit -> args.limit(0, limit));
-		args.withCursor(WithCursor.of(config.getCursorCount() > 0 ? config.getCursorCount() : null));
+		long cursorCount = scan && table.getLimit().isEmpty() && columns.size() <= 2
+				&& config.getNarrowScanCursorCount() > 0 ? config.getNarrowScanCursorCount() : config.getCursorCount();
+		args.withCursor(WithCursor.of(cursorCount > 0 ? cursorCount : null));
 		List<RediSearchAggregationTerm> terms = table.getTermAggregations();
 		boolean global = groupBy.isPresent() && (terms == null || terms.isEmpty());
 		Set<String> jsonArrays = new LinkedHashSet<>();
@@ -260,16 +266,22 @@ public class RediSearchTranslator {
 			loads.stream().filter(load -> !RediSearchBuiltinField.isKeyColumn(load)).forEach(jsonArrays::add);
 		}
 		AggregateArgs aggregateArgs = loadAll ? new LoadAllArgs(args.build()) : args.build();
+		if (earlyFilters) {
+			AggregateArgs.Builder prefix = AggregateArgs.builder();
+			filters.keySet().forEach(field -> prefix.load("@" + field));
+			filters.values().forEach(prefix::filter);
+			aggregateArgs = new PrefixArgs(prefix.build(), aggregateArgs);
+		}
 		return new Aggregation(table.getIndex(), query, filters.values(), aggregateArgs, global,
 				new RediSearchRowReader(columns.stream().map(RediSearchColumnHandle::getName).toList(), sources,
 						exactSources, jsonArrays, table.getMetricAggregations(), exactNumbers,
-						json ? equalities : Map.of(), computes ? Optional.of(outputs) : Optional.empty()));
+						json ? equalities : Map.of(), computes ? Optional.of(outputs) : Optional.empty()).withCursorCount(cursorCount));
 	}
 
 	/**
 	 * The columns a scan reads: those it returns, except arithmetic, and the columns the arithmetic refers to.
 	 */
-	private static List<RediSearchColumnHandle> readColumns(List<RediSearchColumnHandle> outputs) {
+	static List<RediSearchColumnHandle> readColumns(List<RediSearchColumnHandle> outputs) {
 		Map<String, RediSearchColumnHandle> columns = new LinkedHashMap<>();
 		outputs.stream().filter(column -> column.getExpression().isEmpty())
 				.forEach(column -> columns.putIfAbsent(column.getName(), column));
@@ -286,7 +298,7 @@ public class RediSearchTranslator {
 	// Values of these types can lose digits formatted as doubles. Integers of the other types are exact as doubles,
 	// and REAL values have fewer than 12 significant digits.
 	private static boolean isRoundedByRedis(RediSearchColumnHandle column) {
-		return isRoundedUndetectably(column) || (isNumericField(column) && column.getType() == BIGINT);
+		return isRoundedUndetectably(column) || (isNumericField(column) && (column.getType() == BIGINT || column.getType() == io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS));
 	}
 
 	// A rounded DOUBLE or DECIMAL can't be told from an exact value, unlike a BIGINT
@@ -336,6 +348,16 @@ public class RediSearchTranslator {
 			arguments.add(value.name());
 			return super.add(value);
 		}
+	}
+
+	private static class PrefixArgs extends AggregateArgs {
+		private final AggregateArgs prefix;
+		private final AggregateArgs args;
+		PrefixArgs(AggregateArgs prefix, AggregateArgs args) { this.prefix = prefix; this.args = args; }
+		@Override
+		public void build(CommandArgs<?, ?> commandArgs) { prefix.build(commandArgs); args.build(commandArgs); }
+		@Override
+		public Optional<WithCursor> getWithCursor() { return args.getWithCursor(); }
 	}
 
 	/**

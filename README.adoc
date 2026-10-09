@@ -419,7 +419,8 @@ SELECT name, abv FROM beers WHERE abv > 5 LIMIT 10
 Rows to the client
 ----
 
-Redis returns the matching documents in batches of `redisearch.cursor-count` rows (default 1000). The connector reads each batch while Trino processes the one before it.
+Redis returns the matching documents in batches of `redisearch.cursor-count` rows (default 1000).
+An optional `redisearch.narrow-scan-cursor-count` (0 by default, maximum 10000) overrides the initial and subsequent cursor counts for unbounded document scans of at most two input columns. This can reduce round trips for exact distinct scans, while increasing buffered rows; wide scans and grouped operations retain `cursor-count`. The connector reads each batch while Trino processes the one before it.
 
 Set `redisearch.query-timeout-ms` to override Redis's aggregation query timeout in milliseconds.
 The default value, `0`, leaves the server timeout unchanged. Redis Cloud may reject `CONFIG SET search-timeout`, while accepting a per-query `TIMEOUT`.
@@ -541,7 +542,8 @@ On TAG and TEXT fields, the query also matches rows that aren't equal.
 A TEXT query finds the documents containing the value's words.
 A TAG query matches any of the tags Redis splits a value into on the field's `SEPARATOR`, ignoring surrounding whitespace and, unless the field is `CASESENSITIVE`, case.
 A `FILTER` step then keeps the rows equal to the value; scans of JSON documents keep them in the connector. For values with control characters, Trino filters them instead.
-Trino evaluates `LIKE`, `IS NULL`, `IS NOT NULL`, and comparisons other than `=` and `IN` on VARCHAR columns.
+On HASH tables, `LIKE '%literal%'` without other wildcards or an ESCAPE clause uses an exact `contains` pipeline filter before loading projected fields. Other LIKE shapes, JSON LIKE, `IS NULL`, `IS NOT NULL`, and VARCHAR range comparisons stay in Trino.
+Large BIGINT equality/IN values use inclusive widened numeric envelopes with the original exact residual comparison in Trino. Adjacent IN values merged into a short inclusive range are supported; unbounded/large unsafe ranges retain the scan fallback. No companion index or schema/storage change is required.
 * `count(*)`, `min`, `max`, `sum` and `avg` on numeric columns, with or without `GROUP BY`, when Redis evaluates the whole `WHERE` clause
 * `sum` and `avg` of arithmetic on DOUBLE columns of hash indexes, such as `sum(quantity * extendedprice)`, which an `APPLY` step computes
 * Value-preserving widening casts between TINYINT, SMALLINT, INTEGER and BIGINT on indexed NUMERIC fields of hash indexes.
@@ -711,6 +713,9 @@ redisearch.cursor-count=1000
 Pushdown usually has the largest effect because supported filters and aggregations return fewer rows to Trino.
 Automatic split selection can divide eligible document scans among multiple Trino sources; the connection pool bounds their client I/O concurrency.
 Keep the cursor count at 1,000 initially, then compare alternatives with the benchmark on the target workload.
+`redisearch.aggregation-group-limit=1000000` is a conservative planner budget that must not exceed the server's `MAX_AGGREGATE_GROUPS`. GROUP BY remains in Trino when the unfiltered cached document count is unknown or exceeds this budget. Global aggregates remain eligible. Lower the budget for a lower server limit; table growth after metadata caching can still cause a server error, which fails the query without replay.
+Single-column TIMESTAMP(3) TopN on HASH tables with NULLS LAST and LIMIT up to 1000 scans keys and exact order values, retains a bounded heap, then hydrates only the final candidates with pipelined HMGET. Selection must complete before any candidate output is delivered. Other timestamp sort shapes remain in Trino. This reduces wide-row work, but still scans the matching keys and uses the connector's existing read consistency, without snapshot isolation.
+See link:benchmarks/issue-149-152/README.adoc[the bounded local follow-up measurements and full-data validation plan].
 Additional cores can reduce retrieval and conversion time when a scan is partitioned, while global pushed-down operations remain one Redis operation.
 The benefit to an individual query depends on its bottleneck; see the parallel document scan section below for eligibility, discovery costs and measured results.
 The Cloud acceptance and QPF samples in link:benchmarks/issue-135-136/README.adoc[the issue report] pin the earlier single-split build with four connections and do not validate the later automatic planner.

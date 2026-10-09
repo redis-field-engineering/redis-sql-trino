@@ -18,6 +18,7 @@ final class RediSearchReadStats {
 	final LongAdder aggregateRequests = new LongAdder();
 	final LongAdder cursorRequests = new LongAdder();
 	final LongAdder receivedRows = new LongAdder();
+	final LongAdder exactHashCommands = new LongAdder();
 	final LongAdder exactHashReads = new LongAdder();
 	final LongAdder exactHashReadBatches = new LongAdder();
 	final LongAdder requestNanos = new LongAdder();
@@ -60,6 +61,7 @@ final class RediSearchReadStats {
 				"redis.aggregate.requests", new LongCount(aggregateRequests.sum()),
 				"redis.cursor.requests", new LongCount(cursorRequests.sum()),
 				"redis.rows.received", new LongCount(receivedRows.sum()),
+				"redis.exact-hash-commands", new LongCount(exactHashCommands.sum()),
 				"redis.exact-hash-reads", new LongCount(exactHashReads.sum()),
 				"redis.exact-hash-read-batches", new LongCount(exactHashReadBatches.sum()),
 				"redis.request-wall-time", timing(requestNanos.sum()),
