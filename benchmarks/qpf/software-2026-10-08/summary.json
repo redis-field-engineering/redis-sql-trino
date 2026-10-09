@@ -1,0 +1,536 @@
+{
+  "complete": true,
+  "allCorrect": true,
+  "measuredQueries": 432,
+  "cells": [
+    {
+      "factor": 0,
+      "splits": 0,
+      "clients": 1,
+      "measuredQueries": 36,
+      "medianQueriesPerSecond": 0.08500400148803502,
+      "medianRedisShardCpuCores": 2.339896502098454,
+      "medianRedisContainerCpuCores": 3.0203499278479375,
+      "medianTrinoCpuCores": 0.8077092001308842,
+      "queries": {
+        "3": {
+          "samples": 9,
+          "medianSeconds": 6.265666869999222,
+          "p95Seconds": 6.472967936000714,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "5": {
+          "samples": 9,
+          "medianSeconds": 16.510641933000443,
+          "p95Seconds": 23.42478787899927,
+          "observedSourceDrivers": [
+            8
+          ]
+        },
+        "6": {
+          "samples": 9,
+          "medianSeconds": 12.30987481900047,
+          "p95Seconds": 12.559678603000066,
+          "observedSourceDrivers": [
+            8
+          ]
+        },
+        "30": {
+          "samples": 9,
+          "medianSeconds": 11.74093724999966,
+          "p95Seconds": 11.89087721299984,
+          "observedSourceDrivers": [
+            8
+          ]
+        }
+      }
+    },
+    {
+      "factor": 0,
+      "splits": 0,
+      "clients": 4,
+      "measuredQueries": 36,
+      "medianQueriesPerSecond": 0.08841487101047739,
+      "medianRedisShardCpuCores": 2.467810456769869,
+      "medianRedisContainerCpuCores": 3.1818573311217277,
+      "medianTrinoCpuCores": 0.8813087390060035,
+      "queries": {
+        "3": {
+          "samples": 9,
+          "medianSeconds": 6.386108922999483,
+          "p95Seconds": 10.575104965999344,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "5": {
+          "samples": 9,
+          "medianSeconds": 60.39628266900036,
+          "p95Seconds": 81.51394289099972,
+          "observedSourceDrivers": [
+            8
+          ]
+        },
+        "6": {
+          "samples": 9,
+          "medianSeconds": 57.803425105000315,
+          "p95Seconds": 68.96935656900041,
+          "observedSourceDrivers": [
+            8
+          ]
+        },
+        "30": {
+          "samples": 9,
+          "medianSeconds": 57.41874069700043,
+          "p95Seconds": 73.40266199500002,
+          "observedSourceDrivers": [
+            8
+          ]
+        }
+      }
+    },
+    {
+      "factor": 0,
+      "splits": 0,
+      "clients": 8,
+      "measuredQueries": 36,
+      "medianQueriesPerSecond": 0.08657001868616189,
+      "medianRedisShardCpuCores": 2.399439094582819,
+      "medianRedisContainerCpuCores": 3.0964741274973355,
+      "medianTrinoCpuCores": 0.874012027767683,
+      "queries": {
+        "3": {
+          "samples": 9,
+          "medianSeconds": 19.38574649100019,
+          "p95Seconds": 23.271439673999794,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "5": {
+          "samples": 9,
+          "medianSeconds": 109.52585466699975,
+          "p95Seconds": 138.61336857299966,
+          "observedSourceDrivers": [
+            8
+          ]
+        },
+        "6": {
+          "samples": 9,
+          "medianSeconds": 114.85415816199975,
+          "p95Seconds": 138.18367446799994,
+          "observedSourceDrivers": [
+            8
+          ]
+        },
+        "30": {
+          "samples": 9,
+          "medianSeconds": 106.87000305399988,
+          "p95Seconds": 146.55113700200036,
+          "observedSourceDrivers": [
+            8
+          ]
+        }
+      }
+    },
+    {
+      "factor": 0,
+      "splits": 1,
+      "clients": 1,
+      "measuredQueries": 36,
+      "medianQueriesPerSecond": 0.06144261052377402,
+      "medianRedisShardCpuCores": 1.201812589926906,
+      "medianRedisContainerCpuCores": 1.7054563696564866,
+      "medianTrinoCpuCores": 0.5491133149895637,
+      "queries": {
+        "3": {
+          "samples": 9,
+          "medianSeconds": 6.2878073930005485,
+          "p95Seconds": 6.618978105000679,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "5": {
+          "samples": 9,
+          "medianSeconds": 21.869018742999287,
+          "p95Seconds": 26.237338723999528,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "6": {
+          "samples": 9,
+          "medianSeconds": 18.446904405999703,
+          "p95Seconds": 18.609707313999934,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "30": {
+          "samples": 9,
+          "medianSeconds": 18.440912619999835,
+          "p95Seconds": 18.738810177000232,
+          "observedSourceDrivers": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "factor": 0,
+      "splits": 1,
+      "clients": 4,
+      "measuredQueries": 36,
+      "medianQueriesPerSecond": 0.09953600946947846,
+      "medianRedisShardCpuCores": 1.9757580157531076,
+      "medianRedisContainerCpuCores": 2.754411592409074,
+      "medianTrinoCpuCores": 0.9483187862520318,
+      "queries": {
+        "3": {
+          "samples": 9,
+          "medianSeconds": 6.285533909999685,
+          "p95Seconds": 6.501753081000061,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "5": {
+          "samples": 9,
+          "medianSeconds": 57.38620657299998,
+          "p95Seconds": 85.10990859400044,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "6": {
+          "samples": 9,
+          "medianSeconds": 38.94724963399949,
+          "p95Seconds": 58.64464529500037,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "30": {
+          "samples": 9,
+          "medianSeconds": 39.29154944899983,
+          "p95Seconds": 50.35714358699988,
+          "observedSourceDrivers": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "factor": 0,
+      "splits": 1,
+      "clients": 8,
+      "measuredQueries": 36,
+      "medianQueriesPerSecond": 0.11412629948049789,
+      "medianRedisShardCpuCores": 2.2627890397172683,
+      "medianRedisContainerCpuCores": 3.142707885826157,
+      "medianTrinoCpuCores": 1.0646669617962141,
+      "queries": {
+        "3": {
+          "samples": 9,
+          "medianSeconds": 18.990598569000213,
+          "p95Seconds": 19.024353195999538,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "5": {
+          "samples": 9,
+          "medianSeconds": 90.80693516500014,
+          "p95Seconds": 105.14572671699989,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "6": {
+          "samples": 9,
+          "medianSeconds": 63.34026385699963,
+          "p95Seconds": 99.42943902200022,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "30": {
+          "samples": 9,
+          "medianSeconds": 58.31506365699988,
+          "p95Seconds": 78.5840934709995,
+          "observedSourceDrivers": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "factor": 2,
+      "splits": 0,
+      "clients": 1,
+      "measuredQueries": 36,
+      "medianQueriesPerSecond": 0.13034789886250178,
+      "medianRedisShardCpuCores": 3.6685934327349607,
+      "medianRedisContainerCpuCores": 4.689438776284276,
+      "medianTrinoCpuCores": 1.2420701538788006,
+      "queries": {
+        "3": {
+          "samples": 9,
+          "medianSeconds": 7.044521424000777,
+          "p95Seconds": 7.070257461999972,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "5": {
+          "samples": 9,
+          "medianSeconds": 10.331375210999795,
+          "p95Seconds": 10.8363036690007,
+          "observedSourceDrivers": [
+            8
+          ]
+        },
+        "6": {
+          "samples": 9,
+          "medianSeconds": 6.821928147000108,
+          "p95Seconds": 6.917362985000182,
+          "observedSourceDrivers": [
+            8
+          ]
+        },
+        "30": {
+          "samples": 9,
+          "medianSeconds": 6.430876401000205,
+          "p95Seconds": 6.51278936000017,
+          "observedSourceDrivers": [
+            8
+          ]
+        }
+      }
+    },
+    {
+      "factor": 2,
+      "splits": 0,
+      "clients": 4,
+      "measuredQueries": 36,
+      "medianQueriesPerSecond": 0.1433850077698158,
+      "medianRedisShardCpuCores": 4.095792951864231,
+      "medianRedisContainerCpuCores": 5.225883714521971,
+      "medianTrinoCpuCores": 1.4268801097527162,
+      "queries": {
+        "3": {
+          "samples": 9,
+          "medianSeconds": 7.133255520999228,
+          "p95Seconds": 12.226594337999813,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "5": {
+          "samples": 9,
+          "medianSeconds": 36.75723979200029,
+          "p95Seconds": 42.341459910000594,
+          "observedSourceDrivers": [
+            8
+          ]
+        },
+        "6": {
+          "samples": 9,
+          "medianSeconds": 36.04546691199994,
+          "p95Seconds": 42.75171991299976,
+          "observedSourceDrivers": [
+            8
+          ]
+        },
+        "30": {
+          "samples": 9,
+          "medianSeconds": 30.079943357000047,
+          "p95Seconds": 42.380366664000576,
+          "observedSourceDrivers": [
+            8
+          ]
+        }
+      }
+    },
+    {
+      "factor": 2,
+      "splits": 0,
+      "clients": 8,
+      "measuredQueries": 36,
+      "medianQueriesPerSecond": 0.13875382529545047,
+      "medianRedisShardCpuCores": 4.012119373649134,
+      "medianRedisContainerCpuCores": 5.1002010492436085,
+      "medianTrinoCpuCores": 1.4094462002869683,
+      "queries": {
+        "3": {
+          "samples": 9,
+          "medianSeconds": 15.550490739999987,
+          "p95Seconds": 19.206955051000023,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "5": {
+          "samples": 9,
+          "medianSeconds": 78.07093729799999,
+          "p95Seconds": 90.10869635200015,
+          "observedSourceDrivers": [
+            8
+          ]
+        },
+        "6": {
+          "samples": 9,
+          "medianSeconds": 70.38307543000019,
+          "p95Seconds": 72.184332283,
+          "observedSourceDrivers": [
+            8
+          ]
+        },
+        "30": {
+          "samples": 9,
+          "medianSeconds": 70.47351388100014,
+          "p95Seconds": 88.31003510000028,
+          "observedSourceDrivers": [
+            8
+          ]
+        }
+      }
+    },
+    {
+      "factor": 2,
+      "splits": 1,
+      "clients": 1,
+      "measuredQueries": 36,
+      "medianQueriesPerSecond": 0.06465199097013254,
+      "medianRedisShardCpuCores": 1.306379927914097,
+      "medianRedisContainerCpuCores": 1.8358191090572948,
+      "medianTrinoCpuCores": 0.5648616061329584,
+      "queries": {
+        "3": {
+          "samples": 9,
+          "medianSeconds": 7.019978720999916,
+          "p95Seconds": 7.047009615000206,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "5": {
+          "samples": 9,
+          "medianSeconds": 19.99978507900005,
+          "p95Seconds": 24.312198435000028,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "6": {
+          "samples": 9,
+          "medianSeconds": 16.805245411000215,
+          "p95Seconds": 17.082541466000293,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "30": {
+          "samples": 9,
+          "medianSeconds": 16.636469389000013,
+          "p95Seconds": 16.78488728399998,
+          "observedSourceDrivers": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "factor": 2,
+      "splits": 1,
+      "clients": 4,
+      "measuredQueries": 36,
+      "medianQueriesPerSecond": 0.11087029069918722,
+      "medianRedisShardCpuCores": 2.315351369193018,
+      "medianRedisContainerCpuCores": 3.181144459696331,
+      "medianTrinoCpuCores": 1.075206352916862,
+      "queries": {
+        "3": {
+          "samples": 9,
+          "medianSeconds": 7.061208237999381,
+          "p95Seconds": 11.611883879000743,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "5": {
+          "samples": 9,
+          "medianSeconds": 50.94037100100013,
+          "p95Seconds": 65.20919154200055,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "6": {
+          "samples": 9,
+          "medianSeconds": 35.28055450099964,
+          "p95Seconds": 51.288510190000125,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "30": {
+          "samples": 9,
+          "medianSeconds": 32.793878018000214,
+          "p95Seconds": 45.86228145400037,
+          "observedSourceDrivers": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "factor": 2,
+      "splits": 1,
+      "clients": 8,
+      "measuredQueries": 36,
+      "medianQueriesPerSecond": 0.1425500664694485,
+      "medianRedisShardCpuCores": 3.0209962899210954,
+      "medianRedisContainerCpuCores": 4.12571584474213,
+      "medianTrinoCpuCores": 1.3901437614421208,
+      "queries": {
+        "3": {
+          "samples": 9,
+          "medianSeconds": 12.160382797000238,
+          "p95Seconds": 19.20670604499992,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "5": {
+          "samples": 9,
+          "medianSeconds": 68.96554182199998,
+          "p95Seconds": 77.52018270200006,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "6": {
+          "samples": 9,
+          "medianSeconds": 55.07856118300015,
+          "p95Seconds": 79.87132168299968,
+          "observedSourceDrivers": [
+            1
+          ]
+        },
+        "30": {
+          "samples": 9,
+          "medianSeconds": 57.614421286999914,
+          "p95Seconds": 67.79931577600018,
+          "observedSourceDrivers": [
+            1
+          ]
+        }
+      }
+    }
+  ],
+  "tailCaution": "Each query/cell has a small number of samples; p95 is descriptive only."
+}

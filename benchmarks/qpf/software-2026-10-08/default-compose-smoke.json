@@ -1,0 +1,12 @@
+{
+  "localComposeConfigServices": [
+    "trino"
+  ],
+  "execution": "Equivalent docker run using the Compose service image, environment, mounts and setup command because the benchmark host lacks the Compose plugin. Host port 18081 maps to the unchanged container port 8080 because host port 8080 was occupied.",
+  "deployment": "Redis Software",
+  "clusterApi": false,
+  "query": "SELECT UserID FROM hits_5m LIMIT 1",
+  "resultRows": 1,
+  "passed": true,
+  "fullCountAttempt": "The service started and reached Redis Software, but a full 5M count exceeded the default catalog query timeout. Full-table benchmark queries use an explicit 1,200-second timeout."
+}

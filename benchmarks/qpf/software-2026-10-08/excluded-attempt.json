@@ -1,0 +1,7 @@
+{
+  "measuredQueries": 36,
+  "excludedFromFinalMatrix": true,
+  "reason": "Disabling QPF retained search-workers=3; the zero-worker gate stopped the attempt before any Standard sample",
+  "archiveSha256": "361b67c8e75f04f4b603c4af62c7f236e0ad01985f67d588d4a466b4b888f5d7",
+  "privateArchiveKey": "controlled-20261008/results/attempt1-qpf-disable-retained-workers.tar.gz"
+}

@@ -1,0 +1,158 @@
+{
+  "command": [
+    "FT.PROFILE",
+    "hits_5m",
+    "AGGREGATE",
+    "QUERY",
+    "*",
+    "LOAD",
+    "2",
+    "@advengineid",
+    "@resolutionwidth",
+    "GROUPBY",
+    "0",
+    "REDUCE",
+    "SUM",
+    "1",
+    "@advengineid",
+    "AS",
+    "sum_advengineid",
+    "REDUCE",
+    "COUNT",
+    "0",
+    "AS",
+    "documents",
+    "REDUCE",
+    "AVG",
+    "1",
+    "@resolutionwidth",
+    "AS",
+    "avg_width",
+    "TIMEOUT",
+    "1200000",
+    "DIALECT",
+    "2"
+  ],
+  "response": {
+    "Results": {
+      "attributes": [],
+      "format": "STRING",
+      "results": [
+        {
+          "extra_attributes": {
+            "sum_advengineid": "3094732",
+            "documents": "5000000",
+            "avg_width": "1454.5821482"
+          },
+          "values": []
+        }
+      ],
+      "total_results": 1,
+      "warning": []
+    },
+    "Profile": {
+      "Shards": [
+        {
+          "Shard ID": "2",
+          "Total profile time": 4280.777834,
+          "Parsing time": 0.039573,
+          "Workers queue time": 0.034802,
+          "Pipeline creation time": 0.020737,
+          "Total GIL time": 3101.731571,
+          "Coordinator dispatch time [ms]": 0.222518,
+          "Warning": [
+            "None"
+          ],
+          "Internal cursor reads": 1,
+          "Iterators profile": {
+            "Type": "WILDCARD",
+            "Time": 88.816347,
+            "Number of reading operations": 2500002
+          },
+          "Result processors profile": [
+            {
+              "Type": "Index",
+              "Time": 433.126976,
+              "Results processed": 2500002
+            },
+            {
+              "Type": "Threadsafe-Loader",
+              "GIL-Time": 3101.709084,
+              "Time": 3369.969507,
+              "Results processed": 2500002
+            },
+            {
+              "Type": "Grouper",
+              "Time": 477.55229700000064,
+              "Results processed": 1
+            }
+          ]
+        },
+        {
+          "Shard ID": "1",
+          "Total profile time": 4491.32354,
+          "Parsing time": 0.031685,
+          "Workers queue time": 0.028726,
+          "Pipeline creation time": 0.01773,
+          "Total GIL time": 3308.204262,
+          "Coordinator dispatch time [ms]": 0.222518,
+          "Warning": [
+            "None"
+          ],
+          "Internal cursor reads": 1,
+          "Iterators profile": {
+            "Type": "WILDCARD",
+            "Time": 89.041491,
+            "Number of reading operations": 2499998
+          },
+          "Result processors profile": [
+            {
+              "Type": "Index",
+              "Time": 437.029997,
+              "Results processed": 2499998
+            },
+            {
+              "Type": "Threadsafe-Loader",
+              "GIL-Time": 3308.184178,
+              "Time": 3576.564826,
+              "Results processed": 2499998
+            },
+            {
+              "Type": "Grouper",
+              "Time": 477.6216280000003,
+              "Results processed": 1
+            }
+          ]
+        }
+      ],
+      "Coordinator": {
+        "Shard ID": "1",
+        "Total profile time": 4499.157324,
+        "Parsing time": 0.080792,
+        "Workers queue time": 0.0,
+        "Pipeline creation time": 0.0,
+        "Warning": [
+          "None"
+        ],
+        "Result processors profile": [
+          {
+            "Type": "Network",
+            "Time": 4499.008119,
+            "Results processed": 2
+          },
+          {
+            "Type": "Grouper",
+            "Time": 0.024539000000004307,
+            "Results processed": 1
+          },
+          {
+            "Type": "Projector - Operator /",
+            "Time": 0.0018929999996544211,
+            "Results processed": 1
+          }
+        ]
+      }
+    }
+  },
+  "scope": "Untimed direct Redis profile of the pushed Q3 reducers; separate from SQL latency samples."
+}

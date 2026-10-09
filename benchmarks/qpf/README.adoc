@@ -38,6 +38,81 @@ Throughput is completed queries divided by each measured round's elapsed time.
 SQL latency excludes subsequent metrics retrieval; the harness retrieves Trino metrics after the timed round.
 Per-query p95 has only nine measured samples per configuration and is descriptive, not a production tail-latency estimate.
 
+== Results
+
+All 432 measured SQL queries returned the complete expected results.
+The independent audit re-read every CSV, checked its SHA-256 and value against the DuckDB reference, verified 85 before/after/final index health snapshots, and confirmed that the two shard processes never restarted.
+Standard used zero worker threads and 2x QPF used three per shard throughout; no measured round reported Redis or Trino CPU throttling.
+
+The table reports the median throughput of three rounds. Each round executes the same 12-query mix.
+
+[cols="1,1,1,1,1",options="header"]
+|===
+|Scan mode |SQL clients |Standard QPS |2x QPF QPS |2x / Standard
+|One source |1 |0.061 |0.065 |1.05x
+|One source |4 |0.100 |0.111 |1.11x
+|One source |8 |0.114 |0.143 |1.25x
+|Automatic |1 |0.085 |0.130 |1.53x
+|Automatic |4 |0.088 |0.143 |1.62x
+|Automatic |8 |0.087 |0.139 |1.60x
+|===
+
+2x QPF increased throughput in every matched configuration, from 5% with one source and one client to 62% with automatic splits and four clients.
+The extra workers matter most when the connector exposes concurrent work: either several SQL queries, multiple scan sources, or both.
+This answers the multicore question directly: server-side query workers can make this workload faster, but the gain depends on eligible parallel work and does not apply uniformly to every query.
+
+Automatic splits plus 2x QPF and four clients had the highest measured throughput, 0.143 QPS.
+Eight clients did not improve it and increased median query latency.
+One source with 2x QPF needed eight clients to reach similar throughput; its median Q3/Q5/Q6/Q30 latencies were 12.16/68.97/55.08/57.61 seconds, versus 7.13/36.76/36.05/30.08 seconds with automatic splits and four clients.
+For this workload, start with 2x QPF, automatic splits, eight scan connections and a Trino resource-group limit near four concurrent analytical queries, then retest with the production query mix and latency objective.
+
+For one SQL client, automatic splits plus 2x QPF completed the fixed workload at 0.130 QPS, about 2.0x the 0.065 QPS with one source.
+The scan-query medians fell from 20.00 to 10.33 seconds for Q5, 16.81 to 6.82 seconds for Q6, and 16.64 to 6.43 seconds for Q30.
+Q3 stayed near seven seconds because its aggregation is pushed down as one Redis operation and therefore retains one Trino source.
+
+Automatic splitting is not universally faster under concurrency.
+With Standard QPF, one source outperformed automatic mode at four and eight clients; multiple SQL queries already supplied concurrent scans, and partition overhead added contention without worker capacity to absorb it.
+The combination of automatic splits and 2x QPF is what produced the best balance here.
+
+Median per-query latency and average cores during each round are below.
+Each query/cell median contains nine samples.
+
+[cols="1,1,1,1,1,1,1,1,1",options="header"]
+|===
+|QPF |Scan mode |Clients |Q3 median (s) |Q5 median (s) |Q6 median (s) |Q30 median (s) |Redis shard cores |Trino cores
+|Standard |One source |1 |6.29 |21.87 |18.45 |18.44 |1.20 |0.55
+|Standard |One source |4 |6.29 |57.39 |38.95 |39.29 |1.98 |0.95
+|Standard |One source |8 |18.99 |90.81 |63.34 |58.32 |2.26 |1.06
+|Standard |Automatic |1 |6.27 |16.51 |12.31 |11.74 |2.34 |0.81
+|Standard |Automatic |4 |6.39 |60.40 |57.80 |57.42 |2.47 |0.88
+|Standard |Automatic |8 |19.39 |109.53 |114.85 |106.87 |2.40 |0.87
+|2x |One source |1 |7.02 |20.00 |16.81 |16.64 |1.31 |0.56
+|2x |One source |4 |7.06 |50.94 |35.28 |32.79 |2.32 |1.08
+|2x |One source |8 |12.16 |68.97 |55.08 |57.61 |3.02 |1.39
+|2x |Automatic |1 |7.04 |10.33 |6.82 |6.43 |3.67 |1.24
+|2x |Automatic |4 |7.13 |36.76 |36.05 |30.08 |4.10 |1.43
+|2x |Automatic |8 |15.55 |78.07 |70.38 |70.47 |4.01 |1.41
+|===
+
+The retained evidence is in link:software-2026-10-08/[`software-2026-10-08/`]: the summary, round and query samples, runtime and infrastructure pins, profiles, independent audit, cleanup proof, and a sanitized raw archive.
+The default service configuration was also checked against the Software database: default Compose expansion contained only Trino, and the equivalent service image, environment, mounts and setup command discovered and queried the table.
+The benchmark host lacked the Docker Compose plugin, so that live service used `docker run` with an alternate host port; the repository's local `docker compose config` check covers the actual profile selection.
+After retaining the results, the instance, root volume, security group, cleanup function/rule, IAM roles and instance profile were deleted.
+
+== Server profiling
+
+Separate, untimed `FT.PROFILE` calls retain the pushed Q3 reducers for both worker settings.
+These direct calls reproduce the result for this dataset but omit the connector's additional null and precision guards; they are a diagnostic, not the complete SQL execution plan.
+The source schema leaves `advengineid` and `resolutionwidth` non-SORTABLE, so these profiles load the underlying hash fields.
+With three workers, the two shards report about 3.10 and 3.31 seconds of `Threadsafe-Loader` GIL time within total profile times of 4.28 and 4.49 seconds.
+Redis defines this metric as time holding or waiting for its global lock, not solely lock contention; see https://redis.io/docs/latest/commands/ft.profile/[FT.PROFILE].
+This is evidence that document loading can limit scaling, not proof that all four SQL queries have the same bottleneck.
+Profile timings include instrumentation and are excluded from the SQL latency samples.
+
+https://redis.io/docs/latest/operate/oss_and_stack/stack-with-enterprise/search/scalable-query-best-practices/[Redis's scaling guidance] recommends keeping required return fields in suitable SORTABLE index representations to reduce document loading.
+That is a separate schema experiment: preserve exact BIGINT values and original strings, measure added index memory, and rerun correctness checks before adopting it.
+This matrix keeps the existing schema and all query semantics unchanged.
+
 == Reproduction
 
 The Linux harness expects a dedicated host with Docker, Python, `redis==6.4.0`, `pyarrow==21.0.0` and `boto3==1.40.45`.

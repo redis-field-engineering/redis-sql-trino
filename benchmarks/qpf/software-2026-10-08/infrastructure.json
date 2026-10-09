@@ -1,0 +1,43 @@
+{
+  "guard": {
+    "verified": true,
+    "run": "trino-qpf-control-20261008-2250",
+    "instanceIds": [
+      "i-07504982e7357181a"
+    ]
+  },
+  "deadlineUtc": "2026-10-09T04:51:53.981290+00:00",
+  "instance": {
+    "InstanceId": "i-07504982e7357181a",
+    "InstanceType": "m8g.4xlarge",
+    "Architecture": "arm64",
+    "ImageId": "ami-0e1ab5c876cc030e8",
+    "CpuOptions": {
+      "CoreCount": 16,
+      "ThreadsPerCore": 1
+    },
+    "BlockDeviceMappings": [
+      {
+        "DeviceName": "/dev/sda1",
+        "Ebs": {
+          "AttachTime": "2026-10-08 22:52:07+00:00",
+          "DeleteOnTermination": true,
+          "Status": "attached",
+          "VolumeId": "vol-0194e7ef97295aa33",
+          "EbsCardIndex": 0
+        }
+      }
+    ],
+    "LaunchTime": "2026-10-08 22:52:06+00:00"
+  },
+  "volumes": [
+    {
+      "VolumeId": "vol-0194e7ef97295aa33",
+      "Size": 200,
+      "VolumeType": "gp3",
+      "Iops": 6000,
+      "Throughput": 250,
+      "Encrypted": true
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "complete": true,
+  "independentlyVerifiedMeasuredCsvs": 432,
+  "healthChecksVerified": 85,
+  "stableShardProcesses": [
+    [
+      "1",
+      1911
+    ],
+    [
+      "2",
+      1944
+    ]
+  ],
+  "observedWorkerThreadsByFactor": {
+    "2": [
+      3
+    ],
+    "0": [
+      0
+    ]
+  },
+  "cpuThrottlingSeconds": 0,
+  "harnessMatchesRepository": true,
+  "runtimePinsVerified": true,
+  "directProfilesVerified": 2
+}

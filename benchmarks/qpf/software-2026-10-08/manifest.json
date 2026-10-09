@@ -1,0 +1,24 @@
+{
+  "measuredQueries": 432,
+  "complete": true,
+  "privateFinalCheckpointSha256": "9bdd822c9c7952a242a872721c98776528af8091d69e5af7c9964095a4b040dc",
+  "files": {
+    "cleanup.json": "a3db96a131e7f3b26bca15b4792217137334d63d8cb7d4c3a5e3138513a9183b",
+    "completion.json": "22aaccfeb59aa996f497b43e86fe898f71c3c79ed6ad5f4c1ea4ac6f333c6686",
+    "default-compose-smoke.json": "c3fdd4973758297211da1e90f8819f238e598215c882fef922dcdfb41356df98",
+    "design.json": "9e52eaeb2ff75041f42844601cf7882deb1df070d8c78367bc3e494b12bef829",
+    "excluded-attempt.json": "53624bd7c93db50ecbfe4165c68f505c1d40b036b21936452ab4ac8ab4b245cc",
+    "final-runtime-verification.json": "1cb12565fd0b59b514c9316910238d3012ec4b92b8968f72d29276fd43432cf5",
+    "independent-audit.json": "70ff26188828f417e7ab9884900b1059ad22a6df2a8ae1c2550be4e33f15cbb5",
+    "infrastructure.json": "1c55766c7af60ef677365e04f82a0470bb482d401b280ab7f2a644b60ff3b64c",
+    "qpf-transitions-preflight.json": "9fe070006b91b8c03de2a75c29b3380a9007ef00789f4ead1f5ccebf4eef615b",
+    "qpf0-q3-server-profile.json": "cf136e05df775eafe18753ca18848e1c0df0a76731ed4e1c6c32c3d0fb5e69ed",
+    "qpf2-q3-server-profile.json": "2b4d0cb482058f768b9c9ef0435a60bdc3107bcde70b98b397c65bea2aa18171",
+    "raw-results.tar.gz": "841aece494b30dc5c8af332da22f18d3387f4a814b6f048bad2a53bbd3be788b",
+    "reference-recheck.json": "6a59a7d64ec675a221f575e31a8c75d3c4f170da35f0f07a436933f577e97267",
+    "rounds.csv": "9fbbeda5f6e7ebde769305b88ff75ffa399ba7aac3886b2e400e8e368e70c471",
+    "runtime.json": "f9a6c4accb1b62c2eca5c8bee2ff8325e77e9e42251292d1893175605d926386",
+    "samples.csv": "c2a535bd5f8b2f9b4734d650a3e86dfd5c7913734b2f0471e76dfb83cae72fec",
+    "summary.json": "81b80c4b57b5e74e45f4a6432d36a087ca6fccffe8f7d07d4e67f14c6848c8ad"
+  }
+}
