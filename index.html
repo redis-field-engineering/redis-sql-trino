@@ -14,7 +14,7 @@
 <div id="header">
 <h1>Redis SQL Trino</h1>
 <div class="details">
-<span id="revnumber">version 0.4.1</span>
+<span id="revnumber">version 0.4.2</span>
 </div>
 <div id="toc" class="toc2">
 <div id="toctitle">Table of Contents</div>
@@ -26,8 +26,12 @@
 <li><a href="#redisearch-connector">2.2. RediSearch connector</a></li>
 </ul>
 </li>
-<li><a href="#configuration">3. Configuration</a></li>
-<li><a href="#sql-support">4. SQL support</a>
+<li><a href="#configuration">3. Configuration</a>
+<ul class="sectlevel2">
+<li><a href="#sql-support">3.1. Parallel document scans</a></li>
+</ul>
+</li>
+<li><a href="#sql-support-2">4. SQL support</a>
 <ul class="sectlevel2">
 <li><a href="#tables-and-columns">4.1. Tables and columns</a></li>
 <li><a href="#statements">4.2. Statements</a></li>
@@ -153,9 +157,34 @@ redisearch.uri=redis://localhost:6379</code></pre>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><code>1000</code></p></td>
 </tr>
 <tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.narrow-scan-cursor-count</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Optional batch size for unbounded document scans of at most two input fields. Maximum 10000; 0 uses <code>cursor-count</code>. Applies to the initial request and later cursor reads. Larger batches increase response/hydration memory; only one cursor read is prefetched.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>0</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.aggregation-group-limit</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Conservative GROUP BY budget; must not exceed the server MAX_AGGREGATE_GROUPS. Unknown or over-budget document counts retain Trino aggregation. Global aggregates remain eligible.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>1000000</code></p></td>
+</tr>
+<tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.scan-connections</code></p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Number of Redis connections each Trino node&#8217;s scans take turns on, so that one scan&#8217;s batches don&#8217;t hold up other queries' commands.</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><code>4</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>8</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.scan-splits</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>0</code> selects splits automatically from size, estimated CPU capacity and partition balance. <code>1</code> forces a single split; <code>2</code> to <code>64</code> explicitly bounds parallel scans with configured cut points. The connection pool also caps the count. Global operations remain single-split.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>0</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.scan-partition-field</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Optional indexed NUMERIC field alias used to partition scans. Automatic mode can discover a HASH field when unset. Missing, NOINDEX, unsupported or unsafe field names fall back to one split.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Unset</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.scan-partition-boundaries</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Optional comma-separated strictly increasing finite numeric cut points; automatic mode can discover them for HASH indexes. Prefer a stable, evenly distributed field. Missing values stay in the first partition; JSON arrays spanning cut points appear once.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Empty</p></td>
 </tr>
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><code>redisearch.aggregation-pushdown.enabled</code></p></td>
@@ -266,10 +295,91 @@ redisearch.uri=redis://localhost:6379</code></pre>
 </tr>
 </tbody>
 </table>
+<div class="sect2">
+<h3 id="sql-support"><a class="anchor" href="#sql-support"></a>3.1. Parallel document scans</h3>
+<div class="paragraph">
+<p>The connector uses Lettuce for Redis communication. Lettuce supports multiple CPU cores through Netty I/O event loops and computation thread pools.
+Its default pool sizes follow the available CPU count, with a minimum of two threads, unless configured otherwise.
+See <a href="https://redis.github.io/lettuce/advanced-usage/client-resources/">Lettuce client resources</a> for the threading settings.
+A physical connection processes its network events on one event loop; additional client threads do not automatically partition a query or create more Trino sources.</p>
+</div>
+<table class="tableblock frame-all grid-all stretch">
+<colgroup>
+<col style="width: 33.3333%;">
+<col style="width: 66.6667%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Layer</th>
+<th class="tableblock halign-left valign-top">Work it parallelizes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Lettuce</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Redis network I/O and protocol decoding across connections.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Trino connector</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Independent scan splits, each with a cursor, processed by separate Trino drivers/workers.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Redis Query Engine</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Server-side query computation through query workers.</p></td>
+</tr>
+</tbody>
+</table>
+<div class="paragraph">
+<p>The connector&#8217;s existing connection pool supports concurrency between scans.
+Multiple splits let a single document scan use several connections and Trino source pipelines.
+Tune Redis query workers independently and measure the combined configuration; client-side parallelism alone does not determine server-side query concurrency.</p>
+</div>
+<div class="paragraph">
+<p>Automatic split selection is the default (<code>redisearch.scan-splits=0</code>).
+The planner targets at least 250,000 matching rows per split and selects the largest count allowed by the estimated CPU capacity (active Trino workers times coordinator CPU count), the connection pool (eight by default), and a hard ceiling of 64.
+Small tables and selective filters use one split. A filter&#8217;s match count is checked before choosing parallelism.
+For HASH indexes, the planner examines up to three indexed NUMERIC fields, obtains their MIN/MAX in one bounded statistics query, and checks the counts of the proposed ranges.
+A field is rejected if one partition would contain at least 80% of the matching documents; the planner then tries another candidate.
+Discovery results, including unsupported cases, are cached for five minutes (up to 256 entries).
+Statistics queries have a ten-second server timeout and count probes have a one-second timeout; unavailable or partial statistics fall back to one split.
+The first scan can therefore pay a discovery cost; subsequent scans reuse its plan.
+MIN/MAX discovery is a server-side aggregate and can delay concurrent point traffic when Redis query workers are disabled; configured boundaries avoid this discovery work.
+This is a cost heuristic, not a guarantee of the optimal count under every load. Use the benchmark and explicit overrides when tuning a shared deployment.
+JSON arrays support explicit partition fields and cut points; automatic MIN/MAX discovery currently applies to HASH indexes.</p>
+</div>
+<div class="paragraph">
+<p>Set <code>redisearch.scan-splits=1</code> to force one source. To override automatic selection and supply known boundaries:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="CodeRay highlight"><code data-lang="properties">redisearch.scan-splits=4
+redisearch.scan-connections=4
+redisearch.scan-partition-field=ordinal
+redisearch.scan-partition-boundaries=1250000,2500000,3750000</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>This partitions one document scan into four Trino sources with independent cursors and distinct scan connection slots on each worker.
+The NUMERIC field must already be indexed; the connector does not alter the index. Explicit boundaries skip discovery.
+Choose cut points from the field&#8217;s distribution; uneven partitions still return complete results but can limit the speedup.
+If fewer splits are allowed, the connector selects evenly spaced cut points from the configured list and merges the other intervals.
+The lowest partition includes values below the first cut and documents without an indexed value; the highest includes every value above the last cut.
+For multi-valued JSON, partitions use differences of nested range matches, so documents matching multiple ranges appear once.
+All partitions preserve static and dynamic filters. Each source rechecks its index schema before querying and fails if the partition field has become unsafe.</p>
+</div>
+<div class="paragraph">
+<p>Pushed-down LIMIT, ORDER BY/top-N, grouping and reducers always use one split.
+Trino can still compute joins, unsupported expressions and exact DISTINCT from the parallel document sources.
+The normal cursor timeout, failure, exact BIGINT recovery and best-effort deletion behavior applies to each source.
+The pool bounds connections per worker; the split bound applies per query, not to the number of simultaneous queries.
+Configure Trino resource groups to bound overall analytical concurrency when sharing Redis with latency-sensitive traffic.
+Parallel scans do not provide snapshot isolation: keep the partition field stable during a scan, as moving a document across cut points during execution can cause omissions or repetitions.</p>
+</div>
+</div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="sql-support"><a class="anchor" href="#sql-support"></a>4. SQL support</h2>
+<h2 id="sql-support-2"><a class="anchor" href="#sql-support-2"></a>4. SQL support</h2>
 <div class="sectionbody">
 <div class="sect2">
 <h3 id="tables-and-columns"><a class="anchor" href="#tables-and-columns"></a>4.1. Tables and columns</h3>
@@ -490,7 +600,7 @@ Columns read back as those types in <code>DESCRIBE</code>, <code>SHOW CREATE TAB
 </div>
 <div id="numeric-values" class="paragraph">
 <p>Redis returns a NUMERIC field loaded by name formatted as a double, rounded to 12 significant digits unless it&#8217;s an integer.
-So when a query reads DOUBLE, BIGINT or DECIMAL columns, the connector loads hashes with <code>LOAD *</code>, which returns every field of each hash, and JSON documents with <code>DIALECT 3</code>, and reads the values as they&#8217;re stored.
+DOUBLE and DECIMAL scans use <code>LOAD *</code> on HASH tables to retain exact stored values. BIGINT and TIMESTAMP(3) scans load named fields and recover possibly rounded large values with exact HGETs. JSON scans use <code>DIALECT 3</code> to read numbers as stored.
 NUMERIC fields still hold doubles for queries and aggregations in Redis: see <a href="#pushdown">Pushdown</a>.</p>
 </div>
 <div class="paragraph">
@@ -513,7 +623,7 @@ They&#8217;re <code>CASESENSITIVE</code> and split values into tags on the ASCII
 <ul>
 <li>
 <p><code>=</code>, <code>IN</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code> and <code>BETWEEN</code> on NUMERIC fields of BIGINT, INTEGER, SMALLINT, TINYINT, DOUBLE, REAL, DECIMAL, TIMESTAMP(3) and TIMESTAMP(3) WITH TIME ZONE columns.
-NUMERIC fields hold doubles, so Trino evaluates filters with BIGINT and timestamp values of 2^53 or more (timestamps as epoch milliseconds), and on DECIMAL columns of more than 15 digits, which they can&#8217;t compare exactly.
+NUMERIC fields hold doubles. Large BIGINT equality/IN values (including short inclusive ranges Trino merges from adjacent IN values) use widened numeric envelopes, retaining exact residual verification in Trino. The envelopes include every matching signed 64-bit value and may include neighboring IDs. Large/unbounded unsafe BIGINT ranges, unsafe timestamp bounds, nullable domains and DECIMAL columns of more than 15 digits retain the existing fallback; no extra index is needed.
 Redis compares a REAL value as the double it parses from the text the connector writes, so <code>REAL '1.1'</code> as 1.1 rather than 1.100000023841858.</p>
 </li>
 <li>
@@ -536,7 +646,7 @@ Trino evaluates the filter alone when a value has only stop words, and for every
 <p>Redis can&#8217;t match a missing field or compare strings, so Trino evaluates <code>IS NULL</code>, <code>IS NOT NULL</code>, a condition combined with <code>OR ... IS NULL</code>, and <code>&lt;&gt;</code>, <code>&lt;</code>, <code>&gt;</code> and <code>BETWEEN</code> on VARCHAR columns.</p>
 </div>
 <div class="paragraph">
-<p>Trino also evaluates <code>LIKE</code>. A Redis wildcard query matches single words of a TEXT field, ignores case on a TAG field without <code>CASESENSITIVE</code>, and leaves out documents once it has matched <code>MAXEXPANSIONS</code> (200 by default) distinct values.</p>
+<p>On HASH fields with supported property names, <code>LIKE '%literal%'</code> without additional <code>%</code>/<code>_</code> wildcards, an ESCAPE clause or literal control characters uses an exact <code>contains</code> filter before loading the full projection. Trino evaluates other LIKE shapes and JSON LIKE. A Redis wildcard query matches single words of a TEXT field, ignores case on a TAG field without <code>CASESENSITIVE</code>, and leaves out documents once it has matched <code>MAXEXPANSIONS</code> (200 by default) distinct values.</p>
 </div>
 </li>
 </ul>
@@ -554,7 +664,8 @@ So for each DOUBLE or REAL result and key, and the sum each <code>avg</code> is 
 Over RESP2 (<code>redisearch.resp2</code>, or a database without RESP3), the shards of a sharded database send these values to its coordinator already rounded, so Trino computes those aggregations.
 On a BIGINT column, results and keys are exact only for values and sums below 2^53.
 Trino groups DECIMAL columns itself, and DOUBLE and REAL columns whose names aren&#8217;t made of letters, digits and <code></em></code>.
-Trino evaluates <code>HAVING</code> on the groups Redis returns.</p>
+Trino evaluates <code>HAVING</code> on the groups Redis returns.
+GROUP BY pushdown requires a known cached document count no greater than <code>redisearch.aggregation-group-limit</code>, since distinct cardinality is unknown. The count is an upper bound even for filtered queries. Cache staleness/index growth can still trigger a server error; failures are not replayed after delivering output.</p>
 </li>
 <li>
 <p><code>sum</code> and <code>avg</code> of arithmetic on hash indexes, such as <code>sum(quantity * extendedprice)</code>: <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code> and unary <code>-</code> on DOUBLE NUMERIC columns, on integer NUMERIC columns cast to DOUBLE, and on DOUBLE constants.
@@ -563,7 +674,7 @@ A scan that returns the arithmetic computes it in the connector, from the values
 Trino computes arithmetic on integers, which SQL fails on when it overflows, on REAL values, which Redis would compute as doubles, and <code>min</code> and <code>max</code> of arithmetic, since Trino orders nan above other doubles.</p>
 </li>
 <li>
-<p><code>LIMIT</code>, unless Trino filters the rows itself. Trino sorts <code>ORDER BY ... LIMIT</code> itself.</p>
+<p><code>LIMIT</code>, unless Trino filters the rows itself. Eligible numeric HASH TopN uses Redis SORTBY. Single-column TIMESTAMP(3) HASH TopN with NULLS LAST and LIMIT up to 1000 scans only keys/order values and retains exact candidates before pipelined HMGET hydration of their projected fields. Other sort shapes remain in Trino. Timestamp selection checks the configured query timeout over the entire scan and deletes a live cursor on failure; it emits no partial candidates. As with ordinary scans, concurrent writes have no snapshot guarantee.</p>
 </li>
 </ul>
 </div>
@@ -739,8 +850,8 @@ discovery.uri=http://localhost:8080</code></pre>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="CodeRay highlight"><code data-lang="console">wget https://github.com/redis-field-engineering/redis-sql-trino/releases/download/v0.4.1/redis-sql-trino-0.4.1.zip
-unzip -j redis-sql-trino-0.4.1.zip -d /usr/lib/trino/plugin/redisearch</code></pre>
+<pre class="CodeRay highlight"><code data-lang="console">wget https://github.com/redis-field-engineering/redis-sql-trino/releases/download/v0.4.2/redis-sql-trino-0.4.2.zip
+unzip -j redis-sql-trino-0.4.2.zip -d /usr/lib/trino/plugin/redisearch</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -802,8 +913,8 @@ trino --catalog redisearch --schema default</code></pre>
 </div>
 <div id="footer">
 <div id="footer-text">
-Version 0.4.1<br>
-Last updated 2026-10-07 17:30:54 UTC
+Version 0.4.2<br>
+Last updated 2026-10-09 19:48:24 UTC
 </div>
 </div>
 <link rel="stylesheet" href="./coderay-asciidoctor.css">
