@@ -892,12 +892,15 @@ public class RediSearchSession {
     /**
      * Deletes the cursor without waiting for Redis, e.g. from a callback on the connection's thread, where waiting
      * would block the connection.
+     *
+     * @return completion of the deletion, including any bounded retries
      */
-    public void cursorDeleteAsync(Connection scan, RediSearchTableHandle tableHandle, Cursor cursor) {
-        RediSearchCursorRecovery.delete(() -> cursorCommands(scan, cursor).async
-                .ftCursordel(tableHandle.getIndex(), cursor).toCompletableFuture()).exceptionally(e -> {
-            log.warn(e, "Could not delete cursor %s of index %s", cursor.getCursorId(), tableHandle.getIndex());
-            return null;
+    public CompletableFuture<String> cursorDeleteAsync(Connection scan, RediSearchTableHandle tableHandle, Cursor cursor) {
+        return RediSearchCursorRecovery.delete(() -> cursorCommands(scan, cursor).async
+                .ftCursordel(tableHandle.getIndex(), cursor).toCompletableFuture()).whenComplete((reply, failure) -> {
+            if (failure != null) {
+                log.warn(failure, "Could not delete cursor %s of index %s", cursor.getCursorId(), tableHandle.getIndex());
+            }
         });
     }
 

@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.search.arguments.CreateArgs;
@@ -18,6 +20,8 @@ import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.type.DoubleType;
 
 /** Exercises live MIN/MAX, range counts, skew rejection, caching and selective-scan fallback. */
+// FT.CREATE scans the whole keyspace: don't overlap it with this class's 500,000-row load.
+@Execution(ExecutionMode.SAME_THREAD)
 public class TestAutomaticScanPlanning extends TestCursorReads {
     @Test
     public void testAutomaticDiscovery() {
