@@ -41,17 +41,17 @@
         <lettuce.version>7.8.0.RELEASE</lettuce.version>
         <!-- Lettuce ${lettuce.version} requires newer Netty/Reactor patch releases than Trino manages;
              the plugin classloader isolates these from the Trino server -->
-        <dep.netty.version>4.2.17.Final</dep.netty.version>
+        <dep.netty.version>4.2.19.Final</dep.netty.version>
         <dep.reactor-core.version>3.8.7</dep.reactor-core.version>
-        <ulid.version>5.1.0</ulid.version>
+        <ulid.version>5.2.4</ulid.version>
 
         <air.check.skip-license>true</air.check.skip-license>
         <air.check.skip-checkstyle>true</air.check.skip-checkstyle>
         <air.check.skip-airstyle>true</air.check.skip-airstyle>
         <air.check.skip-jacoco>false</air.check.skip-jacoco>
 
-        <asciidoctor.maven.plugin.version>2.1.0</asciidoctor.maven.plugin.version>
-        <asciidoctorj.pdf.version>2.3.4</asciidoctorj.pdf.version>
+        <asciidoctor.maven.plugin.version>3.2.0</asciidoctor.maven.plugin.version>
+        <asciidoctorj.pdf.version>2.3.27</asciidoctorj.pdf.version>
     </properties>
     <dependencyManagement>
         <!-- trino-root manages its own modules at ${project.version}; pin them to the parent (Trino) version -->
