@@ -115,7 +115,7 @@ This matrix keeps the existing schema and all query semantics unchanged.
 
 == Reproduction
 
-The Linux harness expects a dedicated host with Docker, Python, `redis==6.4.0`, `pyarrow==21.0.0` and `boto3==1.40.45`.
+The Linux harness expects a dedicated host with Docker, Python, `redis==6.4.0`, `pyarrow==23.0.1` and `boto3==1.40.45`.
 `QPF_ROOT` defaults to `/opt/qpf`; keep this directory private because it holds generated database credentials.
 The host must have at least the CPU and RAM allocations specified above.
 
