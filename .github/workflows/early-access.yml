@@ -46,11 +46,6 @@ jobs:
           name: test-reports
           path: target/
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-
       - name: Version
         id: vars
         shell: bash
