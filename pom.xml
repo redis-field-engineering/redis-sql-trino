@@ -45,6 +45,13 @@
         <dep.reactor-core.version>3.8.7</dep.reactor-core.version>
         <ulid.version>5.2.4</ulid.version>
 
+        <!-- Keep Jackson and JUnit families aligned through the inherited BOMs;
+             Airlift and provided SPI dependencies retain Trino-managed versions -->
+        <dep.jackson.version>2.22.3</dep.jackson.version>
+        <dep.guava.version>33.7.2-jre</dep.guava.version>
+        <dep.junit.version>6.1.3</dep.junit.version>
+        <dep.junit-platform.version>6.1.3</dep.junit-platform.version>
+
         <air.check.skip-license>true</air.check.skip-license>
         <air.check.skip-checkstyle>true</air.check.skip-checkstyle>
         <air.check.skip-airstyle>true</air.check.skip-airstyle>
