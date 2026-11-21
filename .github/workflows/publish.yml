@@ -15,6 +15,8 @@ on:
 # trino-root's enforcer rules only accept Temurin or Oracle.
 jobs:
   publish:
+    permissions:
+      contents: write
     name: Publish
     runs-on: ubuntu-latest
     steps:
@@ -50,5 +52,5 @@ jobs:
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v4
         with:
-          github_token: ${{ secrets.GIT_ACCESS_TOKEN }}
+          github_token: ${{ github.token }}
           publish_dir: ./target/generated-docs

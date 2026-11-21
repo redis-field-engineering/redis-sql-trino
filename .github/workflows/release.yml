@@ -19,6 +19,9 @@ concurrency:
 # trino-root's enforcer rules only accept Temurin or Oracle.
 jobs:
   release:
+    permissions:
+      contents: write
+      issues: write
     name: Release
     runs-on: ubuntu-latest
     steps:
@@ -64,6 +67,8 @@ jobs:
         with:
           arguments: assemble
           version: latest
+          # Keep the Temurin 25 runtime required by Maven after this action.
+          setup-java: false
         env:
           JRELEASER_PROJECT_VERSION: ${{ inputs.version }}
 
@@ -72,9 +77,11 @@ jobs:
         with:
           arguments: full-release
           version: latest
+          # Keep the Temurin 25 runtime required by Maven after this action.
+          setup-java: false
         env:
           JRELEASER_PROJECT_VERSION: ${{ inputs.version }}
-          JRELEASER_GITHUB_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
+          JRELEASER_GITHUB_TOKEN: ${{ github.token }}
           JRELEASER_BRANCH: ${{ inputs.branch }}
           JRELEASER_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
           JRELEASER_GPG_PUBLIC_KEY: ${{ secrets.GPG_PUBLIC_KEY }}
@@ -83,7 +90,7 @@ jobs:
           JRELEASER_DOCKER_DEFAULT_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
           JRELEASER_MAVENCENTRAL_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
           JRELEASER_MAVENCENTRAL_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
-          JRELEASER_GITHUB_PASSWORD: ${{ secrets.GIT_ACCESS_TOKEN }}
+          JRELEASER_GITHUB_PASSWORD: ${{ github.token }}
           JRELEASER_SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
       - name: JReleaser output
@@ -98,7 +105,7 @@ jobs:
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v4
         with:
-          github_token: ${{ secrets.GIT_ACCESS_TOKEN }}
+          github_token: ${{ github.token }}
           publish_dir: ./target/generated-docs
 
       - name: Commit release version
