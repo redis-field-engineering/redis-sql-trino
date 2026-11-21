@@ -19,8 +19,12 @@ import io.lettuce.core.api.sync.RedisCommands;
 import io.lettuce.core.search.arguments.CreateArgs;
 import io.lettuce.core.search.arguments.NumericFieldArgs;
 import io.lettuce.core.search.arguments.TagFieldArgs;
+import io.trino.operator.OperatorStats;
+import io.trino.plugin.base.metrics.LongCount;
+import io.trino.spi.metrics.Metrics;
 import io.trino.testing.BaseConnectorSmokeTest;
 import io.trino.testing.QueryRunner;
+import io.trino.testing.QueryRunner.MaterializedResultWithPlan;
 import io.trino.testing.TestingConnectorBehavior;
 
 public class TestCaseInsensitiveConnectorSmokeTest extends BaseConnectorSmokeTest {
@@ -114,17 +118,28 @@ public class TestCaseInsensitiveConnectorSmokeTest extends BaseConnectorSmokeTes
 			assertThat(numeric.result().getOnlyColumn()).containsExactly("a", "b");
 			assertThat(getDistributedQueryRunner().getCoordinator().getQueryManager()
 					.getFullQueryInfo(numeric.queryId()).getQueryStats().getPhysicalInputPositions()).isEqualTo(2);
-			// Multiple keys with VARCHAR and NULLS FIRST still require Trino ordering.
+			// Exact local TopN scans all four rows and returns only the winner to Trino's final sort.
 			var strings = getDistributedQueryRunner().executeWithPlan(getSession(),
 					"SELECT id FROM mixedcaseranks ORDER BY id, score LIMIT 1");
 			assertThat(strings.result().getOnlyValue()).isEqualTo("a");
-			assertThat(getDistributedQueryRunner().getCoordinator().getQueryManager()
-					.getFullQueryInfo(strings.queryId()).getQueryStats().getPhysicalInputPositions()).isEqualTo(4);
-			assertThat(computeActual("SELECT id FROM mixedcaseranks ORDER BY score NULLS FIRST LIMIT 1")
-					.getOnlyValue()).isEqualTo("missing");
+			assertLocalTopNReads(strings);
+			var nullsFirst = getDistributedQueryRunner().executeWithPlan(getSession(),
+					"SELECT id FROM mixedcaseranks ORDER BY score NULLS FIRST LIMIT 1");
+			assertThat(nullsFirst.result().getOnlyValue()).isEqualTo("missing");
+			assertLocalTopNReads(nullsFirst);
 		} finally {
 			redis.ftDropindex(index, true);
 		}
+	}
+
+	private void assertLocalTopNReads(MaterializedResultWithPlan result) {
+		var stats = getDistributedQueryRunner().getCoordinator().getQueryManager()
+				.getFullQueryInfo(result.queryId()).getQueryStats();
+		assertThat(stats.getPhysicalInputPositions()).isEqualTo(1);
+		var metrics = stats.getOperatorSummaries().stream().map(OperatorStats::getConnectorMetrics)
+				.reduce(Metrics.EMPTY, Metrics::mergeWith).getMetrics();
+		assertThat(((LongCount) metrics.get("redis.rows.received")).getTotal()).isEqualTo(4);
+		assertThat(((LongCount) metrics.get("redis.local-topn.candidates")).getTotal()).isEqualTo(1);
 	}
 
 	@Test
