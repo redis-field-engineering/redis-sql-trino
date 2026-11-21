@@ -25,6 +25,7 @@ import io.trino.testing.QueryRunner;
  * Aggregations return the same results whether Redis or Trino computes them.
  */
 public class TestAggregationPushdown extends AbstractTestQueryFramework {
+	private RedisCommands<String, String> redis;
 
 	protected Deployment deployment() {
 		return Deployment.NON_SHARDED;
@@ -34,6 +35,7 @@ public class TestAggregationPushdown extends AbstractTestQueryFramework {
 	protected QueryRunner createQueryRunner() throws Exception {
 		RediSearchServer redisearch = closeAfterClass(new RediSearchServer(deployment()));
 		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		this.redis = redis;
 		redis.ftCreate("beers", CreateArgs.builder().withPrefix("beer:").build(),
 				List.of(TagFieldArgs.builder().name("id").build(), TagFieldArgs.builder().name("brewery_id").build(),
 						NumericFieldArgs.builder().name("abv").build()));
@@ -199,18 +201,176 @@ public class TestAggregationPushdown extends AbstractTestQueryFramework {
 	@Test
 	public void testCountColumn() {
 		assertThat(query("SELECT count(*) FROM beers")).isFullyPushedDown().matches("VALUES BIGINT '6'");
-		// Redis counts documents, so Trino counts the non-null values
-		assertThat(query("SELECT count(abv) FROM beers")).matches("VALUES BIGINT '4'");
-		assertThat(query("SELECT count(last_mod) FROM beers")).matches("VALUES BIGINT '1'");
+		// A SUM of existence indicators counts present HASH fields, including unindexed ones.
+		assertThat(query("SELECT count(abv) FROM beers")).isFullyPushedDown().matches("VALUES BIGINT '4'");
+		assertThat(query("SELECT count(last_mod) FROM beers")).isFullyPushedDown().matches("VALUES BIGINT '1'");
 		assertThat(query("SELECT brewery_id, count(abv) FROM beers GROUP BY brewery_id"))
+				.isFullyPushedDown()
 				.matches("VALUES (VARCHAR '812', BIGINT '2'), (VARCHAR '264', BIGINT '2'), (VARCHAR '100', BIGINT '0')");
 		assertThat(query("SELECT brewery_id, count(*), count(abv) FROM beers GROUP BY brewery_id"))
+				.isFullyPushedDown()
 				.matches("VALUES (VARCHAR '812', BIGINT '2', BIGINT '2'), (VARCHAR '264', BIGINT '3', BIGINT '2'), "
 						+ "(VARCHAR '100', BIGINT '1', BIGINT '0')");
+		assertThat(query("SELECT count(abv), count(last_mod) FROM beers WHERE id = 'absent'"))
+				.isFullyPushedDown().matches("VALUES (BIGINT '0', BIGINT '0')");
+		assertThat(query("SELECT g, count(d), count(e) FROM split GROUP BY g")).isFullyPushedDown()
+				.matches("VALUES (VARCHAR 'Ale', BIGINT '1', BIGINT '1'), "
+						+ "(VARCHAR 'Mixed', BIGINT '2', BIGINT '2'), (VARCHAR 'Shared', BIGINT '1', BIGINT '0'), "
+						+ "(VARCHAR 'None', BIGINT '0', BIGINT '0')");
+	}
+
+	@Test
+	public void testBooleanDomainsMatchTheStoredValueDecoder() {
+		assertUpdate("CREATE TABLE boolean_domains (id varchar, flag boolean)");
+		try {
+			redis.hset("boolean_domains:1", Map.of("id", "1", "flag", "TRUE"));
+			redis.hset("boolean_domains:2", Map.of("id", "2", "flag", "false"));
+			redis.hset("boolean_domains:3", Map.of("id", "3", "flag", "junk"));
+			redis.hset("boolean_domains:4", Map.of("id", "4"));
+			redis.hset("boolean_domains:5", Map.of("id", "5", "flag", "true"));
+			assertThat(query("SELECT id FROM boolean_domains WHERE flag")).isFullyPushedDown()
+					.matches("VALUES VARCHAR '1', '5'");
+			assertThat(query("SELECT id FROM boolean_domains WHERE NOT flag")).isFullyPushedDown()
+					.matches("VALUES VARCHAR '2', '3'");
+			assertThat(query("SELECT id FROM boolean_domains WHERE flag = false OR flag IS NULL")).isFullyPushedDown()
+					.matches("VALUES VARCHAR '2', '3', '4'");
+			assertThat(query("SELECT count_if(flag) FROM boolean_domains WHERE flag")).isFullyPushedDown()
+					.matches("VALUES BIGINT '2'");
+			assertThat(query("SELECT b.id FROM boolean_domains b JOIN (VALUES true) t(flag) ON b.flag = t.flag"))
+					.matches("VALUES VARCHAR '1', '5'");
+		} finally {
+			assertUpdate("DROP TABLE boolean_domains");
+		}
+	}
+
+	@Test
+	public void testGroupingPreservesDecodedSqlEquality() {
+		assertUpdate("CREATE TABLE canonical_groups (id varchar, b boolean, u uuid, c char(2), r real, day date)");
+		try {
+			redis.hset("canonical_groups:1", Map.of("id", "1", "b", "TRUE", "u", "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+					"c", "a", "r", "1.000000001", "day", "2024-01-02Z"));
+			redis.hset("canonical_groups:2", Map.of("id", "2", "b", "true", "u", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+					"c", "a ", "r", "1.000000002", "day", "2024-01-02+01:00"));
+			for (String column : List.of("u", "r", "day")) {
+				assertThat(query("SELECT count(DISTINCT " + column + ") FROM canonical_groups"))
+						.isNotFullyPushedDown(AggregationNode.class).matches("VALUES BIGINT '1'");
+			}
+			assertThat(query("SELECT count(DISTINCT b) FROM canonical_groups")).isFullyPushedDown().matches("VALUES BIGINT '1'");
+			assertThat(query("SELECT count(DISTINCT c) FROM canonical_groups")).isFullyPushedDown().matches("VALUES BIGINT '1'");
+			assertThat(query("SELECT b, count(*) FROM canonical_groups GROUP BY b")).isFullyPushedDown()
+					.matches("VALUES (true, BIGINT '2')");
+			assertThat(query("SELECT count_if(b) FROM canonical_groups")).isFullyPushedDown().matches("VALUES BIGINT '2'");
+			assertThat(query("SELECT r, count(*) FROM canonical_groups GROUP BY r")).isNotFullyPushedDown(AggregationNode.class)
+					.matches("VALUES (REAL '1', BIGINT '2')");
+		} finally {
+			assertUpdate("DROP TABLE canonical_groups");
+		}
+	}
+
+	@Test
+	public void testDoubleGroupingTreatsSignedZeroAsOneSqlValue() {
+		assertUpdate("CREATE TABLE signed_zero_groups (id varchar, d double)");
+		try {
+			assertUpdate("INSERT INTO signed_zero_groups VALUES ('a', -0e0), ('b', 0e0)", 2);
+			assertThat(query("SELECT d, count(*) FROM signed_zero_groups GROUP BY d"))
+					.matches("VALUES (DOUBLE '0', BIGINT '2')");
+			assertThat(query("SELECT count(DISTINCT d) FROM signed_zero_groups")).matches("VALUES BIGINT '1'");
+		} finally {
+			assertUpdate("DROP TABLE signed_zero_groups");
+		}
+	}
+
+	@Test
+	public void testExactDistinctKeysAreGroupedBeforeTransfer() {
+		assertThat(query("SELECT DISTINCT brewery_id FROM beers")).isFullyPushedDown()
+				.matches("VALUES VARCHAR '812', '264', '100'");
+		// Both grouping stages execute in one Redis request, returning only the final count.
+		QueryRunner.MaterializedResultWithPlan result = getDistributedQueryRunner().executeWithPlan(getSession(),
+				"SELECT count(DISTINCT brewery_id) FROM beers");
+		assertThat(result.result().getOnlyValue()).isEqualTo(3L);
+		Metrics metrics = getDistributedQueryRunner().getCoordinator().getQueryManager().getFullQueryInfo(result.queryId())
+				.getQueryStats().getOperatorSummaries().stream().map(OperatorStats::getConnectorMetrics)
+				.reduce(Metrics.EMPTY, Metrics::mergeWith);
+		assertThat(((LongCount) metrics.getMetrics().get("redis.rows.received")).getTotal()).isEqualTo(1);
+		assertThat(query("SELECT DISTINCT last_mod FROM beers")).isFullyPushedDown()
+				.matches("VALUES VARCHAR '2010-07-22', CAST(NULL AS VARCHAR)");
+		assertThat(query("SELECT count(DISTINCT last_mod) FROM beers")).matches("VALUES BIGINT '1'");
+		assertUpdate("CREATE TABLE distinct_alias_collision (__trino_distinct_rows varchar)");
+		try {
+			assertUpdate("INSERT INTO distinct_alias_collision VALUES ('same'), ('same')", 2);
+			assertThat(query("SELECT DISTINCT __trino_distinct_rows FROM distinct_alias_collision"))
+					.isFullyPushedDown().matches("VALUES VARCHAR 'same'");
+		} finally {
+			assertUpdate("DROP TABLE distinct_alias_collision");
+		}
+	}
+
+	@Test
+	public void testExactHashTopNForLargeIntegersAndStrings() {
+		assertUpdate("CREATE TABLE exact_ranking (id varchar, value bigint, label varchar)");
+		try {
+			assertUpdate("INSERT INTO exact_ranking VALUES ('a', 9007199254740992, '😀'), "
+					+ "('b', 9007199254740993, ''), ('c', -9223372036854775808, ''), "
+					+ "('d', 9223372036854775807, 'x'), ('e', NULL, NULL)", 5);
+			assertQueryOrdered("SELECT id, value FROM exact_ranking ORDER BY value DESC LIMIT 3",
+					"VALUES ('d', CAST('9223372036854775807' AS BIGINT)), ('b', CAST('9007199254740993' AS BIGINT)), ('a', CAST('9007199254740992' AS BIGINT))");
+			assertQueryOrdered("SELECT id FROM exact_ranking ORDER BY label LIMIT 5",
+					"VALUES ('c'), ('d'), ('b'), ('a'), ('e')");
+			assertQueryOrdered("SELECT id FROM exact_ranking ORDER BY label DESC LIMIT 3",
+					"VALUES ('a'), ('b'), ('d')");
+		} finally {
+			assertUpdate("DROP TABLE exact_ranking");
+		}
+	}
+
+	@Test
+	public void testStoredBooleanAggregateFilters() {
+		assertUpdate("CREATE TABLE filtered_values (g varchar, x double, enabled boolean)");
+		try {
+			assertUpdate("INSERT INTO filtered_values VALUES ('a', 2, true), ('a', NULL, true), ('a', 10, false), "
+					+ "('a', 20, NULL), ('b', 7, false), ('b', NULL, true), ('c', 4, NULL)", 7);
+			assertThat(query("SELECT count(*) FILTER (WHERE enabled), count(x) FILTER (WHERE enabled), "
+					+ "sum(x) FILTER (WHERE enabled), avg(x) FILTER (WHERE enabled) FROM filtered_values"))
+					.isNotFullyPushedDown(AggregationNode.class).matches("VALUES (BIGINT '3', BIGINT '1', DOUBLE '2', DOUBLE '2')");
+			assertThat(query("SELECT g, count(*) FILTER (WHERE enabled), count(x) FILTER (WHERE enabled), "
+					+ "sum(x) FILTER (WHERE enabled) FROM filtered_values GROUP BY g"))
+					.isNotFullyPushedDown(AggregationNode.class).matches("VALUES (VARCHAR 'a', BIGINT '2', BIGINT '1', DOUBLE '2'), "
+							+ "(VARCHAR 'b', BIGINT '1', BIGINT '0', CAST(NULL AS DOUBLE)), "
+							+ "(VARCHAR 'c', BIGINT '0', BIGINT '0', CAST(NULL AS DOUBLE))");
+			assertThat(query("SELECT count_if(enabled) FROM filtered_values")).isFullyPushedDown()
+					.matches("VALUES BIGINT '3'");
+			assertThat(query("SELECT g, count_if(enabled) FROM filtered_values GROUP BY g")).isFullyPushedDown()
+					.matches("VALUES (VARCHAR 'a', BIGINT '2'), (VARCHAR 'b', BIGINT '1'), (VARCHAR 'c', BIGINT '0')");
+		} finally {
+			assertUpdate("DROP TABLE filtered_values");
+		}
+	}
+
+	@Test
+	public void testAggregateInternalAliasesDoNotShadowSourceFields() {
+		// External indexes can retain mixed-case physical names even though Trino normalizes SQL column names.
+		redis.ftCreate("aggregate_alias_collision", CreateArgs.builder().withPrefix("aggregate_alias_collision:").skipInitialScan().build(), List.of(
+				TagFieldArgs.builder().name("syntheticColumn0").build(), NumericFieldArgs.builder().name("n").build(),
+				NumericFieldArgs.builder().name("__has_syntheticColumn0").build(), NumericFieldArgs.builder().name("__value_syntheticColumn0").build(),
+				NumericFieldArgs.builder().name("__count_syntheticColumn0").build(), NumericFieldArgs.builder().name("__precision_count_syntheticColumn0").build()));
+		try {
+			assertUpdate("INSERT INTO aggregate_alias_collision VALUES ('a', 2, 3, 5, 7, 11), ('a', 4, 13, 17, 19, 23), "
+					+ "('b', NULL, 29, 31, 37, 41)", 3);
+			assertThat(query("SELECT syntheticColumn0, sum(n), sum(__has_syntheticColumn0), sum(__value_syntheticColumn0), "
+					+ "count(n), sum(__count_syntheticColumn0), sum(__precision_count_syntheticColumn0) "
+					+ "FROM aggregate_alias_collision GROUP BY syntheticColumn0"))
+					.isFullyPushedDown().matches("VALUES (VARCHAR 'a', DOUBLE '6', DOUBLE '16', DOUBLE '22', BIGINT '2', DOUBLE '26', DOUBLE '34'), "
+							+ "(VARCHAR 'b', CAST(NULL AS DOUBLE), DOUBLE '29', DOUBLE '31', BIGINT '0', DOUBLE '37', DOUBLE '41')");
+		} finally {
+			assertUpdate("DROP TABLE aggregate_alias_collision");
+		}
 	}
 
 	@Test
 	public void testHaving() {
+		assertThat(query("SELECT brewery_id, sum(abv) FROM beers GROUP BY brewery_id HAVING sum(abv) IS NULL"))
+				.isNotFullyPushedDown(FilterNode.class)
+				.matches("VALUES (VARCHAR '100', CAST(NULL AS DOUBLE))");
 		// The aggregation is pushed down and Trino filters the groups
 		assertThat(query("SELECT brewery_id, count(*) FROM beers GROUP BY brewery_id HAVING count(*) > 1"))
 				.isNotFullyPushedDown(FilterNode.class)

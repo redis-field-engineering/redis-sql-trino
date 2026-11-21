@@ -98,6 +98,12 @@ public class RediSearchConnector implements Connector {
 	}
 
 	@Override
+	public java.util.Set<io.trino.spi.function.table.ConnectorTableFunction> getTableFunctions() {
+		return java.util.Set.of(new io.trino.plugin.base.classloader.ClassLoaderSafeConnectorTableFunction(
+				new RediSearchNativeSearch(rediSearchSession), getClass().getClassLoader()));
+	}
+
+	@Override
 	public ConnectorPageSourceProvider getPageSourceProvider() {
 		return pageSourceProvider;
 	}

@@ -36,6 +36,7 @@
         <url>https://github.com/${github.owner}/${github.repo}/issues</url>
     </issueManagement>
     <properties>
+        <redisearch.build-directory>${project.basedir}/target</redisearch.build-directory>
         <github.owner>redis-field-engineering</github.owner>
         <github.repo>redis-sql-trino</github.repo>
         <lettuce.version>7.9.0.RELEASE</lettuce.version>
@@ -300,6 +301,12 @@
 
         <dependency>
             <groupId>io.airlift</groupId>
+            <artifactId>jackson</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.airlift</groupId>
             <artifactId>log-manager</artifactId>
             <scope>test</scope>
         </dependency>
@@ -404,6 +411,7 @@
     </dependencies>
 
     <build>
+        <directory>${redisearch.build-directory}</directory>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -441,6 +449,8 @@
                 <artifactId>asciidoctor-maven-plugin</artifactId>
                 <version>${asciidoctor.maven.plugin.version}</version>
                 <configuration>
+                    <!-- Design notes are repository references; the published PDF must remain the user guide. -->
+                    <sourceDocumentName>index.adoc</sourceDocumentName>
                     <attributes>
                         <github-owner>${github.owner}</github-owner>
                         <github-repo>${github.repo}</github-repo>

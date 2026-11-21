@@ -6,6 +6,34 @@ on:
 # Inlined from redis-github-workflows build-maven.yml, which hard-codes the Zulu JDK;
 # trino-root's enforcer rules only accept Temurin or Oracle.
 jobs:
+  oss-compatibility:
+    name: 'Redis OSS ${{ matrix.redis }} compatibility'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        redis: ['8.4', '8.10.3']
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          java-version: 25
+          distribution: 'temurin'
+          cache: maven
+      - name: Test SQL and cursor compatibility
+        run: >-
+          ./mvnw -B test
+          -Dredisearch.test.oss-image=redis:${{ matrix.redis }}
+          -Djunit.jupiter.execution.parallel.enabled=false
+          -Dtest=TestWrites,TestAtomicHashWrites,TestAtomicHashAcl,TestNativeSearch,TestAggregationPushdown,TestTagAndLikePushdown,TestSqlRelationMetadata,TestCursorReads,TestExactDistinctPushdown,TestCanonicalGrouping,TestExactLocalTopN,TestResp2ExactTopN,TestGroupingFunctionProbes
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: oss-${{ matrix.redis }}-test-reports
+          path: target/surefire-reports/
+
   build:
     name: 'Build'
     runs-on: ubuntu-latest

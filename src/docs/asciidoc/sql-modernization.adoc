@@ -1,0 +1,62 @@
+= SQL, Trino and Redis modernization
+
+This implementation revisits the gaps in https://github.com/redis-field-engineering/redis-sql-trino/issues/185[issue #185].
+The Trino 484 / Java 25 baseline is retained; this work adds capabilities and current SPI integration.
+Historical unsupported or not-planned decisions are context, not permanent restrictions.
+
+== Implementation status
+
+[cols="1,3,3",options="header"]
+|===
+|Issue |Implemented |Remaining work
+|#167 |Cluster-compatible namespace design |Multiple schemas and schema lifecycle
+|#168 |Ordinary views, replace, comments, same-schema rename and drop |Materialized views, refresh and authorization changes
+|#169 |ADD COLUMN FIRST/AFTER |Physical rename, drop and type conversion
+|#170 |HASH/JSON TRUNCATE with key spool and pipelined UNLINK |Safe table replacement
+|#171 |Durable table/column/view comments, atomic metadata and batched initialization |Lifecycle with future schema evolution
+|#172 |Scalar object-path JSON INSERT/UPDATE/MERGE and nested aliases |Arrays, wildcards and whole-document replacement
+|#173 |ARRAY/MAP/ROW, VARBINARY, JSON and full temporal precision on HASH |Native nested indexing and encoded-type predicates
+|#174 |Opt-in single-document HASH atomic update visibility |Multi-document transactions and retry-safe execution
+|#175 |Native text/GEO search table function with SQL composition |Vector binding, score/distance outputs and typed wrappers
+|#176 |HASH COUNT(column) and COUNT_IF(stored BOOLEAN) |General FILTER masks and computed conditions
+|#177 |Exact bounded two-stage global/grouped DISTINCT counting in Redis |Wider canonical keys and additional aggregate shapes
+|#178 |Canonical DOUBLE, HASH BOOLEAN and bounded Unicode CHAR grouping |Further exact numeric/decimal and arithmetic strategies
+|#179 |HASH NULL, lexical VARCHAR and simple exact LIKE filters |General wildcards and broader JSON predicates
+|#180 |Typed multiple-key late-materialized TopN and both NULL orders |JSON deferred projection and further measured tuning
+|#181 |Grouping-only pushdown and relational feasibility design |Join/window execution and multiple grouping sets
+|#182 |DEBUG rejection reasons and scan/TopN MemoryContext |Tighter proven bounds and EXPLAIN annotations
+|#183 |Reconciled statement/type/execution documentation |Keep references current as capabilities land
+|#184 |Accurate view/comment/array/TRUNCATE flags and restricted TopN tests |NOT NULL and negative-date capability contracts
+|===
+
+HASH writes resolve physical indexed aliases and preserve all-NULL rows with a reserved marker.
+Encoded complex values reject a top-level encoded NULL; nested NULLs remain valid.
+Grouping retains Trino execution when stored representations cannot yet be normalized to exact SQL equality.
+These restrictions can be replaced by proven normalization or another execution strategy.
+
+== Detailed designs
+
+* link:sql-metadata-design.adoc[Metadata, namespaces, views, evolution and replacement]
+* link:sql-write-design.adoc[JSON mapping, value encodings, atomic updates and retry protocol]
+* link:sql-query-design.adoc[Pushdown, Search, grouping, ordering and relational execution]
+
+== Validation environments
+
+Independent Maven test JVMs own separate Redis Software clusters; `redisearch.test.cluster-label` names their Docker containers and `redisearch.build-directory` isolates build output and reports.
+OSS compatibility tests use a disposable container per class; CI configures Redis 8.4 and 8.10.3.
+Software suites cover single-shard and OSS Cluster API databases; product tests load the packaged plugin in stock Trino.
+
+Performance assertions compare exact results, plans and source metrics: eligible DISTINCT counts return final aggregates, conditional counts return aggregates, and local TopN loads projected fields for selected candidates.
+No new full-data ClickBench timings or comparative speedups are claimed.
+Paid Cloud qualification and existing Flex capability issues remain separate from Docker validation.
+
+Validation recorded on November 21, 2026:
+
+* Across the full regression run and final targeted reruns, the latest per-class reports contain 585 cases, zero remaining failures/errors and 12 expected skips.
+* The final normal `package` build passed all static checks and 45 affected smoke/RESP2 cases (three expected skips), including single-shard and sharded adjacent-DOUBLE ordering.
+* New DISTINCT, typed TopN, canonical grouping and Unicode expression checks passed on both Redis OSS 8.4 and 8.10.3. CI runs these alongside the existing compatibility suites, with serialized JUnit execution.
+* Stock Trino 484 loaded the final packaged plugin: 22 product cases passed with zero failures/errors/skips, covering both single-shard and sharded databases, including staged DISTINCT and typed multiple-key TopN.
+
+The tests used disposable, isolated Docker environments. Overlapping Software control-plane activation stalled during one validation round; serialized provisioning passed without changing production timeout or incomplete-result guards.
+
+Canonical CHAR grouping reduced a 1,200-document fixture to six transferred groups, compared with 1,200 source rows when aggregation pushdown was disabled. BOOLEAN grouping reduced 1,050 documents to three groups. Typed TopN scanned 1,107 sort-key rows, retained five candidates and fetched 15 projected field values for those winners. These are exact-result and work-reduction assertions, not full-data throughput claims.

@@ -39,6 +39,8 @@ import java.util.stream.IntStream;
 
 import io.airlift.slice.Slice;
 import io.lettuce.core.RedisFuture;
+import io.lettuce.core.ScriptOutputType;
+import io.lettuce.core.json.JsonPath;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.trino.spi.Page;
 import io.trino.spi.block.Block;
@@ -46,7 +48,7 @@ import io.trino.spi.connector.ConnectorMergeSink;
 import io.trino.spi.connector.SchemaTableName;
 
 /**
- * Applies SQL MERGE, UPDATE and DELETE to Redis hashes. The row ID is the document key.
+ * Applies SQL MERGE, UPDATE and DELETE to Redis HASH/JSON documents. The row ID is the document key.
  * <p>
  * Page layout: data columns, then operation (TINYINT), update case number (INTEGER), row ID (VARCHAR).
  */
@@ -71,10 +73,62 @@ public class RediSearchMergeSink implements ConnectorMergeSink {
 
 	@Override
 	public void storeMergedRows(Page page) {
+		RediSearchIndexInfo info = session.getTable(schemaTableName).getIndexInfo();
+		Map<String, String> fieldNames = RediSearchHashUpdate.fieldNames(info);
+		boolean jsonIndex = info.getKeyType().filter(RediSearchIndexInfo.KeyType.JSON::equals).isPresent();
+		RediSearchJsonWriter json = jsonIndex && !updateCaseChannels.isEmpty() ? new RediSearchJsonWriter(info) : null;
 		int columnCount = columns.size();
 		Block operationBlock = page.getBlock(columnCount);
 		Block caseNumberBlock = page.getBlock(columnCount + 1);
 		Block rowIdBlock = page.getBlock(columnCount + 2);
+		for (int position = 0; position < page.getPositionCount(); position++) {
+			byte operation = TINYINT.getByte(operationBlock, position);
+			if (operation == INSERT_OPERATION_NUMBER || operation == UPDATE_OPERATION_NUMBER) {
+				session.verifyWritable(schemaTableName);
+				break;
+			}
+		}
+		Map<Integer, String> jsonUpdates = new HashMap<>();
+		Map<Integer, String[]> atomicUpdates = new HashMap<>();
+		boolean atomicHash = !jsonIndex && session.getConfig().isAtomicHashUpdatesEnabled();
+		if (jsonIndex || atomicHash) {
+			// Validate every JSON/atomic HASH mutation in the page, including insert-only MERGE branches, before flushing.
+			for (int position = 0; position < page.getPositionCount(); position++) {
+				byte operation = TINYINT.getByte(operationBlock, position);
+				if (operation != INSERT_OPERATION_NUMBER && operation != UPDATE_OPERATION_NUMBER) {
+					continue;
+				}
+				if (jsonIndex && json == null) {
+					json = new RediSearchJsonWriter(info);
+				}
+				List<Integer> channels = operation == INSERT_OPERATION_NUMBER
+						? IntStream.range(0, columnCount).boxed().toList()
+						: updateCaseChannels.get(INTEGER.getInt(caseNumberBlock, position));
+				Map<String, String> values = new HashMap<>();
+				for (int channel : channels) {
+					RediSearchColumnHandle column = columns.get(channel);
+					Block block = page.getBlock(channel);
+					String field = jsonIndex ? column.getName() : session.getConfig().isFlexEnabled()
+							? session.flexWriteField(schemaTableName, column.getName())
+							: fieldNames.getOrDefault(column.getName(), column.getName());
+					if (!block.isNull(position)) {
+						RediSearchHashUpdate.putValue(values, field, RediSearchPageSink.value(column.getType(), block, position));
+					} else if (operation == UPDATE_OPERATION_NUMBER) {
+						RediSearchHashUpdate.putValue(values, field, null);
+					}
+				}
+				if (jsonIndex) {
+					jsonUpdates.put(position, json.document(values));
+				} else if (operation == UPDATE_OPERATION_NUMBER) {
+					key(rowIdBlock, position);
+					List<String> nulls = values.entrySet().stream().filter(entry -> entry.getValue() == null)
+							.map(Map.Entry::getKey).toList();
+					nulls.forEach(values::remove);
+					values.put(RediSearchSession.ROW_MARKER, "1");
+					atomicUpdates.put(position, RediSearchHashUpdate.arguments(values, nulls));
+				}
+			}
+		}
 
 		int[] insertPositions = new int[page.getPositionCount()];
 		int insertCount = 0;
@@ -96,24 +150,34 @@ public class RediSearchMergeSink implements ConnectorMergeSink {
 				String key = key(rowIdBlock, position);
 				List<Integer> channels = updateCaseChannels.get(INTEGER.getInt(caseNumberBlock, position));
 				Map<String, String> values = new HashMap<>();
-				if (session.getConfig().isFlexEnabled()) { values.put(RediSearchFlexWriteBuffer.ROW_MARKER, "1"); }
-				List<String> nulls = new ArrayList<>();
 				for (int channel : channels) {
 					RediSearchColumnHandle column = columns.get(channel);
 					Block block = page.getBlock(channel);
-					String field = session.getConfig().isFlexEnabled()
-							? session.flexWriteField(schemaTableName, column.getName()) : column.getName();
-					if (block.isNull(position)) {
-						nulls.add(field);
-					} else {
-						values.put(field, RediSearchPageSink.value(column.getType(), block, position));
+					String field = jsonIndex ? column.getName() : session.getConfig().isFlexEnabled()
+							? session.flexWriteField(schemaTableName, column.getName())
+							: fieldNames.getOrDefault(column.getName(), column.getName());
+					RediSearchHashUpdate.putValue(values, field,
+							block.isNull(position) ? null : RediSearchPageSink.value(column.getType(), block, position));
+				}
+				List<String> nulls = values.entrySet().stream().filter(entry -> entry.getValue() == null)
+						.map(Map.Entry::getKey).toList();
+				nulls.forEach(values::remove);
+				if (json != null) {
+					nulls.forEach(column -> values.put(column, null));
+					// RFC 7396 patch: update only these paths, create missing parents, remove SQL NULL fields.
+					futures.add(commands.jsonMerge(key, JsonPath.ROOT_PATH, jsonUpdates.get(position)));
+				} else if (atomicHash) {
+					futures.add(commands.<Long>eval(RediSearchHashUpdate.SCRIPT, ScriptOutputType.INTEGER,
+							new String[] {key}, atomicUpdates.get(position)));
+				} else {
+					// A Redis hash disappears when its last field is removed. Keep the SQL row alive.
+					values.put(RediSearchSession.ROW_MARKER, "1");
+					if (!values.isEmpty()) {
+						futures.add(commands.hset(key, values));
 					}
-				}
-				if (!values.isEmpty()) {
-					futures.add(commands.hset(key, values));
-				}
-				if (!nulls.isEmpty()) {
-					futures.add(commands.hdel(key, nulls.toArray(String[]::new)));
+					if (!nulls.isEmpty()) {
+						futures.add(commands.hdel(key, nulls.toArray(String[]::new)));
+					}
 				}
 				break;
 			default:
@@ -124,8 +188,7 @@ public class RediSearchMergeSink implements ConnectorMergeSink {
 			futures.add(commands.del(deleteKeys.toArray(String[]::new)));
 		}
 		if (insertCount > 0) {
-			// Before changing anything: MERGE can insert into a JSON index, where the rows would be lost. The commands
-			// so far are still in the writer's buffer.
+			// Validate mappings before sending the buffered mutations.
 			session.verifyWritable(schemaTableName);
 		}
 		writer.flush(futures);

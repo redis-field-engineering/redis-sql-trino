@@ -211,6 +211,14 @@ public class RedisEnterprise implements Closeable {
 				.withCreateContainerCmdModifier(cmd -> cmd.getHostConfig().withCapAdd(Capability.SYS_RESOURCE))
 				.waitingFor(Wait.forHttps("/v1/bootstrap").forPort(API_PORT).allowInsecure().forStatusCode(200)
 						.withStartupTimeout(TIMEOUT));
+		String owner = System.getProperty("redisearch.test.cluster-label");
+		if (owner != null) {
+			if (!owner.matches("[A-Za-z0-9_.-]+")) {
+				throw new IllegalArgumentException("Invalid redisearch.test.cluster-label: " + owner);
+			}
+			node.withLabel("redis-sql-trino.test-owner", owner)
+					.withCreateContainerCmdModifier(cmd -> cmd.withName("redis-sql-" + owner + "-" + UUID.randomUUID().toString().substring(0, 8)));
+		}
 		placement.ifPresent(p -> node.withNetwork(p.network()).withNetworkAliases(p.alias()));
 		this.container = node;
 		this.http = HttpClient.newBuilder().sslContext(trustAll()).connectTimeout(Duration.ofSeconds(10)).build();
@@ -323,6 +331,8 @@ public class RedisEnterprise implements Closeable {
 				await("database " + uid + " endpoint", () -> isPingable(host, port));
 				return new Database(uid, host, port, deployment);
 			} catch (RuntimeException e) {
+				// Cleanup can need another activation timeout; report the original failure before that wait.
+				log.warn(e, "Failed to activate test database %s (%s); cleaning up", uid, deployment);
 				// The license counts its shards until it's gone: other test classes would fail to create theirs
 				try {
 					delete(uid);

@@ -34,6 +34,13 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.Type;
+import io.trino.spi.type.VarcharType;
+import io.trino.spi.type.CharType;
+import static io.trino.spi.type.BooleanType.BOOLEAN;
+import static io.trino.spi.type.RealType.REAL;
+import static io.trino.spi.type.UuidType.UUID;
+import static io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
+import static io.trino.spi.type.DateType.DATE;
 
 public class RediSearchAggregationTerm {
 
@@ -62,6 +69,19 @@ public class RediSearchAggregationTerm {
 		if (column.getExpression().isPresent()) {
 			return Optional.empty();
 		}
+		// Encoded SQL types must group after decoding; their Redis strings need not have SQL equality semantics.
+		// Unindexed VARCHAR is already its SQL representation and may still be loaded and grouped exactly.
+		if (!column.isSupportsPredicates() && !(column.getType() instanceof VarcharType) && !column.getType().equals(BOOLEAN)
+                && !(column.getType() instanceof CharType && RediSearchGroupingNormalizer.requiresNormalization(column.getType()))) {
+			return Optional.empty();
+		}
+		// SQL decoding can collapse distinct stored spellings (TRUE/true, UUID case, CHAR padding,
+		// and double-to-float rounding). Grouping raw Redis values would leave duplicate SQL groups.
+		if (column.getType().equals(UUID) || column.getType().equals(REAL) || column.getType().equals(DATE)
+				|| (column.getType() instanceof CharType && !RediSearchGroupingNormalizer.requiresNormalization(column.getType()))
+                || column.getType().equals(TIMESTAMP_MILLIS)) {
+			return Optional.empty();
+		}
 		// Redis groups a NUMERIC field by its double value and returns it formatted as one, which a DECIMAL column
 		// may not be able to hold exactly
 		if (column.getType() instanceof DecimalType) {
@@ -73,7 +93,7 @@ public class RediSearchAggregationTerm {
 			return Optional.empty();
 		}
 		// A floating-point key is also returned as a mantissa and exponent, by expressions that refer to it as @name
-		if (RediSearchExactNumbers.isFloatingPoint(column.getType())
+		if ((RediSearchExactNumbers.isFloatingPoint(column.getType()) || RediSearchGroupingNormalizer.requiresNormalization(column.getType()))
 				&& !RediSearchQueryBuilder.isProperty(column.getName())) {
 			return Optional.empty();
 		}

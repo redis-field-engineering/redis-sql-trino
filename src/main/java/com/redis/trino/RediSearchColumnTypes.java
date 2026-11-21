@@ -23,7 +23,9 @@
  */
 package com.redis.trino;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import io.airlift.json.JsonCodec;
@@ -85,6 +87,25 @@ public final class RediSearchColumnTypes {
 		Map<String, String> typeIds = new LinkedHashMap<>(read(redis, index));
 		typeIds.put(column, type.getTypeId().getId());
 		redis.set(key(index), CODEC.toJson(typeIds));
+	}
+
+	/** Uses persisted declaration order without changing external-index or hidden-column ordering. */
+	public static List<RediSearchColumnHandle> orderColumns(List<RediSearchColumnHandle> columns, Map<String, String> declaredTypes) {
+		if (declaredTypes.isEmpty()) {
+			return columns;
+		}
+		Map<String, RediSearchColumnHandle> remaining = new LinkedHashMap<>();
+		columns.stream().filter(column -> !column.isHidden()).forEach(column -> remaining.put(column.getName(), column));
+		List<RediSearchColumnHandle> ordered = new ArrayList<>();
+		for (String name : declaredTypes.keySet()) {
+			RediSearchColumnHandle column = remaining.remove(name);
+			if (column != null) {
+				ordered.add(column);
+			}
+		}
+		ordered.addAll(remaining.values());
+		columns.stream().filter(RediSearchColumnHandle::isHidden).forEach(ordered::add);
+		return List.copyOf(ordered);
 	}
 
 	public static void delete(RedisClusterCommands<String, String> redis, String index) {

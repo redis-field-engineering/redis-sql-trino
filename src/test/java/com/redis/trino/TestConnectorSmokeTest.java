@@ -68,15 +68,15 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 	protected boolean hasBehavior(TestingConnectorBehavior connectorBehavior) {
 		switch (connectorBehavior) {
 		case SUPPORTS_CREATE_SCHEMA:
-		case SUPPORTS_CREATE_VIEW:
 		case SUPPORTS_CREATE_MATERIALIZED_VIEW:
 			return false;
 
+		case SUPPORTS_CREATE_VIEW:
 		case SUPPORTS_CREATE_TABLE:
 			return true;
 
 		case SUPPORTS_ARRAY:
-			return false;
+			return true;
 
 		case SUPPORTS_DROP_COLUMN:
 		case SUPPORTS_RENAME_COLUMN:
@@ -85,9 +85,11 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 
 		case SUPPORTS_COMMENT_ON_TABLE:
 		case SUPPORTS_COMMENT_ON_COLUMN:
-			return false;
+			return true;
 
 		case SUPPORTS_TOPN_PUSHDOWN:
+			// Optimization is limited by type, number of sort keys and limit; Trino retains the final sort.
+			// Dedicated tests cover the supported server and late-materialization paths.
 			return false;
 
 		case SUPPORTS_NOT_NULL_CONSTRAINT:
@@ -100,7 +102,7 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 			return true;
 
 		case SUPPORTS_TRUNCATE:
-			return false;
+			return true;
 
 		case SUPPORTS_RENAME_TABLE_ACROSS_SCHEMAS:
 			return false;

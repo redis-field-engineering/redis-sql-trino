@@ -1,0 +1,171 @@
+= SQL metadata and DDL design
+
+This design records the remaining architectural work for issues #167–#171.
+It distinguishes the implemented paths from proposals.
+The connector targets Trino 484's `ConnectorMetadata` SPI on Java 25.
+
+== Implemented metadata
+
+Ordinary views persist the complete `ConnectorViewDefinition`, including its SQL,
+catalog/schema context, columns, security owner/invoker mode and search path.
+The supported lifecycle includes create, replace, list, query, comment, rename within
+the configured schema, and drop. Trino performs query planning and authorization;
+the Redis connector does not interpolate view SQL into native Redis commands.
+
+Views are a bounded JSON string registry at `__trino:views:v1:<schema>`.
+All catalogs connected to the same Redis database and configured schema share it,
+just as they share the existing index-backed tables. The registry is limited to
+1 MiB of serialized UTF-8 data per schema. A future larger registry must use
+sharded metadata with explicit listing/consistency semantics rather than remove
+this bound and allow arbitrary Lua work on large values.
+
+Table and column comments use a separate bounded string map at
+`__trino:comments:v1:<index>`. Table comments occupy the `table` field; column comments
+use `column:<name>`, so a column named `table` cannot collide with the table comment.
+Declared types remain in `__trino:columns:<index>` in their original format.
+Comments created with a table or column are saved, metadata calls expose them,
+COMMENT replaces or clears them, and DROP TABLE removes the comment key.
+
+Strings are deliberate: a metadata hash could become an indexed document on an
+externally defined index without a prefix. Metadata mutations use one-key Lua
+compare-and-set, retrying concurrent modifications at most eight times. This avoids
+lost updates without cross-slot transactions. ACLs need GET/SET/DEL access to these
+keys and EVAL for changes. Existing installations without optional metadata read
+access still discover their tables; a NOPERM read exposes no optional metadata.
+Mutations with missing permissions fail. Failed CREATE/COMMENT operations are not
+multi-command Redis transactions and may leave already-created schema objects.
+
+View/table collision checks cover existing objects. Atomic exclusion of concurrent
+FT.CREATE from other clients and view creation requires the namespace registry below;
+the connector does not control external Redis DDL.
+
+== Schema namespaces: #167 (design, not implemented)
+
+The current configured schema keeps its legacy mapping: SQL table `t` refers to
+Redis index `t`, and CREATE TABLE uses prefix `t:`. Migrating existing catalogs
+silently would break applications and external Search clients.
+
+The proposed namespace layer is a versioned registry of schema IDs and table IDs:
+
+* Persist each schema's display name, stable ID, owner and lifecycle state.
+  Empty schemas survive catalog restart. Never use Redis logical database numbers;
+  those are not portable to supported sharded deployments.
+* Store stable table ID -> Redis index, key prefix, declared-type key and ownership.
+  Existing tables may be explicitly adopted; legacy default-schema discovery
+  continues to enumerate unregistered indexes for backward compatibility.
+* New tables use generated index/prefix IDs under a reserved connector namespace.
+  Names are registry entries, not embedded SQL fragments. User names containing
+  separators or differing only in case must not collide after normalization.
+* Schema/table rename changes names in the registry, preserving physical keys and
+  index names. Cross-schema rename moves the entry only after checking ownership,
+  permissions and target collisions. Session/table-cache keys use stable IDs.
+* DROP SCHEMA RESTRICT verifies there are no tables, views or materialized views.
+  CASCADE is a separate destructive operation with a retained cleanup manifest;
+  ordinary DROP SCHEMA must never infer ownership from a key prefix alone.
+
+Registry publication must be a single-slot atomic update. Redis commands that
+create physical indexes cannot participate in that transaction. Use explicit
+`creating`, `ready`, `dropping` states and operation IDs: reserve a name, create
+the physical object, validate it, publish ready, then clean residual state.
+Recovery resumes or rolls back an identified operation; it never deletes an
+unrecognized existing index. A per-object manifest allows auditing orphaned indexes
+without a full keyspace KEYS command.
+
+Tests must cover two schemas containing the same table name, nonempty-drop guards,
+restart persistence, failed creation between each state transition, concurrent
+name claims, case-insensitive catalogs, legacy discovery/adoption and Redis Cluster
+slot behavior. Until that layer exists, schema creation and cross-schema renames
+remain unsupported. Historical #71's not-planned decision is explicitly being revisited.
+
+== Materialized views: #168 (design, not implemented)
+
+Ordinary view storage is not a materialization protocol. A materialized view needs
+a definition plus an owned storage-table generation and refresh state. Trino 484's
+materialized-view definition, freshness and refresh APIs must be implemented together.
+
+Create reserves the logical name and creates a dedicated backing index/prefix.
+Refresh builds a new generation through CTAS-style page sinks, validates full
+completion/index readiness, then atomically publishes the new storage reference.
+Readers pin the generation they planned against. Failed refresh retains the old
+generation and removes only the failed refresh's owned keys; it must not expose
+a partly filled replacement. Garbage collection waits until pinned readers finish
+or until a documented retention interval has elapsed.
+
+Record last successful refresh and the connector's lack of source snapshot isolation.
+Full refresh is the initial supported mode. Incremental refresh requires reliable
+source change tracking and delete propagation and must not be inferred from timestamps.
+Stale reads and source-query fallback must follow an explicit freshness policy.
+Owner/invoker authorization and view-definition visibility remain Trino concerns.
+
+Acceptance requires create/query/refresh/drop, crash recovery at every publication
+boundary, concurrent refresh exclusion, source-table changes, expired generations,
+and independent result comparison on HASH and supported JSON sources.
+
+== Schema evolution: #169 (design, not implemented)
+
+FT.ALTER can add fields; it does not provide a general drop, rename or type-change
+primitive. SQL metadata changes alone would leave filters and writes using different
+physical schemas. Keep these operations unsupported until their migration is implemented.
+
+Table rename can use the namespace registry without renaming hashes. For unmanaged
+legacy indexes, require explicit adoption or reject the operation. Redis aliases
+alone do not solve saved-type keys, key prefixes, ownership and cache identity.
+
+Column drop/rename/type changes require a migration plan with source and target
+field mappings. A connector-owned shadow index can remove an obsolete index field
+while retaining the stored hash field, provided this distinction is documented.
+Use FT.CREATE without SKIPINITIALSCAN for an index over existing documents, wait
+for indexing completion, check indexing failures, and only then publish it. Drop
+the retired index without DD; deleting the shared documents would corrupt the new index.
+
+Renaming a stored field or converting data needs an owned new key generation or a
+documented write freeze. A background per-row migration with concurrent external
+writes can lose updates and cannot be called atomic. Validate conversions and bounds
+before publication. On failure, keep the old generation usable and retain a recovery
+manifest; never overwrite saved type metadata while Redis still uses the old index.
+ADD COLUMN FIRST/AFTER is implemented as presentation metadata without rewriting
+Redis fields. The saved declared-type map records column order; discovery uses that
+order and keeps hidden key columns last. External indexes with no saved type map
+retain FT.INFO ordering. Physical drop, rename and type conversion still need the
+migration protocol above.
+
+Tests cover failed conversions, overflow, type metadata/cache consistency, NULLs,
+external writes, non-indexed sampled columns, and failure before/after publication.
+JSON path aliases need explicit write mappings rather than treating an alias as a
+physical property name.
+
+== TRUNCATE and replacement: #170
+
+TRUNCATE is implemented as two phases. A key-only cursor scan enumerates indexed
+rows into a temporary file. It validates index readiness and server warning/error
+replies using the existing scan implementation. No deletion occurs until enumeration
+has completed. A second pass sends bounded batches of single-key UNLINK commands on
+a private pipelined connection; the commands work across Redis Cluster slots.
+UNLINK removes each key immediately and reclaims its value in the background,
+reducing blocking on large hashes/documents. TRUNCATE requires UNLINK permission;
+existing DELETE and MERGE continue to use DEL.
+The index, declared types and comments remain in place. It does not use FLUSHDB,
+prefix-wide deletion, or DROPINDEX DD, and it does not collect all keys in heap.
+Temporary files are removed on success and failure; temporary disk capacity is
+proportional to the total indexed-key bytes.
+
+This follows existing writes' nontransactional contract: enumeration failure leaves
+documents untouched, but deletion failure may leave a partly truncated table.
+Concurrent writes are not isolated, and recreated keys with an enumerated name can
+be deleted before completion. Keys absent from the index are not table rows and
+are not touched. Truncating a table whose documents also appear in another index
+deletes those shared documents, just as DELETE FROM that table does.
+
+CREATE OR REPLACE TABLE remains unsupported. Implement it through the owned
+generation/registry publication mechanism, with schema/query validation before
+destructive work. CTAS replacement must retain the old generation until all new
+rows are written and indexed. Reusing the existing destructive DROP TABLE before
+CREATE would lose the old table on validation, write or indexing failure.
+Tables with external owners/overlapping prefixes require adoption or explicit
+unsupported behavior; a table name does not prove exclusive key ownership.
+
+TRUNCATE tests cover multiple cursor batches, empty/repeated truncation, preserving
+types/comments/index, reinsertion and unrelated tables. Replacement additionally
+needs failed source queries, failed sink batches, indexing failure, old-reader
+pinning and orphan-generation cleanup. All claims must be checked on sharded
+deployment modes, not inferred solely from single-node Redis command availability.

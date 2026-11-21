@@ -24,6 +24,9 @@ final class RediSearchReadStats {
 	final LongAdder requestNanos = new LongAdder();
 	final LongAdder exactWaitNanos = new LongAdder();
 	final LongAdder conversionNanos = new LongAdder();
+	final LongAdder localTopNSortHashReads = new LongAdder();
+	final LongAdder localTopNProjectedHashReads = new LongAdder();
+	final LongAdder localTopNCandidates = new LongAdder();
 
 	<T> T redisRequest(Supplier<T> request) {
 		long start = System.nanoTime();
@@ -57,16 +60,19 @@ final class RediSearchReadStats {
 	}
 
 	Metrics metrics() {
-		return new Metrics(Map.of(
-				"redis.aggregate.requests", new LongCount(aggregateRequests.sum()),
-				"redis.cursor.requests", new LongCount(cursorRequests.sum()),
-				"redis.rows.received", new LongCount(receivedRows.sum()),
-				"redis.exact-hash-commands", new LongCount(exactHashCommands.sum()),
-				"redis.exact-hash-reads", new LongCount(exactHashReads.sum()),
-				"redis.exact-hash-read-batches", new LongCount(exactHashReadBatches.sum()),
-				"redis.request-wall-time", timing(requestNanos.sum()),
-				"redis.exact-hash-read-wait-time", timing(exactWaitNanos.sum()),
-				"redis.row-conversion-time", timing(conversionNanos.sum())));
+		return new Metrics(Map.ofEntries(
+				Map.entry("redis.aggregate.requests", new LongCount(aggregateRequests.sum())),
+				Map.entry("redis.cursor.requests", new LongCount(cursorRequests.sum())),
+				Map.entry("redis.rows.received", new LongCount(receivedRows.sum())),
+				Map.entry("redis.exact-hash-commands", new LongCount(exactHashCommands.sum())),
+				Map.entry("redis.exact-hash-reads", new LongCount(exactHashReads.sum())),
+				Map.entry("redis.exact-hash-read-batches", new LongCount(exactHashReadBatches.sum())),
+				Map.entry("redis.request-wall-time", timing(requestNanos.sum())),
+				Map.entry("redis.exact-hash-read-wait-time", timing(exactWaitNanos.sum())),
+				Map.entry("redis.row-conversion-time", timing(conversionNanos.sum())),
+                Map.entry("redis.local-topn.sort-hash-reads", new LongCount(localTopNSortHashReads.sum())),
+                Map.entry("redis.local-topn.projected-hash-reads", new LongCount(localTopNProjectedHashReads.sum())),
+                Map.entry("redis.local-topn.candidates", new LongCount(localTopNCandidates.sum()))));
 	}
 
 	private static DurationTiming timing(long nanos) {

@@ -30,7 +30,7 @@ public class TestConfig {
 				.setTableCacheRefresh(RediSearchConfig.DEFAULT_TABLE_CACHE_REFRESH.toSeconds()).setCluster(false)
 				.setCaCertPath(null).setKeyPassword(null).setKeyPath(null).setCertPath(null)
 				.setNarrowScanCursorCount(0).setAggregationGroupLimit(1000000).setAggregationPushdownEnabled(true)
-				.setDynamicFilteringEnabled(true)
+				.setDynamicFilteringEnabled(true).setAtomicHashUpdatesEnabled(false).setLocalTopNMaxCandidates(1000)
 				.setDynamicFilteringWaitTimeout(RediSearchConfig.DEFAULT_DYNAMIC_FILTERING_WAIT_TIMEOUT));
 	}
 
@@ -41,6 +41,8 @@ public class TestConfig {
 		Map<String, String> properties = ImmutableMap.<String, String>builder().put("redisearch.uri", uri)
 				.put("redisearch.default-schema-name", defaultSchema).put("redisearch.resp2", "true")
 				.put("redisearch.aggregation-pushdown.enabled", "false")
+                .put("redisearch.atomic-hash-updates.enabled", "true")
+                .put("redisearch.local-topn.max-candidates", "2000")
 				.put("redisearch.flex.enabled", "true").put("redisearch.flex.batch-size", "23")
 				.put("redisearch.query-timeout-ms", "1200000")
 				.put("redisearch.narrow-scan-cursor-count", "10000").put("redisearch.aggregation-group-limit", "100")
@@ -67,6 +69,8 @@ public class TestConfig {
 		assertThat(config.getNarrowScanCursorCount()).isEqualTo(10000);
 		assertThat(config.getAggregationGroupLimit()).isEqualTo(100);
 		assertThat(config.isAggregationPushdownEnabled()).isFalse();
+        assertThat(config.isAtomicHashUpdatesEnabled()).isTrue();
+        assertThat(config.getLocalTopNMaxCandidates()).isEqualTo(2000);
 		assertThat(config.isDynamicFilteringEnabled()).isFalse();
 		assertThat(config.getDynamicFilteringWaitTimeout()).isEqualTo(new Duration(3, TimeUnit.SECONDS));
 	}
@@ -100,5 +104,19 @@ public class TestConfig {
 		assertThatThrownBy(() -> configurationFactory.build(RediSearchConfig.class))
 				.hasMessageContaining("Defunct property 'redisearch.table-cache-expiration'");
 	}
+
+    @Test
+    public void testLocalTopNBounds() {
+        for (String value : java.util.List.of("-1", "100001")) {
+            assertThatThrownBy(() -> new ConfigurationFactory(Map.of("redisearch.uri", "redis://localhost:6379",
+                    "redisearch.local-topn.max-candidates", value)).build(RediSearchConfig.class))
+                    .isInstanceOf(RuntimeException.class).hasMessageContaining("redisearch.local-topn.max-candidates");
+        }
+        for (String value : java.util.List.of("0", "100000")) {
+            assertThat(new ConfigurationFactory(Map.of("redisearch.uri", "redis://localhost:6379",
+                    "redisearch.local-topn.max-candidates", value)).build(RediSearchConfig.class).getLocalTopNMaxCandidates())
+                    .isEqualTo(Integer.parseInt(value));
+        }
+    }
 
 }

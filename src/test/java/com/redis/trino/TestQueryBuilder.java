@@ -29,8 +29,10 @@ import io.lettuce.core.codec.StringCodec;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.search.FieldValue;
 import io.trino.spi.TrinoException;
+import io.trino.spi.connector.AggregateFunction;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.SchemaTableName;
+import io.trino.spi.expression.Variable;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.predicate.ValueSet;
@@ -181,8 +183,12 @@ public class TestQueryBuilder {
 	public void testDeclaredTypesQueried() {
 		RediSearchQueryBuilder builder = new RediSearchQueryBuilder();
 		// As RediSearchPageSink writes the values
-		assertThat(builder.buildQuery(domain(declared("flag", BooleanType.BOOLEAN, RediSearchFieldType.TAG),
-				Domain.singleValue(BooleanType.BOOLEAN, true)))).isEqualTo("@flag:{true}");
+		RediSearchColumnHandle flag = declared("flag", BooleanType.BOOLEAN, RediSearchFieldType.TAG);
+		assertThat(RediSearchQueryBuilder.isSupported(flag, Domain.singleValue(BooleanType.BOOLEAN, true))).isFalse();
+		assertThat(RediSearchQueryBuilder.booleanDomainFilter(flag, Domain.singleValue(BooleanType.BOOLEAN, true)))
+				.contains("exists(@flag) && lower(@flag) == \"true\"");
+		assertThat(RediSearchQueryBuilder.booleanDomainFilter(flag, Domain.singleValue(BooleanType.BOOLEAN, false)))
+				.contains("exists(@flag) && lower(@flag) != \"true\"");
 		assertThat(builder.buildQuery(domain(declared("day", DateType.DATE, RediSearchFieldType.TAG),
 				Domain.multipleValues(DateType.DATE, List.of(LocalDate.of(2024, 1, 2).toEpochDay(),
 						LocalDate.of(2024, 1, 3).toEpochDay()))))).isEqualTo("@day:{2024\\-01\\-02 | 2024\\-01\\-03}");
@@ -492,8 +498,11 @@ public class TestQueryBuilder {
 		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
 				List.of(abv, s, c), Optional.of(hashIndex()));
 		// After GROUPBY, for the DOUBLE key and sum but not the count
-		assertThat(commandString(aggregation)).isEqualTo("LOAD 4 @__key @abv @s @c GROUPBY 1 @abv REDUCE SUM 1 @abv AS s "
-				+ "REDUCE COUNT 0 AS c APPLY floor(log2(abs(@abv))) AS __exponent_0 "
+		assertThat(commandString(aggregation)).isEqualTo("LOAD 4 @__key @abv @s @c "
+				+ "APPLY case(exists(@abv), @abv + 0, NULL) AS __trino_group0 "
+				+ "GROUPBY 1 @__trino_group0 REDUCE SUM 1 @abv AS s "
+				+ "REDUCE COUNT 0 AS c APPLY case(exists(@__trino_group0), @__trino_group0, NULL) AS abv "
+				+ "APPLY floor(log2(abs(@abv))) AS __exponent_0 "
 				+ "APPLY abs(@abv) * 2 ^ (26 - floor(@__exponent_0 / 2)) * 2 ^ (27 - ceil(@__exponent_0 / 2)) AS __mantissa_0 "
 				+ "APPLY floor(log2(abs(@s))) AS __exponent_1 "
 				+ "APPLY abs(@s) * 2 ^ (26 - floor(@__exponent_1 / 2)) * 2 ^ (27 - ceil(@__exponent_1 / 2)) AS __mantissa_1 "
@@ -580,6 +589,108 @@ public class TestQueryBuilder {
 	}
 
 	@Test
+	public void testNativeQueryCompositionKeepsOrGrouped() {
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers")
+				.withNativeQuery("@name:redis | @name:search")
+				.withConstraint(TupleDomain.withColumnDomains(Map.of(COL2, varchars("chosen"))));
+		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
+				List.of(COL2), Optional.of(hashIndex()));
+		assertThat(aggregation.getQuery()).isEqualTo("(@name:redis | @name:search) (@col2:{chosen})");
+	}
+
+	@Test
+	public void testNormalizedGroupAliasDoesNotOverwritePrunedGroupKeys() {
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers")
+				.withAggregations(List.of(new RediSearchAggregationTerm("abv", DoubleType.DOUBLE),
+						new RediSearchAggregationTerm("__trino_group0", createUnboundedVarcharType())),
+						List.of(new RediSearchAggregation("count", BIGINT, Optional.empty(), "n")));
+		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
+				List.of(), Optional.of(hashIndex()));
+		assertThat(commandString(aggregation)).contains("AS __trino_group0_ GROUPBY 2 @__trino_group0_ @__trino_group0");
+	}
+
+	@Test
+	public void testCountOverDistinctPreservesSourceNullness() {
+		RediSearchColumnHandle value = filterable("v", RediSearchFieldType.TAG);
+		RediSearchAggregationStage input = new RediSearchAggregationStage(
+				List.of(new RediSearchAggregationTerm("v", value.getType())),
+				List.of(new RediSearchAggregation("count", BIGINT, Optional.empty(), "internal")), true);
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers")
+				.withAggregationStages(List.of(input)).appendAggregation(List.of(),
+						List.of(new RediSearchAggregation("count", BIGINT, Optional.of(value), "n")));
+		RediSearchTranslator.Aggregation query = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
+				List.of(numeric("n", BIGINT)), Optional.of(hashIndex()));
+		assertThat(commandString(query)).contains("APPLY exists(@v) AS __trino_present0 GROUPBY 2 @v @__trino_present0",
+				"APPLY @__trino_present0 AS __has_n GROUPBY 0 REDUCE SUM 1 @__has_n AS n");
+	}
+
+	@Test
+	public void testNonNullCountTranslationAndPrecisionGuard() {
+		RediSearchColumnHandle source = filterable("style", RediSearchFieldType.TAG);
+		AggregateFunction function = new AggregateFunction("count", BIGINT,
+				List.of(new Variable("v", source.getType())), List.of(), false, Optional.empty());
+		RediSearchAggregation count = RediSearchAggregation.handleAggregation(function, Map.of("v", source), "n", false)
+				.orElseThrow();
+		assertThat(count.isCountColumn()).isTrue();
+		assertThat(count.isIntegerSumSafe(OptionalLong.empty())).isFalse();
+		long limit = (1L << 53) - 1;
+		assertThat(count.isIntegerSumSafe(OptionalLong.of(limit))).isTrue();
+		assertThat(count.isIntegerSumSafe(OptionalLong.of(limit + 1))).isFalse();
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers")
+				.withAggregations(List.of(), List.of(count));
+		RediSearchColumnHandle output = numeric("n", BIGINT);
+		RediSearchTranslator.Aggregation aggregation = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
+				List.of(output), Optional.of(hashIndex()));
+		assertThat(commandString(aggregation)).contains("LOAD 3 @__key @style @n APPLY exists(@style) AS __has_n "
+				+ "GROUPBY 0 REDUCE SUM 1 @__has_n AS n REDUCE COUNT 0 AS __precision_count_n");
+		RediSearchRowReader reader = aggregation.getReader();
+		assertThat(reader.read(Map.of("n", value("0"), count.integerSumCountAlias(), value("5"))))
+				.containsExactly("0");
+		assertThat(reader.emptyAggregation()).containsExactly("0");
+		assertThatThrownBy(() -> reader.read(Map.of("n", value("0"), count.integerSumCountAlias(), value(Long.toString(limit + 1)))))
+				.hasMessageContaining("no longer exact after index growth");
+		assertThat(RediSearchAggregation.handleAggregation(new AggregateFunction("count", BIGINT,
+				function.getArguments(), List.of(), true, Optional.empty()), Map.of("v", source), "n", false)).isEmpty();
+		RediSearchColumnHandle flag = new RediSearchColumnHandle("flag", BooleanType.BOOLEAN,
+				RediSearchFieldType.TAG, false, true, Optional.empty(), true);
+		RediSearchAggregation countIf = RediSearchAggregation.handleAggregation(new AggregateFunction("count_if", BIGINT,
+				List.of(new Variable("f", BooleanType.BOOLEAN)), List.of(), false, Optional.empty()),
+				Map.of("f", flag), "conditional", false).orElseThrow();
+		assertThat(countIf.isConditionalCount()).isTrue();
+		assertThat(countIf.hasValueExpression()).isEqualTo("exists(@flag) && lower(@flag) == \"true\"");
+		assertThat(countIf.getInputFields()).containsExactly("flag");
+	}
+
+	@Test
+	public void testHashPresenceAndSimpleLikeFilters() {
+		RediSearchColumnHandle field = filterable("style", RediSearchFieldType.TAG);
+		assertThat(RediSearchQueryBuilder.presenceFilter(field, Domain.onlyNull(field.getType())))
+				.contains("!exists(@style)");
+		assertThat(RediSearchQueryBuilder.presenceFilter(field, Domain.notNull(field.getType())))
+				.contains("exists(@style)");
+		assertThat(RediSearchQueryBuilder.presenceFilter(field, Domain.all(field.getType()))).isEmpty();
+		assertThat(RediSearchQueryBuilder.containsFilter(field, "caf%"))
+				.contains("exists(@style) && startswith(@style, \"caf\") > 0");
+		assertThat(RediSearchQueryBuilder.containsFilter(field, "%fé"))
+				.contains("exists(@style) && strlen(@style) >= strlen(\"fé\") && substr(@style, strlen(@style) - strlen(\"fé\"), strlen(\"fé\")) == \"fé\"");
+		assertThat(RediSearchQueryBuilder.containsFilter(field, "%")).contains("exists(@style)");
+		assertThat(RediSearchQueryBuilder.containsFilter(field, "%%")).contains("exists(@style)");
+		assertThat(RediSearchQueryBuilder.containsFilter(field, "")).contains("exists(@style) && @style == \"\"");
+		assertThat(RediSearchQueryBuilder.containsFilter(field, "a%b")).isEmpty();
+		assertThat(RediSearchQueryBuilder.containsFilter(field, "a_b%")).isEmpty();
+		assertThat(RediSearchQueryBuilder.containsFilter(field, "bad\n%")).isEmpty();
+		assertThat(RediSearchQueryBuilder.containsFilter(field, "quote\"%"))
+				.contains("exists(@style) && startswith(@style, \"quote\\\"\") > 0");
+		Domain lexical = Domain.create(ValueSet.ofRanges(range(field.getType(), utf8Slice("10"), true,
+				utf8Slice("2"), false)), true);
+		assertThat(RediSearchQueryBuilder.stringDomainFilter(field, lexical))
+				.contains("!exists(@style) || (exists(@style) && ((@style >= \"10\" && @style < \"2\")))");
+		Domain invalidUtf8Boundary = Domain.create(ValueSet.ofRanges(lessThan(field.getType(),
+				io.airlift.slice.Slices.wrappedBuffer(new byte[] { (byte) 0xFF }))), false);
+		assertThat(RediSearchQueryBuilder.stringDomainFilter(field, invalidUtf8Boundary)).isEmpty();
+	}
+
+	@Test
 	public void testIntegerSumChecksActualRowsAfterPlanning() {
 		RediSearchColumnHandle widened = RediSearchColumnHandle.integerWidening(numeric("s", SMALLINT), BIGINT);
 		RediSearchAggregation sum = new RediSearchAggregation(RediSearchAggregation.SUM, BIGINT,
@@ -628,6 +739,10 @@ public class TestQueryBuilder {
 		assertThat(RediSearchLocalTopN.comparator(false).compare(new String[] { "a", null },
 				new String[] { "b", "1" })).isPositive();
 		assertThat(ascending.compare(new String[] { "a", "1" }, new String[] { "b", "1" })).isZero();
+		// Trino VARCHAR orders UTF-8 bytes, not Java's UTF-16 code units: U+E000 precedes U+1F600.
+		var strings = RediSearchLocalTopN.comparator(createUnboundedVarcharType(), true);
+		assertThat(strings.compare(new String[] { "a", "" }, new String[] { "b", "😀" })).isNegative();
+		assertThat(strings.compare(new String[] { "a", null }, new String[] { "b", "" })).isPositive();
 	}
 
 	@Test

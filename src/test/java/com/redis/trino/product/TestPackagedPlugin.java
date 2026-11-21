@@ -104,4 +104,68 @@ class TestPackagedPlugin {
 	private static String table(String catalog, String name) {
 		return catalog + "." + SCHEMA + "." + name;
 	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
+	void testNativeSearchLoadsFromPackagedPlugin(String catalog, RediSearchEnvironment env) {
+		assertThat(env.executeTrino("SELECT id, __key FROM TABLE(" + catalog
+				+ ".system.search('beers', '@name:pocus'))"))
+				.containsOnly(row("1", "beer:1"));
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
+	void testViewCommentsAndTruncate(String catalog, RediSearchEnvironment env) {
+		String suffix = Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36);
+		String target = table(catalog, "metadata_" + suffix);
+		String view = table(catalog, "view_" + suffix);
+		try {
+			env.executeTrinoUpdate("CREATE TABLE " + target + " AS SELECT BIGINT '1' id");
+			env.executeTrinoUpdate("COMMENT ON TABLE " + target + " IS 'packaged metadata'");
+			env.executeTrinoUpdate("CREATE VIEW " + view + " AS SELECT id FROM " + target);
+			assertThat(env.executeTrino("SELECT id FROM " + view)).containsOnly(row(1L));
+			env.executeTrinoUpdate("TRUNCATE TABLE " + target);
+			assertThat(env.executeTrino("SELECT count(*) FROM " + view)).containsOnly(row(0L));
+		} finally {
+			env.executeTrinoUpdate("DROP VIEW IF EXISTS " + view);
+			env.executeTrinoUpdate("DROP TABLE IF EXISTS " + target);
+		}
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
+	void testNativeJsonAndEncodedTypes(String catalog, RediSearchEnvironment env) {
+		String target = table(catalog, "encoded_" + Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36));
+		try {
+			env.executeTrinoUpdate("CREATE TABLE " + target + " AS SELECT JSON '{\"a\":1}' payload, "
+					+ "ARRAY[BIGINT '9007199254740993', NULL] ids, "
+					+ "TIMESTAMP '2026-11-21 12:34:56.123456789012' ts");
+			assertThat(env.executeTrino("SELECT json_extract_scalar(payload, '$.a'), CAST(ids[1] AS varchar), "
+					+ "CAST(cardinality(ids) AS varchar), CAST(ts AS varchar) FROM " + target))
+					.containsOnly(row("1", "9007199254740993", "2", "2026-11-21 12:34:56.123456789012"));
+		} finally {
+			env.executeTrinoUpdate("DROP TABLE IF EXISTS " + target);
+		}
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
+	void testStagedDistinctAndTypedTopN(String catalog, RediSearchEnvironment env) {
+		String target = table(catalog, "pushdown_" + Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36));
+		try {
+			env.executeTrinoUpdate("CREATE TABLE " + target + " (g varchar, v varchar, id bigint, amount decimal(20,2))");
+			env.executeTrinoUpdate("INSERT INTO " + target + " VALUES "
+					+ "('A', 'x', BIGINT '9007199254740993', DECIMAL '12.34'), "
+					+ "('A', 'x', BIGINT '9007199254740994', DECIMAL '12.34'), "
+					+ "('A', NULL, BIGINT '3', DECIMAL '99.99'), ('B', NULL, BIGINT '4', NULL)");
+			assertThat(env.executeTrino("SELECT count(DISTINCT v) FROM " + target)).containsOnly(row(1L));
+			assertThat(env.executeTrino("SELECT g, count(DISTINCT v) FROM " + target + " GROUP BY g"))
+					.containsOnly(row("A", 1L), row("B", 0L));
+			assertThat(env.executeTrino("SELECT id FROM " + target + " ORDER BY amount ASC NULLS FIRST, id DESC LIMIT 3"))
+					.containsExactlyInOrder(row(4L), row(9007199254740994L), row(9007199254740993L));
+		} finally {
+			env.executeTrinoUpdate("DROP TABLE IF EXISTS " + target);
+		}
+	}
+
 }

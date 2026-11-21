@@ -29,18 +29,16 @@ import static io.trino.spi.type.DateTimeEncoding.unpackMillisUtc;
 import static io.trino.spi.type.Decimals.readBigDecimal;
 import static io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
 import static io.trino.spi.type.Timestamps.MICROSECONDS_PER_MILLISECOND;
-import static io.trino.spi.type.Timestamps.PICOSECONDS_PER_MILLISECOND;
-import static io.trino.spi.type.Timestamps.roundDiv;
 import static io.trino.spi.type.UuidType.trinoUuidToJavaUuid;
 import static java.lang.Float.intBitsToFloat;
 import static java.lang.Math.floorDiv;
 import static java.lang.Math.toIntExact;
-import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.concurrent.CompletableFuture.completedFuture;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -55,6 +53,7 @@ import com.google.common.primitives.SignedBytes;
 
 import io.airlift.slice.Slice;
 import io.lettuce.core.RedisFuture;
+import io.lettuce.core.json.JsonPath;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.trino.spi.Page;
 import io.trino.spi.TrinoException;
@@ -100,6 +99,33 @@ public class RediSearchPageSink implements ConnectorPageSink {
 	@Override
 	public CompletableFuture<?> appendPage(Page page) {
 		String prefix = prefix().orElse(schemaTableName.getTableName() + KEY_SEPARATOR);
+		session.verifyWritable(schemaTableName);
+		RediSearchIndexInfo info = session.getTable(schemaTableName).getIndexInfo();
+		Map<String, String> fieldNames = RediSearchHashUpdate.fieldNames(info);
+		RediSearchJsonWriter json = info.getKeyType().filter(RediSearchIndexInfo.KeyType.JSON::equals)
+				.map(ignored -> new RediSearchJsonWriter(info)).orElse(null);
+		// Convert the full page before buffering any mutation so unsupported JSON values fail before writes.
+		List<Map<String, String>> rows = new ArrayList<>();
+		List<String> documents = new ArrayList<>();
+		for (int position = 0; position < page.getPositionCount(); position++) {
+			Map<String, String> row = new HashMap<>();
+			for (int channel = 0; channel < page.getChannelCount(); channel++) {
+				if (!page.getBlock(channel).isNull(position)) {
+					RediSearchColumnHandle column = columns.get(channel);
+					String field = json != null ? column.getName() : flexBuffer != null
+							? session.flexWriteField(schemaTableName, column.getName())
+							: fieldNames.getOrDefault(column.getName(), column.getName());
+					RediSearchHashUpdate.putValue(row, field, value(column.getType(), page.getBlock(channel), position));
+				}
+			}
+			if (json == null) {
+				row.put(RediSearchSession.ROW_MARKER, "1");
+			}
+			rows.add(row);
+			if (json != null) {
+				documents.add(json.document(row));
+			}
+		}
 		if (writer == null) {
 			writer = session.openWriter();
 		}
@@ -108,28 +134,19 @@ public class RediSearchPageSink implements ConnectorPageSink {
 		List<String> staged = new ArrayList<>();
 		for (int position = 0; position < page.getPositionCount(); position++) {
 			String key = prefix + factory.create().toString();
-			Map<String, String> map = new HashMap<>();
-			if (flexBuffer != null) { map.put(RediSearchFlexWriteBuffer.ROW_MARKER, "1"); }
-			for (int channel = 0; channel < page.getChannelCount(); channel++) {
-				RediSearchColumnHandle column = columns.get(channel);
-				Block block = page.getBlock(channel);
-				if (block.isNull(position)) {
-					continue;
-				}
-				String value = value(column.getType(), block, position);
-				String field = flexBuffer == null ? column.getName() : session.flexWriteField(schemaTableName, column.getName());
-				map.put(field, value);
-			}
-			if (flexBuffer == null) {
-				futures.add(commands.hset(key, map));
-			} else {
+			if (flexBuffer != null) {
+				// Publish only after source scans finish; LIST entries cannot feed a Flex keyset scan.
 				List<String> row = new ArrayList<>();
 				row.add(key);
-				map.forEach((field, value) -> { row.add(field); row.add(value); });
+				rows.get(position).forEach((field, value) -> { row.add(field); row.add(value); });
 				staged.add(RediSearchFlexWriteBuffer.ROW_CODEC.toJson(row));
+			} else if (json != null) {
+				futures.add(commands.jsonSet(key, JsonPath.ROOT_PATH, documents.get(position)));
+			} else {
+				futures.add(commands.hset(key, rows.get(position)));
 			}
 		}
-		// One write for the page's HSETs, rather than one for each
+		// Flush ordinary document writes, or persist only invisible staging records on Flex.
 		if (flexBuffer == null) { writer.flush(futures); }
 		else { flexBuffer.append(writer, staged); }
 		return NOT_BLOCKED;
@@ -139,10 +156,6 @@ public class RediSearchPageSink implements ConnectorPageSink {
 		try {
 			RediSearchTable table = session.getTable(schemaTableName);
 			RediSearchIndexInfo indexInfo = table.getIndexInfo();
-			Optional<RediSearchIndexInfo.KeyType> on = indexInfo.getKeyType();
-			if (on.isEmpty() || on.get() != RediSearchIndexInfo.KeyType.HASH) {
-				return Optional.empty();
-			}
 			if (indexInfo.getPrefixes().isEmpty()) {
 				return Optional.empty();
 			}
@@ -162,6 +175,15 @@ public class RediSearchPageSink implements ConnectorPageSink {
 	}
 
 	public static String value(Type type, Block block, int position) {
+		if (RediSearchComplexValues.isComplex(type)) {
+			return RediSearchComplexValues.encode(type, block, position);
+		}
+		if (RediSearchTemporalValues.supports(type)) {
+			return RediSearchTemporalValues.encode(type, block, position);
+		}
+		if (type.getBaseName().equals(io.trino.spi.type.StandardTypes.JSON)) {
+			return type.getSlice(block, position).toStringUtf8();
+		}
 		if (type.equals(BooleanType.BOOLEAN)) {
 			return String.valueOf(type.getBoolean(block, position));
 		}
@@ -190,15 +212,14 @@ public class RediSearchPageSink implements ConnectorPageSink {
 			return padSpaces(type.getSlice(block, position), (CharType) type).toStringUtf8();
 		}
 		if (type.equals(VarbinaryType.VARBINARY)) {
-			return new String(type.getSlice(block, position).getBytes(), UTF_8);
+			return Base64.getEncoder().encodeToString(type.getSlice(block, position).getBytes());
 		}
 		if (type.equals(DateType.DATE)) {
 			long days = type.getLong(block, position);
 			return DateTimeFormatter.ISO_DATE.format(LocalDate.ofEpochDay(days));
 		}
-		if (type.equals(TimeType.TIME_MILLIS)) {
-			long picos = type.getLong(block, position);
-			return String.valueOf(roundDiv(picos, PICOSECONDS_PER_MILLISECOND));
+		if (type instanceof TimeType) {
+			return String.valueOf(type.getLong(block, position));
 		}
 		if (type.equals(TIMESTAMP_MILLIS)) {
 			long millisUtc = floorDiv(type.getLong(block, position), MICROSECONDS_PER_MILLISECOND);

@@ -1,0 +1,138 @@
+= SQL value storage and write guarantees
+
+This note records the implementation and remaining design work for issues #172, #173 and #174.
+It does not promise transaction or retry guarantees that the connector does not implement.
+
+== Implemented JSON write mapping
+
+INSERT writes a new JSON document with `JSON.SET` at the index's first key prefix and a generated ULID.
+UPDATE and MERGE update branches send one `JSON.MERGE` root merge-patch per document.
+The backend must provide that command.
+The merge patch preserves unrelated properties, creates missing object parents and removes a leaf when SQL assigns NULL.
+SQL NULL on INSERT is omitted; it does not create a JSON null value.
+One merge command is a document mutation, not a transaction covering other documents or MERGE branches.
+
+SQL aliases map through FT.INFO identifiers, such as `display_name` to `$.profile.name`.
+HASH writes likewise resolve aliases to physical hash field names; conflicting assignments through two aliases of the same hash field are rejected.
+Only dotted object member paths with ASCII identifier components are writable.
+Wildcard, array, root, duplicate and overlapping indexed paths are rejected before writing.
+This conservative restriction avoids inadvertently updating multiple JSON values or resolving conflicting aliases by write order.
+The sampled whole-document `$` column is read-only, as are sampled fields without an indexed path.
+NUMERIC columns write JSON numbers; TAG and TEXT columns write JSON strings in the connector's scalar representation.
+Existing TAG booleans remain subject to the documented JSON read representation; writing VARCHAR values does not infer JSON boolean types.
+Nonfinite JSON numbers fail rather than silently becoming strings or nulls.
+
+The writer converts a full input page before flushing its mutations.
+MERGE also validates the JSON insert and update values in that page before flushing its update/delete commands.
+Other pages may already have committed; a failure does not roll them back.
+Future array/wildcard support needs an explicit SQL cardinality model and validation for multiple-path matches.
+Full-document JSON replacement needs its own write contract so generated scalar updates cannot accidentally overwrite unrelated data.
+
+== Lossless HASH scalar encodings
+
+Existing supported scalar formats are unchanged, including epoch milliseconds for TIMESTAMP(3) and TIMESTAMP(3) WITH TIME ZONE.
+Additional types use TAG NOINDEX fields and retain SQL comparisons, grouping and ordering in Trino.
+The encoded payload is not indexed as a large tag:
+
+[cols="1,2",options="header"]
+|===
+|Type |Stored text
+|VARBINARY |RFC 4648 standard Base64, including padding
+|TIME(p) |Picoseconds since midnight, as an integer
+|TIMESTAMP(p), p <= 6 except p = 3 |Epoch microseconds, as an integer
+|TIMESTAMP(p), p > 6 |`<epochMicros>:<picosOfMicro>`
+|TIMESTAMP(p) WITH TIME ZONE, p < 3 |The Trino packed millisecond/zone-key integer
+|TIMESTAMP(p) WITH TIME ZONE, p > 3 |`<epochMillis>:<picosOfMilli>:<zoneKey>`
+|TIME(p) WITH TIME ZONE, short form |The Trino packed nanosecond/offset integer
+|TIME(p) WITH TIME ZONE, long form |`<picoseconds>:<offsetMinutes>`
+|JSON |JSON text, parsed into Trino 484's native Json value when read
+|===
+
+All timestamp/time precisions from 0 through 12 are represented without conversion through doubles.
+The existing millisecond timestamp-with-time-zone encoding reads in UTC as before; new zoned encodings preserve their zone key or offset.
+Readers validate precision alignment and component bounds for the new temporal formats.
+Zone keys are Trino identifiers; a future portable interchange format should store zone IDs in a new encoding version rather than reinterpret existing bytes.
+Loss of saved type metadata still exposes TAG fields as VARCHAR and does not infer their original SQL types.
+
+== ARRAY, MAP and ROW encoding
+
+Complex values use `trino:v1:` followed by a JSON structure interpreted using the saved SQL type descriptor.
+Every non-null scalar leaf is a JSON string containing that scalar's lossless connector encoding.
+Nested NULL is JSON null; a column-level SQL NULL is an absent field, and top-level `trino:v1:null` is rejected.
+An empty collection is an empty JSON array, not NULL.
+Arrays preserve order, rows store fields by position and maps store an array of key/value pairs.
+Map keys therefore retain their SQL type and need not be coerced to JSON property names.
+Map readers reject NULL keys and duplicate SQL keys.
+Row field names live in the persisted type descriptor; a name change must not silently reorder positional values.
+Nested type validation occurs before table creation, including CTAS.
+
+The version prefix enables future format changes with an explicit decoder and migration path.
+The reader rejects unversioned or malformed complex values rather than guessing an encoding.
+The JSON parser's stream constraints bound nesting and scalar lengths; ordinary Trino page and Redis value limits also apply.
+This is whole-column storage: there is no promise that Redis indexes array elements or named row members.
+
+Complex and newly encoded scalar predicates currently remain in Trino.
+Future equality pushdown could use a canonical companion value only when SQL equality matches canonical bytes, including map order independence, nested NULLs, floating NaN/signed zero, CHAR padding and time-zone normalization.
+It must retain an exact residual filter until all cases are proven.
+Structural ordering must not use lexicographic ordering of this storage text.
+Schema changes involving encoded types require decoding with the old type and re-encoding with the new type.
+
+== NULL-only HASH rows
+
+The reserved unindexed hash field `__trino_row_marker` is written on HASH INSERT and UPDATE and hidden from SQL schema discovery.
+It keeps an all-NULL row alive: Redis otherwise rejects an empty HSET and deletes a hash when HDEL removes its last field.
+CREATE TABLE and ADD COLUMN reject the reserved name.
+Existing application-owned hashes are not rewritten until SQL updates them.
+The marker is never a Redis search predicate, so native indexed filters still match only their indexed values.
+
+== Optional atomic visibility for HASH updates
+
+`redisearch.atomic-hash-updates.enabled=true` applies each HASH UPDATE or MERGE update through a single-key Lua script.
+It is false by default to preserve the existing command/ACL contract.
+EVAL, the underlying HSET/HDEL permissions, and Redis's `redis.acl_check_cmd` Lua helper are required.
+There is no silent fallback when script execution is denied.
+The script checks HSET/HDEL authorization before mutating that key, and the connector validates each page's payload before flushing mutations.
+Other Redis clients cannot observe an intermediate state between that document's field sets and removals.
+A script error is not rollback, and this option does not provide multi-row atomicity, snapshot scans or retry safety.
+The script accesses one KEYS entry, so it does not require cross-slot coordination.
+
+This mode sends EVAL per updated document; it trades script overhead for single-command visibility and may be slower than the default pipelined HSET/HDEL path.
+Benchmark it on the actual workload before selecting it for performance.
+A later EVALSHA implementation can cache the script, but must retry NOSCRIPT only when the server confirms execution never started and must account for buffered-writer flush scheduling and cluster node routing.
+
+== Retry-safe writes: proposed protocol, not implemented
+
+Retry-mode rejection remains necessary.
+A freshly generated key per attempt makes INSERT non-idempotent, and repeating an UPDATE expression against a newly scanned row can apply its effect twice.
+An application ID column is not a uniqueness constraint or an idempotency key.
+
+A future retry implementation needs the following components before enabling retry-policy other than NONE:
+
+. Assign each logical write a stable query/operation identifier and each row a deterministic identity that survives task rescheduling.
+  Worker-local sequence numbers and newly generated ULIDs are insufficient when repartitioning changes row order.
+. Freeze the intended mutation payload before applying it; repeated execution must replay that payload rather than recompute an expression against changed data.
+. Atomically apply a single-key mutation together with its operation marker and record its outcome.
+  A marker stored in a separate arbitrary key may produce CROSSSLOT on Redis Cluster.
+  A hash tag scheme must co-locate marker and document without changing existing externally owned key names unexpectedly.
+. Validate all mutation arguments before the atomic script/function applies changes.
+  A Lua/function error does not imply rollback of mutations already executed by that script.
+. Make marker retention cover the retry horizon and define recovery for markers surviving a crashed coordinator.
+  Eviction or premature expiry can turn a duplicate attempt into an additional mutation.
+. Define commit/abort and visibility separately from idempotency.
+  Per-document deduplication does not make a multi-document INSERT, UPDATE, DELETE or MERGE atomic.
+
+For multi-row atomicity, staging under a new namespace and atomically publishing a manifest could work for connector-owned tables whose readers honor that manifest.
+It cannot transparently give snapshot/transaction semantics to external applications reading ordinary keys or to indexes spanning arbitrary external prefixes.
+General cross-slot rollback requires a durable transaction coordinator and compensation semantics, not a single MULTI/EXEC call.
+TRUNCATE, replacement and DDL must define their interaction with outstanding staged writes.
+
+== Validation requirements
+
+Pure value tests cover all temporal precisions, negative epochs, binary bytes, native JSON, nested collections/NULLs, non-string map keys and malformed encodings.
+SQL integration tests cover HASH scalar/complex INSERT and CTAS, and scalar/nested JSON INSERT, UPDATE, MERGE and DELETE, including preservation of unrelated properties and creation of missing parents.
+Run the inherited sharded write suite as well as the single-shard suite.
+
+Before claiming retry safety, inject failures before/after buffering, during a batch, after server application but before acknowledgement, after coordinator loss and during task rescheduling.
+Verify exact affected keys/values, not just row counts.
+Exercise concurrent writes, cancelled statements, duplicate attempts, marker expiry/eviction, failover and cross-slot routing.
+Retries and atomicity remain unsupported until these protocol tests pass on each supported deployment mode.

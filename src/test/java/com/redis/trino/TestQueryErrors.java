@@ -49,6 +49,22 @@ class TestQueryErrors {
     }
 
     @Test
+    void nativeQuerySyntaxHasArgumentErrorWhileBackendFailuresArePreserved() {
+        for (String message : List.of("SEARCH_SYNTAX Syntax error at offset 6 near name", "Syntax error at offset 6 near name")) {
+            RedisCommandExecutionException server = new RedisCommandExecutionException(message);
+            RuntimeException result = RediSearchQueryErrors.classifyNativeQuery(new CompletionException(server));
+            assertThat(result).isInstanceOf(TrinoException.class).hasCause(server).hasMessageContaining(message);
+            assertThat(((TrinoException) result).getErrorCode())
+                    .isEqualTo(io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT.toErrorCode());
+        }
+        for (RuntimeException failure : List.of(new RedisCommandTimeoutException("Command timed out"),
+                new RedisCommandExecutionException("SEARCH_EXPR Syntax error in generated expression"),
+                new IllegalStateException("Syntax error in connector"))) {
+            assertThat(RediSearchQueryErrors.classifyNativeQuery(failure)).isSameAs(failure);
+        }
+    }
+
+    @Test
     void preservesParserTimeoutAndOtherFailures() {
         for (RuntimeException failure : new RuntimeException[] {
                 new RedisCommandExecutionException("SEARCH_PARSE_ARGS Bad arguments for PARAMS"),
