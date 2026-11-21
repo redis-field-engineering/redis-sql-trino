@@ -524,19 +524,20 @@ public class RediSearchSession {
         tableCache.invalidate(tableName);
     }
 
-    public void addColumn(SchemaTableName schemaTableName, ColumnMetadata columnMetadata) {
+    public void addColumn(SchemaTableName schemaTableName, ColumnMetadata columnMetadata, Map<String, Type> orderedTypes) {
         String tableName = toRemoteTableName(schemaTableName.getTableName());
         if (config.isFlexEnabled()) {
             verifyWritable(schemaTableName);
             verifyFlexColumn(columnMetadata.getName());
             // All Flex predicates run in Trino. A logical typed column need not be indexed, so no FT.ALTER/rebuild.
-            RediSearchColumnTypes.add(sync, tableName, columnMetadata.getName(), columnMetadata.getType());
+            RediSearchColumnTypes.write(sync, tableName, orderedTypes);
             tableCache.invalidate(schemaTableName);
             return;
         }
         FieldArgs field = buildField(columnMetadata.getName(), columnMetadata.getType());
-        // Also for an index created outside Trino, whose other columns keep the types read from FT.INFO
-        RediSearchColumnTypes.add(sync, tableName, columnMetadata.getName(), columnMetadata.getType());
+        // Persist the complete order before publishing the field and invalidating the cache. Partial legacy type
+        // maps do not describe schema order, and an intermediate ADD result must never remain cached.
+        RediSearchColumnTypes.write(sync, tableName, orderedTypes);
         sync.ftAlter(tableName, List.of(field));
         tableCache.invalidate(schemaTableName);
     }
@@ -657,7 +658,8 @@ public class RediSearchSession {
             columns.add(builtinfield.getColumnHandle());
         }
         RediSearchTableHandle tableHandle = new RediSearchTableHandle(schemaTableName, index);
-        return new RediSearchTable(tableHandle, RediSearchColumnTypes.orderColumns(columns.build(), declaredTypes), indexInfo);
+        return new RediSearchTable(tableHandle, RediSearchColumnTypes.orderColumns(columns.build(), declaredTypes,
+                indexInfo.getFields().stream().map(RediSearchIndexInfo.Field::getAttribute).collect(toSet())), indexInfo);
     }
 
     private Optional<RediSearchIndexInfo> indexInfo(String index) {
@@ -1097,6 +1099,15 @@ public class RediSearchSession {
         CompletableFuture<List<io.lettuce.core.KeyValue<String, String>>> readFields(String key, List<String> fields) {
             open();
             return reads.async.hmget(key, fields.toArray(String[]::new)).toCompletableFuture();
+        }
+
+        CompletableFuture<Map<String, String>> readJsonFields(String key, List<String> paths) {
+            open();
+            // addKey keeps routing single-key and cluster-safe. Decode the raw JSON text, never floating JsonValues.
+            return reads.async.dispatch(io.lettuce.core.protocol.CommandType.JSON_GET,
+                    new io.lettuce.core.output.ValueOutput<>(StringCodec.UTF8),
+                    new CommandArgs<>(StringCodec.UTF8).addKey(key).addValues(paths))
+                    .toCompletableFuture().thenApply(raw -> RediSearchJsonValues.decode(raw, paths));
         }
 
         void flush() {

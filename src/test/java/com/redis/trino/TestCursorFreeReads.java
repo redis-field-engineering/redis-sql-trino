@@ -94,7 +94,7 @@ public class TestCursorFreeReads extends AbstractTestQueryFramework {
     public void testQuotedUnicodeKeysAndShortBatches() {
         String index = "cf_keys";
         hashIndex(index);
-        List<String> suffixes = List.of("Z", "a\"b", "a\\b", "A", "z", "é", "\uE000", "😀", "1", "10", "2");
+        List<String> suffixes = List.of("Z", "a\"b", "a\\b", "A", "z", "é", "", "😀", "1", "10", "2", "terminal\\", "slash\\ space", "repeat\\\\b");
         for (int i = 0; i < suffixes.size(); i++) {
             server.getConnection().sync().hset(index + ":" + suffixes.get(i), Map.of("raw_id", "" + i, "amount", "1.0"));
         }

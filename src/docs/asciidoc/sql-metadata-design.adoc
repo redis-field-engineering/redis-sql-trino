@@ -169,3 +169,5 @@ types/comments/index, reinsertion and unrelated tables. Replacement additionally
 needs failed source queries, failed sink batches, indexing failure, old-reader
 pinning and orphan-generation cleanup. All claims must be checked on sharded
 deployment modes, not inferred solely from single-node Redis command availability.
+
+Default ADD COLUMN also persists the complete visible order for unmanaged indexes. Legacy partial type maps do not declare index column order; a complete indexed-column map can preserve explicit order while newly sampled unindexed fields append. The complete map is published before field creation and cache invalidation, so an intermediate column layout cannot remain cached. FIRST/AFTER/LAST and ordinal inserts have external-index regression coverage.

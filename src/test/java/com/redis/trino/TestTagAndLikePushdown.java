@@ -17,7 +17,7 @@ import io.trino.testing.QueryRunner;
 
 /**
  * TAG and wildcard queries match differently from SQL's {@code =} and {@code LIKE}. Redis keeps the equal rows with a
- * FILTER on TAG equality, and Trino evaluates {@code LIKE} and the values a tag query can't match.
+ * FILTER on TAG equality and supported stored-string LIKE shapes, with Trino evaluating the remaining predicates.
  */
 public class TestTagAndLikePushdown extends AbstractTestQueryFramework {
 
@@ -105,7 +105,7 @@ public class TestTagAndLikePushdown extends AbstractTestQueryFramework {
 		assertThat(query("SELECT id FROM beers WHERE name LIKE '%the'")).matches("VALUES VARCHAR '5'");
 		// TAG wildcards ignore case without CASESENSITIVE
 		assertThat(query("SELECT id FROM beers WHERE style LIKE '%HEAT'")).returnsEmptyResult();
-		// Redis has no single-character wildcard outside w'...', no infix shorter than two characters, and rejects a%c
+		// Single-character wildcards use Trino; percent patterns filter the whole stored string.
 		assertThat(query("SELECT id FROM beers WHERE code LIKE '_heat'")).matches("VALUES VARCHAR '1', '2'");
 		assertThat(query("SELECT id FROM beers WHERE code LIKE '%b%'")).matches("VALUES VARCHAR '3'");
 		assertThat(query("SELECT id FROM beers WHERE style LIKE 'a%b'")).matches("VALUES VARCHAR '3'");
@@ -123,7 +123,7 @@ public class TestTagAndLikePushdown extends AbstractTestQueryFramework {
 				.matches("VALUES VARCHAR '6'");
 		assertThat(query("SELECT id FROM beers WHERE style LIKE 'Caf%' LIMIT 1")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '6'");
-		assertThat(query("SELECT id FROM beers WHERE style LIKE 'a%b'")).isNotFullyPushedDown(FilterNode.class)
+		assertThat(query("SELECT id FROM beers WHERE style LIKE 'a%b'")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '3'");
 	}
 
@@ -138,7 +138,7 @@ public class TestTagAndLikePushdown extends AbstractTestQueryFramework {
 			assertThat(query("SELECT id FROM unicode_like WHERE text_value LIKE '%😀'"))
 					.isFullyPushedDown().matches("VALUES VARCHAR '2', '5'");
 			assertThat(query("SELECT id FROM unicode_like WHERE text_value LIKE '%😀%'"))
-					.isFullyPushedDown().matches("VALUES VARCHAR '1', '2', '5', '6'");
+					.isNotFullyPushedDown(FilterNode.class).matches("VALUES VARCHAR '1', '2', '5', '6'");
 			assertThat(query("SELECT count(*) FROM unicode_like WHERE text_value LIKE '%'"))
 					.isFullyPushedDown().matches("VALUES BIGINT '6'");
 			assertThat(query("SELECT id FROM unicode_like WHERE text_value LIKE ''"))

@@ -54,7 +54,7 @@ public class TestClickBenchFollowUps extends AbstractTestQueryFramework {
     @Test
     public void testWideTimestampTopN() {
         var result = getDistributedQueryRunner().executeWithPlan(getSession(),
-                "SELECT * FROM followups WHERE url LIKE '%google%' ORDER BY eventtime LIMIT 10");
+                "SELECT * FROM followups WHERE url LIKE 'https://google/%' ORDER BY eventtime LIMIT 10");
         assertThat(result.result().getRowCount()).isEqualTo(10);
         for (int i = 0; i < 10; i++) {
             var row = result.result().getMaterializedRows().get(i);

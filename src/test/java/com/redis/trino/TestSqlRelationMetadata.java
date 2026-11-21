@@ -62,6 +62,42 @@ public class TestSqlRelationMetadata extends AbstractTestQueryFramework {
     }
 
     @Test
+    void testAddColumnPreservesUnmanagedAndPartialSchemaOrder() {
+        var redis = server.getConnection().sync();
+        for (boolean partialTypes : new boolean[] {false, true}) {
+            String index = partialTypes ? "partial_order" : "unmanaged_order";
+            redis.ftCreate(index, io.lettuce.core.search.arguments.CreateArgs.builder().withPrefix(index + ":").build(),
+                    java.util.List.of(io.lettuce.core.search.arguments.NumericFieldArgs.builder().name("a").build(),
+                            io.lettuce.core.search.arguments.TagFieldArgs.builder().name("b").build()));
+            server.awaitIndexed(index);
+            redis.hset(index + ":old", java.util.Map.of("a", "1", "b", "before", "z", "sampled"));
+            if (partialTypes) {
+                redis.set(RediSearchColumnTypes.key(index), "{\"b\":\"varchar\"}");
+            }
+            try {
+                assertColumnOrder(index, "a", "b", "z");
+                assertUpdate("ALTER TABLE " + index + " ADD COLUMN c bigint");
+                assertColumnOrder(index, "a", "b", "z", "c");
+                assertUpdate("ALTER TABLE " + index + " ADD COLUMN head bigint FIRST");
+                assertColumnOrder(index, "head", "a", "b", "z", "c");
+                assertUpdate("ALTER TABLE " + index + " ADD COLUMN middle bigint AFTER a");
+                assertColumnOrder(index, "head", "a", "middle", "b", "z", "c");
+                assertUpdate("INSERT INTO " + index + " VALUES (10, 20, 30, 'Bee', 'Zed', 40)", 1);
+                assertThat(query("SELECT * FROM " + index + " WHERE head = 10"))
+                        .matches("VALUES (BIGINT '10', DOUBLE '20', BIGINT '30', VARCHAR 'Bee', VARCHAR 'Zed', BIGINT '40')");
+            }
+            finally {
+                assertUpdate("DROP TABLE " + index);
+            }
+        }
+    }
+
+    private void assertColumnOrder(String table, String... columns) {
+        assertThat(computeActual("SHOW COLUMNS FROM " + table).getMaterializedRows().stream()
+                .map(row -> row.getField(0)).toList()).containsExactly((Object[]) columns);
+    }
+
+    @Test
     void testTruncateJsonIndex() {
         var redis = server.getConnection().sync();
         redis.ftCreate("json_truncate", io.lettuce.core.search.arguments.CreateArgs.builder()

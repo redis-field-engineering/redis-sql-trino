@@ -27,6 +27,11 @@ final class RediSearchReadStats {
 	final LongAdder localTopNSortHashReads = new LongAdder();
 	final LongAdder localTopNProjectedHashReads = new LongAdder();
 	final LongAdder localTopNCandidates = new LongAdder();
+    final LongAdder jsonCommands = new LongAdder();
+    final LongAdder jsonPathReads = new LongAdder();
+    final LongAdder jsonReadBatches = new LongAdder();
+    final LongAdder jsonWaitNanos = new LongAdder();
+    final LongAdder localTopNProjectedJsonReads = new LongAdder();
 
 	<T> T redisRequest(Supplier<T> request) {
 		long start = System.nanoTime();
@@ -56,7 +61,7 @@ final class RediSearchReadStats {
 	}
 
 	long readTimeNanos() {
-		return requestNanos.sum() + exactWaitNanos.sum();
+		return requestNanos.sum() + exactWaitNanos.sum() + jsonWaitNanos.sum();
 	}
 
 	Metrics metrics() {
@@ -72,7 +77,12 @@ final class RediSearchReadStats {
 				Map.entry("redis.row-conversion-time", timing(conversionNanos.sum())),
                 Map.entry("redis.local-topn.sort-hash-reads", new LongCount(localTopNSortHashReads.sum())),
                 Map.entry("redis.local-topn.projected-hash-reads", new LongCount(localTopNProjectedHashReads.sum())),
-                Map.entry("redis.local-topn.candidates", new LongCount(localTopNCandidates.sum()))));
+                Map.entry("redis.local-topn.candidates", new LongCount(localTopNCandidates.sum())),
+                Map.entry("redis.json.commands", new LongCount(jsonCommands.sum())),
+                Map.entry("redis.json.path-reads", new LongCount(jsonPathReads.sum())),
+                Map.entry("redis.json.read-batches", new LongCount(jsonReadBatches.sum())),
+                Map.entry("redis.json.read-wait-time", timing(jsonWaitNanos.sum())),
+                Map.entry("redis.local-topn.projected-json-reads", new LongCount(localTopNProjectedJsonReads.sum()))));
 	}
 
 	private static DurationTiming timing(long nanos) {

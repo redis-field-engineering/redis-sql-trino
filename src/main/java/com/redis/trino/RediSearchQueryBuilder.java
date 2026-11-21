@@ -345,40 +345,89 @@ public class RediSearchQueryBuilder {
 
 	// FILTER doesn't take PARAMS, so values are inlined
 	static String stringLiteral(String value) {
-		return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+		if (value.indexOf('\\') < 0) { return "\"" + value.replace("\"", "\\\"") + "\""; }
+		// The expression lexer collapses backslash runs and removes them before punctuation/whitespace.
+		// A backslash followed by a letter survives; isolate that byte, then compose literal segments.
+		List<String> pieces = new ArrayList<>();
+		int start = 0;
+		for (int offset = 0; offset < value.length(); offset++) {
+			if (value.charAt(offset) == '\\') {
+				pieces.add(stringLiteral(value.substring(start, offset)));
+				pieces.add("substr(\"\\\\x\", 0, 1)");
+				start = offset + 1;
+			}
+		}
+		pieces.add(stringLiteral(value.substring(start)));
+		return "format(\"" + "%s".repeat(pieces.size()) + "\", " + String.join(", ", pieces) + ")";
 	}
 
-	/** Exact simple LIKE shapes, without wildcard expansion, normalization or tokenization. */
+	/** Exact LIKE shapes over stored HASH strings, without indexed wildcard expansion. */
 	static Optional<String> containsFilter(RediSearchColumnHandle column, String pattern) {
+		return likeFilter(column, pattern, Optional.empty()).filter(LikePredicate::exact).map(LikePredicate::expression);
+	}
+
+	record LikePredicate(String expression, boolean exact) {}
+
+	static Optional<LikePredicate> likeFilter(RediSearchColumnHandle column, String pattern, Optional<String> escape) {
 		if (!column.isFilterable() || !(column.getType() instanceof VarcharType) || !isProperty(column.getName())
-				|| FILTER_UNSUPPORTED_CHARACTERS.matcher(pattern).find() || pattern.indexOf('_') >= 0) {
+				|| FILTER_UNSUPPORTED_CHARACTERS.matcher(pattern).find()
+				|| escape.filter(value -> value.codePointCount(0, value.length()) != 1).isPresent()) {
 			return Optional.empty();
 		}
-		boolean leading = pattern.startsWith("%");
-		boolean trailing = pattern.endsWith("%");
-		int start = leading ? 1 : 0;
-		int end = trailing && pattern.length() > start ? pattern.length() - 1 : pattern.length();
-		String literal = pattern.substring(start, end);
-		if (literal.indexOf('%') >= 0) {
-			return Optional.empty();
+		int escapeCodePoint = escape.map(value -> value.codePointAt(0)).orElse(-1);
+		List<String> parts = new ArrayList<>();
+		StringBuilder literal = new StringBuilder();
+		boolean wildcard = false;
+		for (int offset = 0; offset < pattern.length();) {
+			int codePoint = pattern.codePointAt(offset);
+			offset += Character.charCount(codePoint);
+			if (codePoint == escapeCodePoint) {
+				if (offset == pattern.length()) { return Optional.empty(); }
+				codePoint = pattern.codePointAt(offset);
+				offset += Character.charCount(codePoint);
+				if (codePoint != '%' && codePoint != '_' && codePoint != escapeCodePoint) { return Optional.empty(); }
+				literal.appendCodePoint(codePoint);
+				wildcard = false;
+			} else if (codePoint == '_') {
+				return Optional.empty();
+			} else if (codePoint == '%') {
+				if (!wildcard) {
+					parts.add(literal.toString());
+					literal.setLength(0);
+				}
+				wildcard = true;
+			} else {
+				literal.appendCodePoint(codePoint);
+				wildcard = false;
+			}
 		}
+		parts.add(literal.toString());
 		String field = property(column.getName());
-		String quoted = stringLiteral(literal);
-		String predicate;
-		if (literal.isEmpty() && (leading || trailing)) {
-			return Optional.of("exists(" + field + ")");
-		} else if (leading && trailing) {
-			predicate = "contains(" + field + ", " + quoted + ") > 0";
-		} else if (trailing) {
-			predicate = "startswith(" + field + ", " + quoted + ") > 0";
-		} else if (leading) {
-			// Let Redis calculate both lengths, so offsets use its own string representation for Unicode.
-			predicate = "strlen(" + field + ") >= strlen(" + quoted + ") && substr(" + field
-					+ ", strlen(" + field + ") - strlen(" + quoted + "), strlen(" + quoted + ")) == " + quoted;
-		} else {
-			predicate = field + " == " + quoted;
+		if (parts.size() == 1) {
+			return Optional.of(new LikePredicate("exists(" + field + ") && " + field + " == " + stringLiteral(parts.getFirst()), true));
 		}
-		return Optional.of("exists(" + field + ") && " + predicate);
+		// At most one middle literal. Native contains() truncates at NUL, so retain a residual for it.
+		if (parts.size() > 3) { return Optional.empty(); }
+		String prefix = parts.getFirst();
+		String suffix = parts.getLast();
+		String middle = parts.size() == 3 ? parts.get(1) : "";
+		List<String> predicates = new ArrayList<>();
+		predicates.add("exists(" + field + ")");
+		List<String> lengths = parts.stream().filter(value -> !value.isEmpty())
+				.map(value -> "strlen(" + stringLiteral(value) + ")").toList();
+		// Redis strlen/substr both use bytes; lengths of literals use that same representation.
+		if (!suffix.isEmpty() || !middle.isEmpty()) {
+			predicates.add("strlen(" + field + ") >= " + String.join(" + ", lengths));
+		}
+		if (!prefix.isEmpty()) {
+			predicates.add("startswith(" + field + ", " + stringLiteral(prefix) + ") > 0");
+		}
+		if (!suffix.isEmpty()) {
+			String quoted = stringLiteral(suffix);
+			predicates.add("substr(" + field + ", strlen(" + field + ") - strlen(" + quoted
+					+ "), strlen(" + quoted + ")) == " + quoted);
+		}
+		return Optional.of(new LikePredicate(String.join(" && ", predicates), middle.isEmpty()));
 	}
 
 	/** Only HASH callers may use these: a missing field is SQL NULL, including for unindexed columns. */

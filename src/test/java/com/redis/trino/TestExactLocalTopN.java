@@ -65,12 +65,48 @@ public class TestExactLocalTopN extends AbstractTestQueryFramework {
         Metrics metrics = metrics(sql);
         assertThat(metric(metrics, "redis.rows.received")).isEqualTo(ROWS);
         assertThat(metric(metrics, "redis.local-topn.candidates")).isEqualTo(5);
-        // Exact BIGINT source recovery and exact DECIMAL sort hydration read only ordering fields for all rows.
+        // BIGINT and DECIMAL keys share one HMGET per source row, without fetching the wide payload.
         assertThat(metric(metrics, "redis.local-topn.sort-hash-reads")).isEqualTo(2L * ROWS);
         // The final Trino sort still needs amount + id, and the client also requests payload: 3 fields per winner.
         assertThat(metric(metrics, "redis.local-topn.projected-hash-reads")).isEqualTo(15);
         assertThat(metric(metrics, "redis.exact-hash-reads")).isEqualTo(2L * ROWS + 15);
+        assertThat(metric(metrics, "redis.exact-hash-commands")).isEqualTo(ROWS + 5);
+        assertThat(metric(metrics, "redis.exact-hash-read-batches")).isEqualTo(31);
         System.out.println("EXACT_TOPN_LATE_MATERIALIZATION deployment=" + deployment() + " metrics=" + metrics.getMetrics());
+    }
+
+    @Test
+    public void testCoalescedNumericReadsResolveAliasesNullsAndInvalidLosers() {
+        var redis = server.getConnection().sync();
+        redis.ftCreate("topn_mixed_alias", io.lettuce.core.search.arguments.CreateArgs.builder()
+                .withPrefix("topn_mixed_alias:").skipInitialScan().build(), List.of(
+                io.lettuce.core.search.arguments.NumericFieldArgs.builder().name("raw_id").as("id").build(),
+                io.lettuce.core.search.arguments.NumericFieldArgs.builder().name("raw_amount").as("amount").build(),
+                io.lettuce.core.search.arguments.TagFieldArgs.builder().name("raw_payload").as("payload").build()));
+        RediSearchColumnTypes.write(redis, "topn_mixed_alias", Map.of("id", io.trino.spi.type.BigintType.BIGINT,
+                "amount", io.trino.spi.type.DecimalType.createDecimalType(30, 6),
+                "payload", io.trino.spi.type.VarcharType.VARCHAR));
+        for (int i = 0; i < 7; i++) {
+            Map<String, String> fields = new HashMap<>();
+            if (i != 0) { fields.put("raw_id", Long.toString(9007199254740992L + i)); }
+            if (i > 1) { fields.put("raw_amount", "9007199254740993.00000" + i); }
+            fields.put("raw_payload", "row-" + i);
+            redis.hset("topn_mixed_alias:" + i, fields);
+        }
+        try {
+            String sql = "SELECT id, amount, payload FROM topn_mixed_alias ORDER BY amount ASC NULLS FIRST, id DESC NULLS LAST LIMIT 3";
+            assertExactOrder(sql, sql.replace("FROM topn_mixed_alias", "FROM no_local_topn.tpch.topn_mixed_alias"));
+            Metrics metrics = metrics(sql);
+            assertThat(metric(metrics, "redis.rows.received")).isEqualTo(7);
+            assertThat(metric(metrics, "redis.local-topn.sort-hash-reads")).isEqualTo(14);
+            assertThat(metric(metrics, "redis.local-topn.projected-hash-reads")).isEqualTo(9);
+            assertThat(metric(metrics, "redis.exact-hash-commands")).isEqualTo(10);
+            // This numeric index value is valid to Redis but not to SQL BIGINT. Even an obvious loser must decode.
+            redis.hset("topn_mixed_alias:invalid", Map.of("raw_id", "1.5", "raw_amount", "9007199254740994", "raw_payload", "loser"));
+            assertQueryFails(sql, ".*not a valid bigint.*");
+        } finally {
+            assertUpdate("DROP TABLE topn_mixed_alias");
+        }
     }
 
     @Test
@@ -122,7 +158,7 @@ public class TestExactLocalTopN extends AbstractTestQueryFramework {
     }
 
     @Test
-    public void testJsonOrderingRetainsExactTrinoFallback() {
+    public void testJsonOrderingRetainsExactTrinoFallbackWhenDisabled() {
         var redis = server.getConnection().sync();
         redis.ftCreate("topn_json_fallback", io.lettuce.core.search.arguments.CreateArgs.builder()
                 .on(io.lettuce.core.search.arguments.CreateArgs.TargetType.JSON).withPrefix("topn_json_fallback:").build(),
@@ -134,7 +170,7 @@ public class TestExactLocalTopN extends AbstractTestQueryFramework {
             redis.jsonSet("topn_json_fallback:3", io.lettuce.core.json.JsonPath.ROOT_PATH, "{\"id\":-1}");
             redis.jsonSet("topn_json_fallback:4", io.lettuce.core.json.JsonPath.ROOT_PATH, "{\"other\":true}");
             server.awaitIndexed("topn_json_fallback");
-            String sql = "SELECT id FROM topn_json_fallback ORDER BY id DESC NULLS FIRST LIMIT 2";
+            String sql = "SELECT id FROM no_local_topn.tpch.topn_json_fallback ORDER BY id DESC NULLS FIRST LIMIT 2";
             assertThat(computeActual(sql).getOnlyColumn()).containsExactly(null, 9007199254740993L);
             Metrics fallbackMetrics = metrics(sql);
             assertThat(metric(fallbackMetrics, "redis.rows.received")).isEqualTo(4);

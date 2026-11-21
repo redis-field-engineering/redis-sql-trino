@@ -88,8 +88,8 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 			return true;
 
 		case SUPPORTS_TOPN_PUSHDOWN:
-			// No unconditional contract: JSON, residual predicates and candidate budgets retain Trino sorting.
-			// HASH native/typed TopN is covered separately; see the SQL guide's test capability inventory.
+			// No unconditional contract: unsupported JSON mappings, residual predicates and candidate budgets retain Trino sorting.
+			// Native and HASH/JSON typed TopN have dedicated coverage; see the SQL guide's test capability inventory.
 			return false;
 
 		case SUPPORTS_NOT_NULL_CONSTRAINT:

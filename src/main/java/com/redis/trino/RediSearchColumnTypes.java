@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import io.airlift.json.JsonCodec;
 import io.airlift.log.Logger;
@@ -89,9 +90,11 @@ public final class RediSearchColumnTypes {
 		redis.set(key(index), CODEC.toJson(typeIds));
 	}
 
-	/** Uses persisted declaration order without changing external-index or hidden-column ordering. */
-	public static List<RediSearchColumnHandle> orderColumns(List<RediSearchColumnHandle> columns, Map<String, String> declaredTypes) {
-		if (declaredTypes.isEmpty()) {
+	/** A legacy partial type map is not a column-order declaration for the external index. */
+	public static List<RediSearchColumnHandle> orderColumns(List<RediSearchColumnHandle> columns,
+			Map<String, String> declaredTypes, Set<String> indexedColumns) {
+		if (declaredTypes.isEmpty() || columns.stream().anyMatch(column -> !column.isHidden()
+				&& indexedColumns.contains(column.getName()) && !declaredTypes.containsKey(column.getName()))) {
 			return columns;
 		}
 		Map<String, RediSearchColumnHandle> remaining = new LinkedHashMap<>();

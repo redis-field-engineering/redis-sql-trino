@@ -165,7 +165,7 @@ public class TestQueryBuilder {
 		assertThat(new RediSearchQueryBuilder().filters(TupleDomain.withColumnDomains(ImmutableMap.of(style,
 				varchars("say \"hi\"", "back\\slash", "a$b@c'd|e", "Café")))))
 				.containsEntry("style", "exists(@style) && ((@style == \"Café\" || @style == \"a$b@c'd|e\") "
-						+ "|| (@style == \"back\\\\slash\" || @style == \"say \\\"hi\\\"\"))");
+						+ "|| (@style == format(\"%s%s%s\", \"back\", substr(\"\\\\x\", 0, 1), \"slash\") || @style == \"say \\\"hi\\\"\"))");
 		// IN nests its comparisons in halves
 		assertThat(new RediSearchQueryBuilder().filters(TupleDomain.withColumnDomains(ImmutableMap.of(style,
 				varchars("a", "b", "c", "d", "e"))))).containsEntry("style", "exists(@style) && "
@@ -676,7 +676,18 @@ public class TestQueryBuilder {
 		assertThat(RediSearchQueryBuilder.containsFilter(field, "%")).contains("exists(@style)");
 		assertThat(RediSearchQueryBuilder.containsFilter(field, "%%")).contains("exists(@style)");
 		assertThat(RediSearchQueryBuilder.containsFilter(field, "")).contains("exists(@style) && @style == \"\"");
-		assertThat(RediSearchQueryBuilder.containsFilter(field, "a%b")).isEmpty();
+		assertThat(RediSearchQueryBuilder.containsFilter(field, "a%b"))
+				.contains("exists(@style) && strlen(@style) >= strlen(\"a\") + strlen(\"b\") && startswith(@style, \"a\") > 0 && substr(@style, strlen(@style) - strlen(\"b\"), strlen(\"b\")) == \"b\"");
+		assertThat(RediSearchQueryBuilder.containsFilter(field, "%a%b%")).isEmpty();
+		assertThat(RediSearchQueryBuilder.likeFilter(field, "a!_%", Optional.of("!")).map(RediSearchQueryBuilder.LikePredicate::expression))
+				.contains("exists(@style) && startswith(@style, \"a_\") > 0");
+		assertThat(RediSearchQueryBuilder.likeFilter(field, "a!x%", Optional.of("!"))).isEmpty();
+		assertThat(RediSearchQueryBuilder.likeFilter(field, "a!", Optional.of("!"))).isEmpty();
+		assertThat(RediSearchQueryBuilder.likeFilter(field, "a%", Optional.of(""))).isEmpty();
+		assertThat(RediSearchQueryBuilder.stringLiteral("a\\")).isEqualTo("format(\"%s%s%s\", \"a\", substr(\"\\\\x\", 0, 1), \"\")");
+		assertThat(RediSearchQueryBuilder.containsFilter(field, "%bar%")).isEmpty();
+		assertThat(RediSearchQueryBuilder.likeFilter(field, "foo%bar%", Optional.empty()))
+				.contains(new RediSearchQueryBuilder.LikePredicate("exists(@style) && strlen(@style) >= strlen(\"foo\") + strlen(\"bar\") && startswith(@style, \"foo\") > 0", false));
 		assertThat(RediSearchQueryBuilder.containsFilter(field, "a_b%")).isEmpty();
 		assertThat(RediSearchQueryBuilder.containsFilter(field, "bad\n%")).isEmpty();
 		assertThat(RediSearchQueryBuilder.containsFilter(field, "quote\"%"))

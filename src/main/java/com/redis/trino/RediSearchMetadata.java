@@ -382,10 +382,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		if (!ordered.containsKey(column.getName())) {
 			throw new TrinoException(StandardErrorCode.COLUMN_NOT_FOUND, "Column position does not exist: " + position);
 		}
-		rediSearchSession.addColumn(table.getSchemaTableName(), column);
-		if (!(position instanceof ColumnPosition.Last)) {
-			RediSearchColumnTypes.write(rediSearchSession.sync(), table.getIndex(), ordered);
-		}
+		rediSearchSession.addColumn(table.getSchemaTableName(), column, ordered);
 		if (column.getComment().isPresent()) {
 			relationMetadata.setComment(((RediSearchTableHandle) tableHandle).getIndex(), Optional.of(column.getName()), column.getComment());
 		}
@@ -575,11 +572,13 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			return Optional.empty();
 		}
 		RediSearchTable schema = rediSearchSession.getTable(handle.getSchemaTableName());
-		if (schema.getIndexInfo().getKeyType().filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
+		boolean json = schema.getIndexInfo().getKeyType().filter(RediSearchIndexInfo.KeyType.JSON::equals).isPresent();
+		if (json ? !RediSearchJsonValues.supportsSchema(schema)
+                : schema.getIndexInfo().getKeyType().filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
 			return Optional.empty();
 		}
 		List<RediSearchColumnHandle> columns = new java.util.ArrayList<>();
-		boolean nativeSort = true;
+		boolean nativeSort = !json;
 		for (SortItem item : sortItems) {
 			if (!(assignments.get(item.getName()) instanceof RediSearchColumnHandle column)
 					|| column.getExpression().isPresent()
@@ -662,14 +661,26 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		for (ConnectorExpression expression : ConnectorExpressions.extractConjuncts(constraint.getExpression())) {
 			if (expression instanceof Call call
 					&& call.getFunctionName().equals(io.trino.spi.expression.StandardFunctions.LIKE_FUNCTION_NAME)
-					&& call.getArguments().size() == 2 && call.getArguments().get(0) instanceof Variable variable
+					&& (call.getArguments().size() == 2 || call.getArguments().size() == 3)
+					&& call.getArguments().get(0) instanceof Variable variable
 					&& call.getArguments().get(1) instanceof Constant constant && constant.getValue() instanceof Slice pattern
 					&& constraint.getAssignments().get(variable.getName()) instanceof RediSearchColumnHandle column
 					&& hash) {
-				Optional<String> filter = RediSearchQueryBuilder.containsFilter(column, pattern.toStringUtf8());
+				Optional<String> escape = Optional.empty();
+				if (call.getArguments().size() == 3) {
+					if (!(call.getArguments().get(2) instanceof Constant escapeConstant)
+							|| !(escapeConstant.getValue() instanceof Slice escapeSlice)
+							|| !io.airlift.slice.Slices.utf8Slice(escapeSlice.toStringUtf8()).equals(escapeSlice)) {
+						remaining.add(expression);
+						continue;
+					}
+					escape = Optional.of(escapeSlice.toStringUtf8());
+				}
+				Optional<RediSearchQueryBuilder.LikePredicate> filter = io.airlift.slice.Slices.utf8Slice(pattern.toStringUtf8()).equals(pattern)
+						? RediSearchQueryBuilder.likeFilter(column, pattern.toStringUtf8(), escape) : Optional.empty();
 				if (filter.isPresent()) {
-					mergeFilter(filters, column.getName(), filter.orElseThrow());
-					continue;
+					mergeFilter(filters, column.getName(), filter.orElseThrow().expression());
+					if (filter.orElseThrow().exact()) { continue; }
 				}
 			}
 			remaining.add(expression);
@@ -774,13 +785,19 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			return applyCountOverDistinct(table, aggregates, assignments, groupingSets.getFirst());
 		}
 		if (!groupingSets.get(0).isEmpty()) {
-			// No reliable distinct-cardinality statistic is available. Document count is an upper bound;
-			// unknown or over-budget tables aggregate in Trino, without runtime replay or partial output.
 			OptionalLong documents = rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo().getNumDocs();
-			if (!isGroupPushdownSafe(documents, rediSearchSession.getConfig().getAggregationGroupLimit())) {
-				log.debug("Rejecting GROUP BY pushdown: index %s document count %s exceeds group budget %s",
-						table.getIndex(), documents, rediSearchSession.getConfig().getAggregationGroupLimit());
+			long groupBudget = rediSearchSession.getConfig().getAggregationGroupLimit();
+			// A normalized finite key domain can bound groups independently of the number of input rows.
+			// This relaxes only the group-memory budget; all type, precision and capability guards below remain.
+			OptionalLong provenGroups = RediSearchGroupingBounds.upperBoundWithin(documents, groupingSets.getFirst(), groupBudget);
+			if (provenGroups.isEmpty()) {
+				log.debug("Rejecting GROUP BY pushdown: index %s document count %s and finite key bounds do not fit group budget %s",
+						table.getIndex(), documents, groupBudget);
 				return Optional.empty();
+			}
+			if (!isGroupPushdownSafe(documents, groupBudget)) {
+				log.debug("GROUP BY finite key bound %s fits group budget %s for index %s with cached document count %s",
+						provenGroups.orElseThrow(), groupBudget, table.getIndex(), documents);
 			}
 		}
 		// Sums and averages count their values where Redis can, which a sharded database needs to compute them
