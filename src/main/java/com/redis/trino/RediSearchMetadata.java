@@ -234,6 +234,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	public Optional<ConnectorOutputMetadata> finishCreateTable(ConnectorSession session,
 			ConnectorOutputTableHandle tableHandle, Collection<Slice> fragments,
 			Collection<ComputedStatistics> computedStatistics) {
+		rediSearchSession.publishFlexStaging(fragments);
 		clearRollback();
 		return Optional.empty();
 	}
@@ -254,6 +255,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	public Optional<ConnectorOutputMetadata> finishInsert(ConnectorSession session,
 			ConnectorInsertTableHandle insertHandle, List<ConnectorTableHandle> sourceTableHandles, Collection<Slice> fragments,
 			Collection<ComputedStatistics> computedStatistics) {
+		rediSearchSession.publishFlexStaging(fragments);
 		return Optional.empty();
 	}
 
@@ -271,7 +273,6 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	@Override
 	public ConnectorMergeTableHandle beginMerge(ConnectorSession session, ConnectorTableHandle tableHandle,
 			Map<Integer, Collection<ColumnHandle>> updateCaseColumns, RetryMode retryMode) {
-		rediSearchSession.verifyWritesSupported();
 		checkRetry(retryMode);
 		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
 		// DELETE has no update cases and works on any index. Inserts from MERGE are checked by the merge sink, since
@@ -291,6 +292,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	public Optional<ConnectorOutputMetadata> finishMerge(ConnectorSession session, ConnectorMergeTableHandle mergeTableHandle,
 			List<ConnectorTableHandle> sourceTableHandles, Collection<Slice> fragments,
 			Collection<ComputedStatistics> computedStatistics) {
+		rediSearchSession.publishFlexStaging(fragments);
 		return Optional.empty();
 	}
 

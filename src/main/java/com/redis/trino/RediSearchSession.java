@@ -38,6 +38,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -61,6 +62,7 @@ import com.redis.trino.RediSearchTranslator.Aggregation;
 
 import io.airlift.json.JsonCodec;
 import io.airlift.log.Logger;
+import io.airlift.slice.Slice;
 import io.lettuce.core.AbstractRedisClient;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.LettuceFutures;
@@ -423,7 +425,7 @@ public class RediSearchSession {
     }
 
     public void createTable(SchemaTableName schemaTableName, List<RediSearchColumnHandle> columns) {
-        verifyWritesSupported();
+        if (config.isFlexEnabled()) { columns.forEach(column -> verifyFlexColumn(column.getName())); }
         String index = schemaTableName.getTableName();
         if (!sync.ftList().contains(index)) {
             Map<String, Type> types = new LinkedHashMap<>();
@@ -477,26 +479,55 @@ public class RediSearchSession {
      * documents never sees; DELETE works on both.
      */
     public void verifyWritable(SchemaTableName tableName) {
-        verifyWritesSupported();
         RediSearchTable table = getTable(tableName);
         if (table.getIndexInfo().getKeyType().filter(type -> type == RediSearchIndexInfo.KeyType.JSON).isPresent()) {
             throw new TrinoException(NOT_SUPPORTED, format(
                     "Index %s is on JSON documents; the connector only writes hashes, so only DELETE is supported",
                     table.getTableHandle().getIndex()));
         }
+        if (config.isFlexEnabled() && table.getIndexInfo().getFields().stream()
+                .anyMatch(field -> field.getIdentifier().equals(RediSearchFlexWriteBuffer.ROW_MARKER))) {
+            throw new TrinoException(NOT_SUPPORTED, "Cannot write an index using reserved field " + RediSearchFlexWriteBuffer.ROW_MARKER);
+        }
     }
 
     public void dropTable(SchemaTableName tableName) {
-        verifyWritesSupported();
         String index = toRemoteTableName(tableName.getTableName());
-        sync.ftDropindex(index, true);
+        if (config.isFlexEnabled()) {
+            // Delete only indexed documents, never a prefix glob: external indexes can have FILTERs or share prefixes.
+            Optional<RediSearchIndexInfo> info = cursorFreeIndexInfo(sync, index);
+            info.ifPresent(value -> verifyIndexed(index, value));
+            var table = new RediSearchTableHandle(tableName, index);
+            Optional<String> after = Optional.empty();
+            while (info.isPresent()) {
+                var aggregation = translator.aggregatePage(table, List.of(), info, after, config.getFlexBatchSize());
+                var reply = sync.ftAggregate(index, aggregation.getQuery(), aggregation.getArgs());
+                RediSearchQueryErrors.verifyComplete(reply);
+                var last = RediSearchCursorFreePageSource.lastKey(reply, after, config.getFlexBatchSize());
+                if (last.isEmpty()) { break; }
+                String[] keys = reply.getReplies().stream().flatMap(shard -> shard.getResults().stream())
+                        .map(row -> row.getFields().get(RediSearchBuiltinField.KEY.getName()).asString()).toArray(String[]::new);
+                sync.del(keys);
+                after = last;
+            }
+            sync.ftDropindex(index, false);
+        } else {
+            sync.ftDropindex(index, true);
+        }
         RediSearchColumnTypes.delete(sync, index);
         tableCache.invalidate(tableName);
     }
 
     public void addColumn(SchemaTableName schemaTableName, ColumnMetadata columnMetadata) {
-        verifyWritesSupported();
         String tableName = toRemoteTableName(schemaTableName.getTableName());
+        if (config.isFlexEnabled()) {
+            verifyWritable(schemaTableName);
+            verifyFlexColumn(columnMetadata.getName());
+            // All Flex predicates run in Trino. A logical typed column need not be indexed, so no FT.ALTER/rebuild.
+            RediSearchColumnTypes.add(sync, tableName, columnMetadata.getName(), columnMetadata.getType());
+            tableCache.invalidate(schemaTableName);
+            return;
+        }
         FieldArgs field = buildField(columnMetadata.getName(), columnMetadata.getType());
         // Also for an index created outside Trino, whose other columns keep the types read from FT.INFO
         RediSearchColumnTypes.add(sync, tableName, columnMetadata.getName(), columnMetadata.getType());
@@ -504,11 +535,51 @@ public class RediSearchSession {
         tableCache.invalidate(schemaTableName);
     }
 
-    void verifyWritesSupported() {
-        if (config.isFlexEnabled()) {
-            throw new TrinoException(NOT_SUPPORTED,
-                    "Redis Flex mode currently supports reads of existing indexes only; writes and DDL are not supported");
+    private static void verifyFlexColumn(String name) {
+        if (name.equals(RediSearchFlexWriteBuffer.ROW_MARKER)) {
+            throw new TrinoException(NOT_SUPPORTED, "Reserved Flex column name: " + name);
         }
+    }
+
+    String flexWriteField(SchemaTableName table, String column) {
+        return getTable(table).getIndexInfo().getFields().stream().filter(field -> field.getAttribute().equals(column))
+                .map(RediSearchIndexInfo.Field::getIdentifier).findFirst().orElse(column);
+    }
+
+    void publishFlexStaging(Collection<Slice> fragments) {
+        if (!config.isFlexEnabled() || fragments.isEmpty()) { return; }
+        try (Writer writer = openWriter()) {
+            for (Slice fragment : fragments) {
+                List<String> descriptor = RediSearchFlexWriteBuffer.ROW_CODEC.fromJson(fragment.toStringUtf8());
+                com.google.common.base.Preconditions.checkArgument(descriptor.size() == 2, "Invalid Flex staging descriptor");
+                String key = descriptor.get(0);
+                long expectedRows = Long.parseLong(descriptor.get(1));
+                com.google.common.base.Preconditions.checkArgument(key.startsWith(RediSearchFlexWriteBuffer.PREFIX), "Invalid Flex staging key");
+                com.google.common.base.Preconditions.checkState(expectedRows > 0 && sync.llen(key) == expectedRows,
+                        "Missing or incomplete Flex staging list; refusing a partial insert");
+                for (long offset = 0; offset < expectedRows; offset += 1000) {
+                    long count = Math.min(1000, expectedRows - offset);
+                    List<String> batch = sync.lrange(key, offset, offset + count - 1);
+                    com.google.common.base.Preconditions.checkState(batch.size() == count,
+                            "Flex staging list disappeared during publication; refusing a partial insert");
+                    List<io.lettuce.core.RedisFuture<?>> writes = new ArrayList<>();
+                    for (String encoded : batch) {
+                        List<String> row = RediSearchFlexWriteBuffer.ROW_CODEC.fromJson(encoded);
+                        com.google.common.base.Preconditions.checkState(row.size() >= 3 && row.size() % 2 == 1, "Invalid staged Flex row");
+                        Map<String, String> fields = new LinkedHashMap<>();
+                        for (int i = 1; i < row.size(); i += 2) { fields.put(row.get(i), row.get(i + 1)); }
+                        writes.add(writer.commands().hset(row.get(0), fields));
+                    }
+                    writer.flush(writes);
+                }
+                sync.del(key);
+            }
+        }
+    }
+
+    void discardFlexStaging(String key) {
+        try { sync.del(key); }
+        catch (RuntimeException failure) { log.warn(failure, "Could not discard Flex staging list; it will expire"); }
     }
 
     private String toRemoteTableName(String tableName) {
@@ -542,12 +613,22 @@ public class RediSearchSession {
         for (RediSearchBuiltinField builtinfield : RediSearchBuiltinField.values()) {
             fields.add(builtinfield.getName());
         }
+        if (config.isFlexEnabled()) { fields.add(RediSearchFlexWriteBuffer.ROW_MARKER); }
         Map<String, String> declaredTypes = RediSearchColumnTypes.read(sync, index);
         for (RediSearchIndexInfo.Field indexedField : indexInfo.getFields()) {
             RediSearchColumnHandle column = buildColumnHandle(indexedField, indexInfo.getKeyType(),
                     Optional.ofNullable(declaredTypes.get(indexedField.getAttribute())));
             fields.add(column.getName());
+            if (config.isFlexEnabled()) { fields.add(indexedField.getIdentifier()); }
             columns.add(column);
+        }
+        if (config.isFlexEnabled()) {
+            for (var declared : declaredTypes.entrySet()) {
+                if (fields.add(declared.getKey())) {
+                    Type type = typeManager.getType(TypeId.of(declared.getValue()));
+                    columns.add(new RediSearchColumnHandle(declared.getKey(), type, toFieldType(type), false, false, Optional.empty()));
+                }
+            }
         }
         SearchReply<String> results = sync.ftSearch(index, "*");
         for (SearchReply.SearchResult<String> doc : results.getResults()) {

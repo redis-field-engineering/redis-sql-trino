@@ -158,7 +158,7 @@ Follow-up issues:
 * https://github.com/redis-field-engineering/redis-sql-trino/issues/119[#119: Flex schema discovery and read paths]
 * https://github.com/redis-field-engineering/redis-sql-trino/issues/120[#120: Flex numeric and DDL limitations]
 
-=== Read-only Redis Software Flex
+=== Redis Software Flex
 
 For an existing Search-on-Flex database on *Redis Software 8.2.6+ with Redis 8.8+*, enable the cursor-free reader in the Trino catalog:
 
@@ -172,9 +172,13 @@ redisearch.flex.batch-size=1000
 
 Flex mode reads existing HASH and scalar JSON indexes with `FT.AGGREGATE`, without `WITHCURSOR` or `FT.CURSOR` commands. Each request sorts by the unique document key and selects keys strictly after the previous batch; even a short batch is followed by another request until an empty batch establishes exhaustion. The existing stored-value recovery retains numeric precision.
 
-This first stage is *read-only*. CREATE, ALTER, DROP, INSERT, UPDATE, DELETE and MERGE are rejected before changing Redis. Trino evaluates SQL filters (including LIKE), joins, grouping, aggregates, ORDER BY and LIMIT. Aggregation/filter/Top-N/limit pushdowns, dynamic filters and scan partitioning are disabled in this mode. The RAM cursor reader remains the default when `redisearch.flex.enabled=false`.
+Flex mode supports CREATE TABLE, CTAS, INSERT, UPDATE, DELETE, MERGE, ADD COLUMN and DROP TABLE for HASH tables. JSON indexes support reads, DELETE and DROP; inserts and updates still require HASH indexes. Trino evaluates SQL filters (including LIKE), joins, grouping, aggregates, ORDER BY and LIMIT. Aggregation/filter/Top-N/limit pushdowns, dynamic filters and scan partitioning are disabled in this mode. The RAM cursor reader remains the default when `redisearch.flex.enabled=false`.
 
 `redisearch.flex.batch-size` accepts 1–10000 rows and bounds each response, not the total result. One batch is prefetched. Each keyset request searches and sorts the remaining index, so large full scans can cost more than RAM cursor scans; benchmark your workload. Scans are not snapshots of concurrent writes. Document keys must be valid UTF-8 without ASCII control characters; unsafe keys fail explicitly. Type discovery continues to sample unindexed fields.
+
+Flex inserts are staged in expiring Redis LISTs and published by the coordinator after all input has been consumed. This prevents `INSERT ... SELECT` and MERGE from reading their own new rows during keyset scans. Staging uses Redis RAM until publication; abandoned staging lists expire after 24 hours. Publication and UPDATE/DELETE are not multi-row transactions: an error can leave partial changes, and automatic retries remain unsupported. The service account needs `EVAL`, `RPUSH`, `EXPIRE`, `LRANGE`, `LLEN`, `HSET`, `HDEL` and `DEL`, in addition to the ordinary discovery and type-metadata commands. ACL key patterns must allow `__trino:staging:*` as well as the table and metadata keys.
+
+Flex does not support `FT.ALTER` or `FT.DROPINDEX ... DD`. ADD COLUMN therefore saves a typed logical column in the connector's metadata without adding a Search index field; it remains readable, writable and filterable in Trino. DROP TABLE enumerates and deletes only the index's matching documents before dropping the index without `DD`, preserving unindexed keys that share its prefix. The hidden hash field `__trino_row_marker` is reserved so rows whose SQL columns are all NULL remain representable.
 
 This mode requires the current Software Search-on-Flex preview, including cursor-free aggregation and field loading. It does not enable Search on a database where Search is absent or support the older 8.6 Flex build in the historical matrix. See link:benchmarks/issue-118/README.adoc[the pinned retest] and https://redis.io/docs/latest/operate/rs/flex/search/[Redis's current Software Flex requirements].
 

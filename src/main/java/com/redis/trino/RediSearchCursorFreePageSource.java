@@ -24,7 +24,7 @@ import io.trino.spi.connector.SourcePage;
 import io.trino.spi.metrics.Metrics;
 
 /**
- * Read-only Flex scans. Each bounded request sorts by the unique document key and selects keys strictly after the
+ * Cursor-free Flex scans. Each bounded request sorts by the unique document key and selects keys strictly after the
  * previous page. No offsets, server cursor, result-window cap, or assumption that a short batch means exhaustion.
  * Like the ordinary reader, this does not offer a snapshot of concurrent writes.
  */
