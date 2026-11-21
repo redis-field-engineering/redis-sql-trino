@@ -11,7 +11,7 @@ Historical unsupported or not-planned decisions are context, not permanent restr
 |Issue |Implemented |Remaining work
 |#167 |Cluster-compatible namespace design |Multiple schemas and schema lifecycle
 |#168 |Ordinary views, replace, comments, same-schema rename and drop |Materialized views, refresh and authorization changes
-|#169 |ADD COLUMN FIRST/AFTER |Physical rename, drop and type conversion
+|#169 |ADD COLUMN FIRST/AFTER and stable unmanaged-index order for all positions |Physical rename, drop and type conversion
 |#170 |HASH/JSON TRUNCATE with key spool and pipelined UNLINK |Safe table replacement
 |#171 |Durable table/column/view comments, atomic metadata and batched initialization |Lifecycle with future schema evolution
 |#172 |Scalar object-path JSON INSERT/UPDATE/MERGE and nested aliases |Arrays, wildcards and whole-document replacement
@@ -21,10 +21,10 @@ Historical unsupported or not-planned decisions are context, not permanent restr
 |#176 |HASH COUNT(column) and COUNT_IF(stored BOOLEAN) |General FILTER masks and computed conditions
 |#177 |Exact bounded two-stage global/grouped DISTINCT counting in Redis |Wider canonical keys and additional aggregate shapes
 |#178 |Canonical DOUBLE, HASH BOOLEAN and bounded Unicode CHAR grouping |Further exact numeric/decimal and arithmetic strategies
-|#179 |HASH NULL, lexical VARCHAR and simple exact LIKE filters |General wildcards and broader JSON predicates
-|#180 |Typed multiple-key late-materialized TopN and both NULL orders |JSON deferred projection and further measured tuning
+|#179 |HASH NULL, lexical VARCHAR and exact anchored LIKE/ESCAPE filters |Unanchored contains/middle residuals, general wildcards and broader JSON predicates
+|#180 |HASH/JSON typed late-materialized TopN, both NULL orders and coalesced numeric reads |Additional JSON paths and further measured tuning
 |#181 |Grouping-only pushdown and relational feasibility design |Join/window execution and multiple grouping sets
-|#182 |DEBUG rejection reasons and scan/TopN MemoryContext |Tighter proven bounds and EXPLAIN annotations
+|#182 |DEBUG rejection reasons, finite BOOLEAN/CHAR(0) group bounds and scan/TopN MemoryContext |Further proven bounds and EXPLAIN annotations
 |#183 |Reconciled statement/type/execution documentation |Keep references current as capabilities land
 |#184 |Explicit capability/skip inventory, restricted TopN/fallback tests and negative-date round trips |Keep the test contract current as capabilities change
 |===
@@ -52,11 +52,18 @@ Paid Cloud qualification and existing Flex capability issues remain separate fro
 
 Validation recorded on November 21, 2026:
 
-* Across the full regression run and final targeted reruns, the latest per-class reports contain 585 cases, zero remaining failures/errors and 12 expected skips.
-* The final normal `package` build passed all static checks and 45 affected smoke/RESP2 cases (three expected skips), including single-shard and sharded adjacent-DOUBLE ordering.
-* New DISTINCT, typed TopN, canonical grouping and Unicode expression checks passed on both Redis OSS 8.4 and 8.10.3. CI runs these alongside the existing compatibility suites, with serialized JUnit execution.
-* Stock Trino 484 loaded the final packaged plugin: 22 product cases passed with zero failures/errors/skips, covering both single-shard and sharded databases, including staged DISTINCT and typed multiple-key TopN.
+* Across the full regression run and final post-pull targeted rerun, the latest per-class reports contain 679 cases, zero remaining failures/errors and 12 expected skips.
+* The final normal `package` build passed all static checks and 268 affected/incoming acceptance cases (nine expected skips), including the schema-order fix and cursor-free backslash-key continuation.
+* New LIKE, finite grouping, JSON TopN and mixed numeric hydration checks passed on Redis OSS 8.4 and 8.10.3. Software suites cover normal and sharded databases, with JSON ordering under RESP2 and RESP3. CI includes the new execution suites with serialized JUnit.
+* Stock Trino 484 loaded the final packaged plugin: 26 product cases passed with zero failures/errors/skips, including escaped/anchored LIKE and nested JSON alias ordering plus exact source filters on both Redis topologies.
 
-The tests used disposable, isolated Docker environments. Overlapping Software control-plane activation stalled during one validation round; serialized provisioning passed without changing production timeout or incomplete-result guards.
+Tests used disposable Docker Redis environments. Final combined verification serialized Software provisioning and JUnit execution without changing production timeout, precision or incomplete-result guards.
 
-Canonical CHAR grouping reduced a 1,200-document fixture to six transferred groups, compared with 1,200 source rows when aggregation pushdown was disabled. BOOLEAN grouping reduced 1,050 documents to three groups. Typed TopN scanned 1,107 sort-key rows, retained five candidates and fetched 15 projected field values for those winners. These are exact-result and work-reduction assertions, not full-data throughput claims.
+Work-reduction fixtures:
+
+* Canonical CHAR grouping transfers six groups from 1,200 documents. With an input-count budget too small for 1,050 documents, finite BOOLEAN/CHAR(0) bounds permit two, three, six or nine groups instead of a Trino aggregation scan.
+* Anchored LIKE scans transfer 30 matching rows instead of 390; a pushed COUNT transfers one row with no cursor reads. Contains-style patterns retain Trino residuals because Redis contains() truncates at embedded NUL bytes.
+* Mixed numeric HASH TopN keeps the same 1,107 source rows, five winners and 15 projected-field reads while coalescing Redis commands from 2,219 to 1,112 and read batches from 61 to 31.
+* JSON TopN scans 137 narrow source rows and retrieves five winners through five JSON.GET commands, 15 projected paths and one read batch, with no HASH commands.
+
+These are exact-result and work-reduction assertions, not full-data throughput claims.

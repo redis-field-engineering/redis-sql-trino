@@ -7,7 +7,15 @@ import static io.trino.testing.containers.environment.QueryResultAssert.assertTh
 import static io.trino.testing.containers.environment.Row.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+
+import com.redis.trino.RediSearchServer;
+
+import io.lettuce.core.json.JsonPath;
+import io.lettuce.core.search.arguments.CreateArgs;
+import io.lettuce.core.search.arguments.NumericFieldArgs;
+import io.lettuce.core.search.arguments.TagFieldArgs;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -165,6 +173,54 @@ class TestPackagedPlugin {
 					.containsExactlyInOrder(row(4L), row(9007199254740994L), row(9007199254740993L));
 		} finally {
 			env.executeTrinoUpdate("DROP TABLE IF EXISTS " + target);
+		}
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
+	void testAnchoredLikeAndEscapedLiterals(String catalog, RediSearchEnvironment env) {
+		String target = table(catalog, "like_" + Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36));
+		try {
+			env.executeTrinoUpdate("CREATE TABLE " + target + " (value varchar)");
+			env.executeTrinoUpdate("INSERT INTO " + target + " VALUES ('pre-middle-suf'), ('presuf'), "
+					+ "('pre%suf'), ('pre_suf'), ('aba'), ('abaaba'), (NULL)");
+			assertThat(env.executeTrino("SELECT value FROM " + target + " WHERE value LIKE 'pre%suf'"))
+					.containsOnly(row("pre-middle-suf"), row("presuf"), row("pre%suf"), row("pre_suf"));
+			assertThat(env.executeTrino("SELECT value FROM " + target + " WHERE value LIKE 'pre!%suf' ESCAPE '!'"))
+					.containsOnly(row("pre%suf"));
+			assertThat(env.executeTrino("SELECT value FROM " + target + " WHERE value LIKE 'pre!_suf' ESCAPE '!'"))
+					.containsOnly(row("pre_suf"));
+			assertThat(env.executeTrino("SELECT value FROM " + target + " WHERE value LIKE 'aba%aba'"))
+					.containsOnly(row("abaaba"));
+		} finally {
+			env.executeTrinoUpdate("DROP TABLE IF EXISTS " + target);
+		}
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
+	void testJsonTopNUsesNestedAliasesAndExactFilters(String catalog, RediSearchEnvironment env) {
+		String index = "json_topn_" + Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36);
+		String target = table(catalog, index);
+		var redis = env.redis(catalog);
+		redis.ftCreate(index, CreateArgs.builder().on(CreateArgs.TargetType.JSON).withPrefix(index + ":").build(),
+				List.of(TagFieldArgs.builder().name("$.doc.id").as("id").build(),
+						NumericFieldArgs.builder().name("$.doc.rank").as("rank").build(),
+						TagFieldArgs.builder().name("$.doc.payload").as("payload").build()));
+		try {
+			RediSearchServer.awaitIndexed(redis, index);
+			redis.jsonSet(index + ":1", JsonPath.ROOT_PATH, "{\"doc\":{\"id\":\"z\",\"rank\":2,\"payload\":\"last\"}}");
+			redis.jsonSet(index + ":2", JsonPath.ROOT_PATH, "{\"doc\":{\"id\":\"b\",\"rank\":3,\"payload\":\"rank first\"}}");
+			redis.jsonSet(index + ":3", JsonPath.ROOT_PATH, "{\"doc\":{\"id\":\"a\",\"rank\":3,\"payload\":\"tie first\"}}");
+			redis.jsonSet(index + ":4", JsonPath.ROOT_PATH, "{\"doc\":{\"id\":\"n\",\"payload\":\"null first\"}}");
+			redis.jsonSet(index + ":5", JsonPath.ROOT_PATH, "{\"doc\":{\"id\":\"A\",\"rank\":1000,\"payload\":\"upper\"}}");
+			assertThat(env.executeTrino("SELECT id, payload FROM " + target
+					+ " ORDER BY rank DESC NULLS FIRST, id ASC LIMIT 3"))
+					.containsExactlyInOrder(row("n", "null first"), row("A", "upper"), row("a", "tie first"));
+			assertThat(env.executeTrino("SELECT id FROM " + target + " WHERE id = 'a' ORDER BY rank DESC LIMIT 1"))
+					.containsOnly(row("a"));
+		} finally {
+			redis.ftDropindex(index, true);
 		}
 	}
 

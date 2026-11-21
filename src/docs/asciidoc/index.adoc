@@ -544,8 +544,8 @@ These suites do not inherit the larger `BaseConnectorTest` contract.
 |===
 |Flag or inherited test |Contract |Coverage and reason
 |`SUPPORTS_TOPN_PUSHDOWN=false`
-|No unconditional TopN pushdown guarantee. Trino retains final ordering; JSON, residual filters, disabled optimization and candidate limits can require a full scan.
-|The inherited `testTopN` still checks SQL results. Dedicated smoke tests check native numeric HASH and typed candidate selection. `TestExactLocalTopN` and its sharded subclass cover exact BIGINT/DECIMAL, both NULL orders, budgets and JSON fallback; `TestClickBenchFollowUps` covers TIMESTAMP(3). `TestResp2ExactTopN` covers floating fallback.
+|No unconditional TopN pushdown guarantee. Trino retains final ordering; unsupported JSON mappings, residual filters, disabled optimization and candidate limits can require a full scan.
+|The inherited `testTopN` still checks SQL results. Dedicated smoke tests check native numeric HASH and typed candidate selection. `TestExactLocalTopN` and its sharded subclass cover exact BIGINT/DECIMAL, both NULL orders, budgets and disabled JSON fallback; `TestJsonLocalTopN` and its protocol/sharded variants cover JSON winner hydration. `TestClickBenchFollowUps` covers TIMESTAMP(3). `TestResp2ExactTopN` covers floating fallback.
 |`SUPPORTS_CREATE_SCHEMA=false`
 |One configured schema; no schema lifecycle.
 |The inherited create-schema test asserts rejection. `testCreateSchemaWithNonLowercaseOwnerName` skips because creating a schema is unsupported. Namespace implementation remains #167.
@@ -773,8 +773,9 @@ This is SQL equality, not an SQL interface to arbitrary Redis full-text query sy
 Other string predicates::
 On HASH indexes, loaded-value pipeline filters handle `IS NULL`, `IS NOT NULL`, and eligible VARCHAR equality, inequality, ranges and nullable domains.
 These filters can reduce transferred rows and allow later LIMIT/grouping; they do not imply an indexed lexical range lookup.
-Simple LIKE literal, prefix, suffix and contains patterns also run in Redis when there is no interior `%`, `_`, ESCAPE clause or unsupported control character.
-Other LIKE patterns and JSON LIKE remain in Trino; JSON NULL/range predicates also retain their existing fallback.
+Literal, prefix, suffix and anchored `prefix%suffix` LIKE patterns run in Redis, including constant ESCAPE characters and Unicode literals. Overlap guards compare Redis byte lengths.
+Contains-style and middle-literal patterns retain a Trino residual; safe prefix/suffix/length prefilters can still reduce input. Redis contains() stops at embedded NUL bytes, so it cannot implement SQL VARCHAR containment exactly.
+Unescaped `_`, invalid escapes, unsupported controls and JSON LIKE retain Trino evaluation; JSON NULL/range predicates also retain their existing fallback.
 Redis wildcard matching alone is insufficient for SQL LIKE correctness: its word boundaries, case handling and expansion limits differ.
 
 For control characters, unsupported field names and padded CHAR comparisons, exact equality can remain in Trino even when Redis supplies a prefilter.
@@ -818,8 +819,9 @@ DECIMAL grouping and floating grouping with unsupported field names also stay in
 Other pushed-down BIGINT computations are exact only within double's integer precision range; reading exact stored values does not recover precision already lost in an aggregate.
 Widened INTEGER/SMALLINT/TINYINT SUM inputs have conservative document-count bounds; an unknown or excessive count retains Trino computation.
 
-GROUP BY pushdown requires a known cached document count no greater than `redisearch.aggregation-group-limit`.
-That unfiltered count bounds the possible number of groups, even if WHERE is selective.
+GROUP BY pushdown accepts a cached document count within `redisearch.aggregation-group-limit`, or a proven finite bound for all grouping keys.
+Canonical BOOLEAN contributes at most three groups including NULL; CHAR(0) contributes at most two. Products of these domains are capped before multiplication to avoid overflow. The bound applies to intermediate DISTINCT groups as well as final groups.
+These finite bounds remain valid as rows are added. Other grouping keys still require the unfiltered document-count bound; integer SUM, RESP2, capability and residual-filter guards remain independent.
 Keep the configured budget within the server's `MAX_AGGREGATE_GROUPS` limit.
 Index growth after caching can still cause a server error; the query fails rather than replaying partially delivered output.
 Global aggregates have no GROUP BY cardinality budget.
@@ -843,7 +845,7 @@ For HASH indexes, `ORDER BY ... LIMIT` uses Redis `SORTBY` when all sort keys ar
 Native DOUBLE ordering requires RESP3; RESP2 uses the exact local path or retains Trino ordering.
 Trino sorts the returned candidates to produce the final order.
 BIGINT and DECIMAL sort keys do not use this path because Redis double ordering can lose precision.
-JSON ordering stays in Trino.
+JSON uses the exact local optimization below.
 
 A separate HASH optimization uses Trino typed comparators for multiple supported orderable keys, either direction and both NULL orders.
 It scans keys and exact sort values, keeps a bounded set of candidates, and loads projected fields with pipelined `HMGET` only after selection finishes.
@@ -851,7 +853,9 @@ This includes exact BIGINT/DECIMAL, floating-point, text, binary and temporal or
 DOUBLE/REAL/DECIMAL sort fields use narrow exact reads rather than loading every source document's payload.
 `redisearch.local-topn.max-candidates` defaults to 1,000, accepts values up to 100,000, and can be set to zero to disable this path.
 Selection batches, typed candidate keys and hydration reserve Trino memory. Selection checks the configured timeout and emits no candidates if it fails.
-The optimization reduces wide-row retrieval but still scans matching keys. JSON ordering remains in Trino.
+The optimization reduces wide-row retrieval but still scans matching keys.
+For JSON indexes, DIALECT 3 scans only keys, ordering columns and required filter fields, then single-key pipelined `JSON.GET` retrieves winner projections. This requires JSON.GET permission, simple dotted object paths or `$` for the whole visible schema, and no unsupported schema mappings. Flex retains Trino ordering.
+Mixed HASH numeric sorts combine BIGINT/timestamp recovery with existing DOUBLE/DECIMAL reads in one HMGET per source key. JSON command/path/batch/wait counters distinguish winner hydration from HASH reads.
 
 ==== Joins and optimizer statistics
 

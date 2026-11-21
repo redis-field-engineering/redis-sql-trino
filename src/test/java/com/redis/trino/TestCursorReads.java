@@ -396,7 +396,7 @@ public class TestCursorReads extends AbstractTestQueryFramework {
 						+ String.format("%02d", i) + ".000', BIGINT '" + (9007199254740993L + i)
 						+ "', DOUBLE '0.1234567890123456', DATE '2026-10-07', VARCHAR 'value', " + extraValues + ")";
 			}).collect(java.util.stream.Collectors.joining(", "));
-			assertThat(query("SELECT * FROM wide_projection WHERE url LIKE '%google%' ORDER BY eventtime LIMIT 10"))
+			assertThat(query("SELECT * FROM wide_projection WHERE url LIKE 'https://google/%' ORDER BY eventtime LIMIT 10"))
 					.matches("VALUES " + expected);
 			// ClickBench has no DOUBLE columns: loading all its indexed fields by name must also be safe.
 			String names = "url, eventtime, userid, eventdate, params, " + IntStream.range(0, 99)

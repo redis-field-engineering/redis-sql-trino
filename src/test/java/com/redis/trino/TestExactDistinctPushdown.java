@@ -100,7 +100,7 @@ public class TestExactDistinctPushdown extends AbstractTestQueryFramework {
         assertThat(query("SELECT count(DISTINCT v) FROM distinct_values WHERE v = 'red' OR v IS NULL"))
                 .isFullyPushedDown().matches("VALUES BIGINT '1'");
         assertThat(query("SELECT count(DISTINCT v) FROM distinct_values WHERE v LIKE '%red%'"))
-                .isFullyPushedDown().matches("VALUES BIGINT '3'");
+                .isNotFullyPushedDown(FilterNode.class).matches("VALUES BIGINT '3'");
         assertThat(query("SELECT count(DISTINCT v) FROM distinct_values WHERE g = 'absent'"))
                 .isFullyPushedDown().matches("VALUES BIGINT '0'");
         assertThat(query("SELECT g, count(DISTINCT v) FROM distinct_values WHERE g = 'absent' GROUP BY g"))

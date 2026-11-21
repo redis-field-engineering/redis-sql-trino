@@ -74,6 +74,11 @@ final class RediSearchLocalTopN {
             RediSearchTableHandle table, List<RediSearchColumnHandle> outputs,
             RediSearchSession.ExactHashReader exactReader, RediSearchReadStats stats, Reservation memory) {
         RediSearchTable schema = session.getTable(table.getSchemaTableName());
+        boolean json = schema.getIndexInfo().getKeyType().filter(RediSearchIndexInfo.KeyType.JSON::equals).isPresent();
+        if (json && !RediSearchJsonValues.supportsSchema(schema)) {
+            throw new io.trino.spi.TrinoException(io.trino.spi.StandardErrorCode.NOT_SUPPORTED,
+                    "JSON TopN requires simple object paths or the whole document column");
+        }
         Map<String, RediSearchColumnHandle> schemaColumns = new HashMap<>();
         schema.getColumns().forEach(column -> schemaColumns.put(column.getName(), column));
         Map<String, String> identifiers = new HashMap<>();
@@ -81,9 +86,12 @@ final class RediSearchLocalTopN {
         List<RediSearchColumnHandle> orders = table.getSort().stream().map(sort -> schemaColumns.get(sort.getColumn())).toList();
         Ordering ordering = new Ordering(orders.stream().map(RediSearchColumnHandle::getType).toList(), table.getSort());
 
-        // Reading DOUBLE/DECIMAL through LOAD * would transfer every wide HASH payload. Fetch only those exact sort
-        // fields with pipelined HMGET. Other types keep the existing efficient narrow cursor path (including BIGINT
-        // stored-value recovery), and repeated sort columns share the same source column.
+        // Reading DOUBLE/DECIMAL through LOAD * would transfer every wide HASH payload. Fetch those exact sort
+        // fields with pipelined HMGET. JSON DIALECT 3 LOAD already preserves exact source numbers.
+        // When a HASH read is already necessary, include BIGINT/millisecond timestamp
+        // keys in it instead of triggering a second numeric-recovery request in Session.result. A lone BIGINT or
+        // timestamp keeps the efficient narrow cursor path and only recovers values that could be rounded.
+        boolean coalesceNumericRecovery = !json && orders.stream().anyMatch(RediSearchLocalTopN::needsExactSortRead);
         List<RediSearchColumnHandle> selection = new ArrayList<>();
         selection.add(RediSearchBuiltinField.KEY.getColumnHandle());
         Map<String, Integer> selectedPositions = new HashMap<>();
@@ -92,7 +100,7 @@ final class RediSearchLocalTopN {
         int[] scanPositions = new int[orders.size()];
         for (int i = 0; i < orders.size(); i++) {
             RediSearchColumnHandle column = orders.get(i);
-            if (needsExactSortRead(column)) {
+            if (!json && (needsExactSortRead(column) || (coalesceNumericRecovery && needsNumericRecovery(column)))) {
                 exactPositions.computeIfAbsent(identifiers.getOrDefault(column.getName(), column.getName()), ignored -> new ArrayList<>()).add(i + 1);
                 scanPositions[i] = -1;
             } else {
@@ -196,31 +204,45 @@ final class RediSearchLocalTopN {
                 String name = columns.get(i).getName();
                 if (RediSearchBuiltinField.isKeyColumn(name)) { row[i] = candidate.raw[0]; continue; }
                 // Keep winner hydration unchanged: it can include the ordering column and is counted separately.
-                fields.add(identifiers.getOrDefault(name, name));
+                fields.add(json ? RediSearchJsonValues.path(schema.getIndexInfo(), name).orElseThrow()
+                        : identifiers.getOrDefault(name, name));
                 positions.add(i);
             }
             if (!fields.isEmpty()) {
-                stats.exactHashReads.add(fields.size());
-                stats.exactHashCommands.increment();
-                stats.localTopNProjectedHashReads.add(fields.size());
-                reads.add(exactReader.readFields(candidate.raw[0], fields).thenAccept(values -> {
-                    for (int i = 0; i < values.size(); i++) {
-                        row[positions.get(i)] = values.get(i).hasValue() ? values.get(i).getValue() : null;
-                    }
-                    long bytes = 0;
-                    for (String value : row) { bytes += SizeOf.estimatedSizeOf(value); }
-                    memory.addHydrated(bytes);
-                }));
+                if (json) {
+                    List<String> paths = List.copyOf(new java.util.LinkedHashSet<>(fields));
+                    stats.jsonCommands.increment();
+                    stats.jsonPathReads.add(paths.size());
+                    stats.localTopNProjectedJsonReads.add(paths.size());
+                    reads.add(exactReader.readJsonFields(candidate.raw[0], paths).thenAccept(values -> {
+                        for (int i = 0; i < fields.size(); i++) { row[positions.get(i)] = values.get(fields.get(i)); }
+                        long bytes = 0;
+                        for (String value : row) { bytes += SizeOf.estimatedSizeOf(value); }
+                        memory.addHydrated(bytes);
+                    }));
+                } else {
+                    stats.exactHashReads.add(fields.size());
+                    stats.exactHashCommands.increment();
+                    stats.localTopNProjectedHashReads.add(fields.size());
+                    reads.add(exactReader.readFields(candidate.raw[0], fields).thenAccept(values -> {
+                        for (int i = 0; i < values.size(); i++) {
+                            row[positions.get(i)] = values.get(i).hasValue() ? values.get(i).getValue() : null;
+                        }
+                        long bytes = 0;
+                        for (String value : row) { bytes += SizeOf.estimatedSizeOf(value); }
+                        memory.addHydrated(bytes);
+                    }));
+                }
             }
             rows.add(row);
             // A raised candidate budget must not queue an equally large wave of client futures/commands.
             if (reads.size() >= 1000) {
-                awaitReads(exactReader, reads, stats);
+                awaitReads(exactReader, reads, stats, json);
                 reads.clear();
                 checkActive(session, started);
             }
         }
-        awaitReads(exactReader, reads, stats);
+        awaitReads(exactReader, reads, stats, json);
         checkActive(session, started);
         RediSearchRowReader reader = new RediSearchRowReader(columns.stream().map(RediSearchColumnHandle::getName).toList(),
                 Map.of(), Map.of(), java.util.Set.of(), List.of(), Map.of(), Map.of(), Optional.of(outputs));
@@ -234,13 +256,27 @@ final class RediSearchLocalTopN {
                 && (column.getType() instanceof DecimalType || column.getType().equals(DoubleType.DOUBLE) || column.getType().equals(RealType.REAL));
     }
 
+    private static boolean needsNumericRecovery(RediSearchColumnHandle column) {
+        return column.getFieldType() == RediSearchFieldType.NUMERIC
+                && (column.getType().equals(BIGINT) || column.getType().equals(io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS));
+    }
+
     private static void awaitReads(RediSearchSession.ExactHashReader reader, List<CompletableFuture<?>> reads,
             RediSearchReadStats stats) {
+        awaitReads(reader, reads, stats, false);
+    }
+
+    private static void awaitReads(RediSearchSession.ExactHashReader reader, List<CompletableFuture<?>> reads,
+            RediSearchReadStats stats, boolean json) {
         if (reads.isEmpty()) { return; }
-        stats.exactHashReadBatches.increment();
+        if (json) { stats.jsonReadBatches.increment(); }
+        else { stats.exactHashReadBatches.increment(); }
         long start = System.nanoTime();
         try { reader.flush(); CompletableFuture.allOf(reads.toArray(CompletableFuture[]::new)).join(); }
-        finally { stats.exactWaitNanos.add(System.nanoTime() - start); }
+        finally {
+            if (json) { stats.jsonWaitNanos.add(System.nanoTime() - start); }
+            else { stats.exactWaitNanos.add(System.nanoTime() - start); }
+        }
     }
 
     private static void checkActive(RediSearchSession session, long started) {
