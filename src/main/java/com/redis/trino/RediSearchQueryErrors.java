@@ -16,6 +16,17 @@ final class RediSearchQueryErrors {
 
     private RediSearchQueryErrors() {}
 
+    /** Called only for an explicit native-search query argument, not generated pipeline expressions. */
+    static RuntimeException classifyNativeQuery(Throwable failure) {
+        RuntimeException result = classify(failure);
+        if (result instanceof RedisCommandExecutionException && result.getMessage() != null
+                && (result.getMessage().startsWith("SEARCH_SYNTAX ") || result.getMessage().startsWith("Syntax error"))) {
+            return new TrinoException(io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT,
+                    "Invalid native Search query: " + result.getMessage(), result);
+        }
+        return result;
+    }
+
     static void verifyComplete(AggregationReply<String> reply) {
         for (var shard : reply.getReplies()) {
             if (!shard.getWarnings().isEmpty()) {

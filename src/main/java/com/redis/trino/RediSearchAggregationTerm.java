@@ -34,6 +34,13 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.Type;
+import io.trino.spi.type.VarcharType;
+import io.trino.spi.type.CharType;
+import static io.trino.spi.type.BooleanType.BOOLEAN;
+import static io.trino.spi.type.RealType.REAL;
+import static io.trino.spi.type.UuidType.UUID;
+import static io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
+import static io.trino.spi.type.DateType.DATE;
 
 public class RediSearchAggregationTerm {
 
@@ -60,6 +67,17 @@ public class RediSearchAggregationTerm {
 		RediSearchColumnHandle column = (RediSearchColumnHandle) columnHandle;
 		// Arithmetic isn't a field Redis can group by
 		if (column.getExpression().isPresent()) {
+			return Optional.empty();
+		}
+		// Encoded SQL types must group after decoding; their Redis strings need not have SQL equality semantics.
+		// Unindexed VARCHAR is already its SQL representation and may still be loaded and grouped exactly.
+		if (!column.isSupportsPredicates() && !(column.getType() instanceof VarcharType)) {
+			return Optional.empty();
+		}
+		// SQL decoding can collapse distinct stored spellings (TRUE/true, UUID case, CHAR padding,
+		// and double-to-float rounding). Grouping raw Redis values would leave duplicate SQL groups.
+		if (column.getType().equals(BOOLEAN) || column.getType().equals(UUID) || column.getType().equals(REAL) || column.getType().equals(DATE)
+				|| column.getType() instanceof CharType || column.getType().equals(TIMESTAMP_MILLIS)) {
 			return Optional.empty();
 		}
 		// Redis groups a NUMERIC field by its double value and returns it formatted as one, which a DECIMAL column

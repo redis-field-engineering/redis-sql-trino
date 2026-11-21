@@ -209,7 +209,7 @@ public class RediSearchRowReader {
 				String count = asString(row.get(metrics[i].integerSumCountAlias()));
 				if (count == null || !metrics[i].isIntegerSumSafe(OptionalLong.of(Long.parseLong(count)))) {
 					throw new TrinoException(NUMERIC_VALUE_OUT_OF_RANGE,
-							"Integer SUM pushdown is no longer exact after index growth; refresh table metadata and retry");
+							"Integer aggregate pushdown is no longer exact after index growth; refresh table metadata and retry");
 				}
 			}
 			FieldValue field = row.get(fields[i]);

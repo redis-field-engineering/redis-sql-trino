@@ -46,6 +46,22 @@ public class TestCursorFreeReads extends AbstractTestQueryFramework {
     }
 
     @Test
+    public void testNativeSearchUsesCursorFreePredicateAndSqlResidual() {
+        String index = "cf_native";
+        hashIndex(index);
+        var redis = server.getConnection().sync();
+        redis.hset(index + ":1", Map.of("raw_id", "1", "amount", "2", "note", "GroupA"));
+        redis.hset(index + ":2", Map.of("raw_id", "2", "amount", "3", "note", "GroupB"));
+        redis.hset(index + ":3", Map.of("raw_id", "3", "amount", "4", "note", "GroupA"));
+        server.awaitIndexed(index);
+        assertThat(query("SELECT id FROM TABLE(redisearch.system.search('cf_native', '@note:{GroupA}')) WHERE id > 1"))
+                .matches("VALUES BIGINT '3'");
+        assertThat(query("SELECT count(*) FROM TABLE(redisearch.system.search('cf_native', '@note:{GroupA}'))"))
+                .matches("VALUES BIGINT '2'");
+        assertQueryFails("SELECT * FROM TABLE(redisearch.system.search('cf_native', '@note:('))", ".*(Syntax|syntax).*" );
+    }
+
+    @Test
     public void testMultiplePagesWithExactNumbersNullsAndSqlOperations() {
         String index = "cf_rows";
         hashIndex(index);

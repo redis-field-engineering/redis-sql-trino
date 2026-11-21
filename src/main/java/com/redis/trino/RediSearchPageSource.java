@@ -43,6 +43,7 @@ import io.trino.spi.Page;
 import io.trino.spi.PageBuilder;
 import io.trino.spi.block.BlockBuilder;
 import io.trino.spi.connector.ConnectorPageSource;
+import io.trino.spi.connector.MemoryContext;
 import io.trino.spi.connector.SourcePage;
 import io.trino.spi.metrics.Metrics;
 import io.trino.spi.type.Type;
@@ -71,6 +72,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 	private final PageBuilder pageBuilder;
 	private final RediSearchRowReader reader;
 	private final RediSearchReadStats stats = new RediSearchReadStats();
+	private final MemoryContext memoryContext;
 	private Iterator<String[]> rows;
 	private long batchRetainedBytes;
 	// The cursor the batches are read from, until one exhausts it
@@ -87,7 +89,13 @@ public class RediSearchPageSource implements ConnectorPageSource {
 
 	public RediSearchPageSource(RediSearchSession session, RediSearchTableHandle table,
 			List<RediSearchColumnHandle> columns, Optional<RediSearchScanPartition> partition) {
+		this(session, table, columns, partition, MemoryContext.NO_LIMIT);
+	}
+
+	public RediSearchPageSource(RediSearchSession session, RediSearchTableHandle table,
+			List<RediSearchColumnHandle> columns, Optional<RediSearchScanPartition> partition, MemoryContext memoryContext) {
 		this.session = session;
+		this.memoryContext = java.util.Objects.requireNonNull(memoryContext, "memoryContext is null");
 		this.connection = partition.map(value -> session.scanConnection(value.connectionSlot()))
 				.orElseGet(session::scanConnection);
 		this.exactReader = session.exactHashReader();
@@ -97,14 +105,24 @@ public class RediSearchPageSource implements ConnectorPageSource {
 		this.pageBuilder = new PageBuilder(columnTypes);
 		RediSearchSession.AggregateResult first;
 		try {
-			first = partition.isEmpty() ? session.aggregate(connection, table, columns, exactReader, stats)
-					: session.aggregate(connection, table, columns, exactReader, stats, partition);
+			if (table.getSort().stream().anyMatch(RediSearchSortItem::isLocal)) {
+				first = RediSearchLocalTopN.read(session, connection, table, columns, exactReader, stats, memoryContext);
+			} else {
+				first = partition.isEmpty() ? session.aggregate(connection, table, columns, exactReader, stats)
+						: session.aggregate(connection, table, columns, exactReader, stats, partition);
+			}
 		} catch (RuntimeException | Error e) {
 			exactReader.close();
+			memoryContext.setBytes(0);
 			throw e;
 		}
 		this.reader = first.getReader();
-		start(first);
+		try {
+			start(first);
+		} catch (RuntimeException | Error e) {
+			close();
+			throw e;
+		}
 	}
 
 	private void start(RediSearchSession.AggregateResult batch) {
@@ -115,6 +133,7 @@ public class RediSearchPageSource implements ConnectorPageSource {
 			return bytes;
 		});
 		cursor = batch.getCursor();
+		updateMemory();
 		if (cursor.isEmpty()) {
 			// Exhausted, and gone: the reads sent after this batch's fail ("Cursor not found"), and have no rows
 			reads.forEach(read -> read.whenComplete((reply, failure) -> {
@@ -141,9 +160,8 @@ public class RediSearchPageSource implements ConnectorPageSource {
 		return completedBytes;
 	}
 
-	@Override
-	public long getMemoryUsage() {
-		return batchRetainedBytes + pageBuilder.getRetainedSizeInBytes();
+	private void updateMemory() {
+		memoryContext.setBytes(batchRetainedBytes + pageBuilder.getRetainedSizeInBytes());
 	}
 
 	@Override
@@ -205,11 +223,13 @@ public class RediSearchPageSource implements ConnectorPageSource {
 				}
 			}
 		}
+		updateMemory();
 		if (pageBuilder.isEmpty()) {
 			return null;
 		}
 		Page page = pageBuilder.build();
 		pageBuilder.reset();
+		updateMemory();
 		// Trino requires completed bytes to be cumulative across pages
 		completedBytes += page.getSizeInBytes();
 		return SourcePage.create(page);
@@ -233,6 +253,8 @@ public class RediSearchPageSource implements ConnectorPageSource {
 		exactReader.close();
 		batchRetainedBytes = 0;
 		rows = java.util.Collections.emptyIterator();
+		finished = true;
+		memoryContext.setBytes(0);
 	}
 
 	static void deleteAfterReads(List<CompletableFuture<AggregationReply<String>>> pending, Runnable delete) {

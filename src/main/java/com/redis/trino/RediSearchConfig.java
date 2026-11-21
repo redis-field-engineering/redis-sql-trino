@@ -385,4 +385,17 @@ public class RediSearchConfig {
         return this;
     }
 
+    private boolean atomicHashUpdatesEnabled;
+
+    public boolean isAtomicHashUpdatesEnabled() {
+        return atomicHashUpdatesEnabled;
+    }
+
+    @Config("redisearch.atomic-hash-updates.enabled")
+    @ConfigDescription("Apply each HASH UPDATE as one Lua script; requires EVAL and underlying command ACLs")
+    public RediSearchConfig setAtomicHashUpdatesEnabled(boolean enabled) {
+        this.atomicHashUpdatesEnabled = enabled;
+        return this;
+    }
+
 }

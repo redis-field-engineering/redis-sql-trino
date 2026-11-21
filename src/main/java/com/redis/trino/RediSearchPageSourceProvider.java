@@ -61,7 +61,7 @@ public class RediSearchPageSourceProvider implements ConnectorPageSourceProvider
 		this.rediSearchSession = requireNonNull(rediSearchSession, "rediSearchSession is null");
 	}
 
-	// Page sources report their buffered memory through getMemoryUsage().
+
 	@Override
 	public ConnectorPageSource createPageSource(ConnectorTransactionHandle transaction, ConnectorSession session,
 			ConnectorSplit split, ConnectorTableHandle table, Optional<ConnectorTableCredentials> tableCredentials,
@@ -81,10 +81,10 @@ public class RediSearchPageSourceProvider implements ConnectorPageSourceProvider
 		}
 		ImmutableList<RediSearchColumnHandle> columnHandles = handles.build();
 		if (rediSearchSession.getConfig().isFlexEnabled()) {
-			return new RediSearchCursorFreePageSource(rediSearchSession, tableHandle, columnHandles);
+            return new RediSearchCursorFreePageSource(rediSearchSession, tableHandle, columnHandles, memoryContext);
 		}
 		return new RediSearchPageSource(rediSearchSession, tableHandle, columnHandles,
-				((RediSearchSplit) split).getPartition());
+				((RediSearchSplit) split).getPartition(), memoryContext);
 	}
 
 	/**

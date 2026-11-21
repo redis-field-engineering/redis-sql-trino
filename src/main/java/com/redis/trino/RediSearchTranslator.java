@@ -171,12 +171,36 @@ public class RediSearchTranslator {
 		List<RediSearchColumnHandle> columns = readColumns(outputs);
 		boolean computes = columns.size() != outputs.size() || !columns.equals(outputs);
 		String query = queryBuilder.buildQuery(table.getConstraint());
+		if (table.getNativeQuery().isPresent()) {
+			query = query.equals("*") ? table.getNativeQuery().orElseThrow()
+					: "(" + table.getNativeQuery().orElseThrow() + ") (" + query + ")";
+		}
 		if (partition.isPresent()) {
 			query = query.equals("*") ? partition.get().query()
 					: "(" + query + ") (" + partition.get().query() + ")";
 		}
 		Map<String, List<String>> equalities = RediSearchQueryBuilder.equalities(table.getConstraint());
-		Optional<GroupBy> groupBy = queryBuilder.group(table);
+		Map<String, String> normalizedKeys = new LinkedHashMap<>();
+		Set<String> usedNames = new LinkedHashSet<>();
+		columns.forEach(column -> usedNames.add(column.getName()));
+		table.getTermAggregations().forEach(term -> usedNames.add(term.getTerm()));
+		indexInfo.ifPresent(info -> info.getFields().forEach(field -> {
+			usedNames.add(field.getAttribute());
+			usedNames.add(field.getIdentifier());
+		}));
+		table.getMetricAggregations().forEach(metric -> {
+			usedNames.add(metric.getAlias());
+			usedNames.addAll(metric.getInputFields());
+		});
+		for (RediSearchAggregationTerm term : table.getTermAggregations()) {
+			if (term.getType().equals(DOUBLE)) {
+				String alias = "__trino_group" + normalizedKeys.size();
+				while (usedNames.contains(alias)) { alias += "_"; }
+				usedNames.add(alias);
+				normalizedKeys.put(term.getTerm(), alias);
+			}
+		}
+		Optional<GroupBy> groupBy = queryBuilder.group(table, normalizedKeys);
 		// A scan reads the documents' values. Redis returns a NUMERIC field loaded by name formatted as a double, and
 		// rounded to 12 significant digits unless it's an integer; LOAD * on a hash and DIALECT 3 on JSON return the
 		// values as stored. GROUPBY keys and REDUCE results are formatted the same way, so APPLY also returns them as
@@ -203,6 +227,9 @@ public class RediSearchTranslator {
 		List<RediSearchAggregation> countingValues = table.getMetricAggregations().stream()
 				.filter(RediSearchAggregation::isCountingValues).toList();
 		countingValues.forEach(metric -> loads.addAll(metric.getInputFields()));
+		List<RediSearchAggregation> nonNullCounts = table.getMetricAggregations().stream()
+				.filter(RediSearchAggregation::isConditionalCount).toList();
+		nonNullCounts.forEach(metric -> loads.addAll(metric.getInputFields()));
 		Map<String, String> sources = new HashMap<>();
 		Map<String, String> exactSources = new HashMap<>();
 		Map<String, RediSearchIndexInfo.Field> fields = indexInfo.map(RediSearchIndexInfo::getFields).orElse(List.of())
@@ -223,6 +250,8 @@ public class RediSearchTranslator {
 				}
 			}
 		}
+		// A grouping key is still needed when an outer COUNT prunes it from the scan's projected output.
+		table.getTermAggregations().forEach(term -> loads.add(term.getTerm()));
 		// Always mark LOAD operands as field references. A bare field named "params" can be parsed as the
 		// command's PARAMS clause by a distributed coordinator; @params is unambiguous.
 		loads.forEach(field -> args.load("@" + field));
@@ -241,7 +270,14 @@ public class RediSearchTranslator {
 			args.apply(metric.valueExpression(), metric.getValueField());
 			args.apply(metric.hasValueExpression(), metric.getHasValueField());
 		}
+		for (RediSearchAggregation metric : nonNullCounts) {
+			args.apply(metric.hasValueExpression(), metric.getHasValueField());
+		}
+		// Redis hashes -0 and +0 as separate numeric keys; SQL groups them together. A synthetic
+		// key leaves the source field intact for reducers/arithmetic where the sign can matter.
+		normalizedKeys.forEach((field, alias) -> args.apply("case(exists(@" + field + "), @" + field + " + 0, NULL)", alias));
 		groupBy.ifPresent(args::groupBy);
+		normalizedKeys.forEach((field, alias) -> args.apply("case(exists(@" + alias + "), @" + alias + ", NULL)", field));
 		// The keys and results that needn't be integers, as mantissas and exponents
 		Map<String, Type> exactNumbers = new HashMap<>();
 		if (groupBy.isPresent()) {

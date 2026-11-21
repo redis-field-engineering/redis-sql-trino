@@ -16,11 +16,16 @@ public class TestTableHandle {
 	@Test
 	public void testRoundTrip() {
 		RediSearchTableHandle expected = new RediSearchTableHandle(new SchemaTableName("schema", "table"), "table")
+				.withNativeQuery("@title:redis | @title:search")
 				.withTopN(List.of(new RediSearchSortItem("price", false, true)), 10).withFilters(java.util.Map.of("url", "contains(@url, \"google\")"));
 
 		String json = codec.toJson(expected);
 		RediSearchTableHandle actual = codec.fromJson(json);
 
 		assertThat(actual).isEqualTo(expected);
+		assertThat(actual.withoutTopN().getNativeQuery()).contains("@title:redis | @title:search");
+		assertThat(actual.withConstraint(io.trino.spi.predicate.TupleDomain.all()).getNativeQuery()).isEqualTo(expected.getNativeQuery());
+		assertThat(actual.withLimit(1).getNativeQuery()).isEqualTo(expected.getNativeQuery());
+		assertThat(actual.withAggregations(List.of(), List.of()).getNativeQuery()).isEqualTo(expected.getNativeQuery());
 	}
 }

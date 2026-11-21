@@ -71,7 +71,7 @@ public class TestTagAndLikePushdown extends AbstractTestQueryFramework {
 		assertThat(query("SELECT id FROM beers WHERE style = 'a'")).isFullyPushedDown().matches("VALUES VARCHAR '4'");
 		assertThat(query("SELECT id FROM beers WHERE code = 'a'")).matches("VALUES VARCHAR '4'");
 		// and a query for a value containing it matches nothing, so Trino evaluates the filter alone
-		assertThat(query("SELECT id FROM beers WHERE style = 'a,b'")).isNotFullyPushedDown(FilterNode.class)
+		assertThat(query("SELECT id FROM beers WHERE style = 'a,b'")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '3'");
 		assertThat(explain("SELECT id FROM beers WHERE style = 'a,b'")).contains("constraint=ALL");
 		assertThat(query("SELECT id FROM beers WHERE style IN ('a', 'a,b')")).matches("VALUES VARCHAR '3', '4'");
@@ -98,7 +98,7 @@ public class TestTagAndLikePushdown extends AbstractTestQueryFramework {
 	@Test
 	public void testLike() {
 		// A wildcard matches any term of a TEXT value, ignoring case
-		assertThat(query("SELECT id FROM beers WHERE name LIKE '%Pocus'")).isNotFullyPushedDown(FilterNode.class)
+		assertThat(query("SELECT id FROM beers WHERE name LIKE '%Pocus'")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '1', '4'");
 		assertThat(query("SELECT id FROM beers WHERE name LIKE '%pocus'")).returnsEmptyResult();
 		// Stop words aren't indexed
@@ -109,6 +109,78 @@ public class TestTagAndLikePushdown extends AbstractTestQueryFramework {
 		assertThat(query("SELECT id FROM beers WHERE code LIKE '_heat'")).matches("VALUES VARCHAR '1', '2'");
 		assertThat(query("SELECT id FROM beers WHERE code LIKE '%b%'")).matches("VALUES VARCHAR '3'");
 		assertThat(query("SELECT id FROM beers WHERE style LIKE 'a%b'")).matches("VALUES VARCHAR '3'");
+	}
+
+	@Test
+	public void testSimpleLikeUsesStoredStrings() {
+		assertThat(query("SELECT id FROM beers WHERE name LIKE 'Hocus%'")).isFullyPushedDown()
+				.matches("VALUES VARCHAR '1'");
+		assertThat(query("SELECT id FROM beers WHERE name LIKE '%Hocus'")).isFullyPushedDown()
+				.matches("VALUES VARCHAR '2', '3', '6'");
+		assertThat(query("SELECT count(*) FROM beers WHERE name LIKE '%Hocus'"))
+				.isFullyPushedDown().matches("VALUES BIGINT '3'");
+		assertThat(query("SELECT id FROM beers WHERE code LIKE '%fé'")).isFullyPushedDown()
+				.matches("VALUES VARCHAR '6'");
+		assertThat(query("SELECT id FROM beers WHERE style LIKE 'Caf%' LIMIT 1")).isFullyPushedDown()
+				.matches("VALUES VARCHAR '6'");
+		assertThat(query("SELECT id FROM beers WHERE style LIKE 'a%b'")).isNotFullyPushedDown(FilterNode.class)
+				.matches("VALUES VARCHAR '3'");
+	}
+
+	@Test
+	public void testUnicodeLikeBoundariesAndMissingValues() {
+		assertUpdate("CREATE TABLE unicode_like (id varchar, text_value varchar)");
+		try {
+			assertUpdate("INSERT INTO unicode_like VALUES ('1', 'prefix😀suffix'), ('2', '😀'), ('3', ''), "
+					+ "('4', NULL), ('5', 'x😀'), ('6', '😀x'), ('7', 'x')", 7);
+			assertThat(query("SELECT id FROM unicode_like WHERE text_value LIKE '😀%'"))
+					.isFullyPushedDown().matches("VALUES VARCHAR '2', '6'");
+			assertThat(query("SELECT id FROM unicode_like WHERE text_value LIKE '%😀'"))
+					.isFullyPushedDown().matches("VALUES VARCHAR '2', '5'");
+			assertThat(query("SELECT id FROM unicode_like WHERE text_value LIKE '%😀%'"))
+					.isFullyPushedDown().matches("VALUES VARCHAR '1', '2', '5', '6'");
+			assertThat(query("SELECT count(*) FROM unicode_like WHERE text_value LIKE '%'"))
+					.isFullyPushedDown().matches("VALUES BIGINT '6'");
+			assertThat(query("SELECT id FROM unicode_like WHERE text_value LIKE ''"))
+					.isFullyPushedDown().matches("VALUES VARCHAR '3'");
+		} finally {
+			assertUpdate("DROP TABLE unicode_like");
+		}
+	}
+
+	@Test
+	public void testHashVarcharRangesAndNullableDomains() {
+		assertThat(query("SELECT id FROM beers WHERE style > 'a'")).isFullyPushedDown()
+				.matches("VALUES VARCHAR '2', '3'");
+		assertThat(query("SELECT id FROM beers WHERE style < 'a'")).isFullyPushedDown()
+				.matches("VALUES VARCHAR '1', '5', '6'");
+		assertThat(query("SELECT count(*) FROM beers WHERE tags < 'b' OR tags IS NULL")).isFullyPushedDown()
+				.matches("VALUES BIGINT '6'");
+		assertUpdate("CREATE TABLE lexical_values (id varchar, v varchar)");
+		try {
+			assertUpdate("INSERT INTO lexical_values VALUES ('1', '10'), ('2', '2'), ('3', ''), ('4', NULL), "
+					+ "('5', ''), ('6', '😀')", 6);
+			assertThat(query("SELECT id FROM lexical_values WHERE v >= '10' AND v < '2'"))
+					.isFullyPushedDown().matches("VALUES VARCHAR '1'");
+			assertThat(query("SELECT id FROM lexical_values WHERE v > ''"))
+					.isFullyPushedDown().matches("VALUES VARCHAR '6'");
+			assertThat(query("SELECT id FROM lexical_values WHERE v = '' OR v IS NULL"))
+					.isFullyPushedDown().matches("VALUES VARCHAR '3', '4'");
+		} finally {
+			assertUpdate("DROP TABLE lexical_values");
+		}
+	}
+
+	@Test
+	public void testHashNullPredicates() {
+		assertThat(query("SELECT id FROM beers WHERE tags IS NULL")).isFullyPushedDown()
+				.matches("VALUES VARCHAR '4', '5', '6'");
+		assertThat(query("SELECT count(*) FROM beers WHERE tags IS NOT NULL")).isFullyPushedDown()
+				.matches("VALUES BIGINT '3'");
+		assertThat(query("SELECT count(tags) FROM beers WHERE tags IS NULL")).isFullyPushedDown()
+				.matches("VALUES BIGINT '0'");
+		assertThat(query("SELECT id FROM beers WHERE tags IS NULL AND name LIKE 'Caf%' LIMIT 1"))
+				.isFullyPushedDown().matches("VALUES VARCHAR '6'");
 	}
 
 	@Test

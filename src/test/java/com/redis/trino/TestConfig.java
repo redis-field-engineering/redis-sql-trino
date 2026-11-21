@@ -30,7 +30,7 @@ public class TestConfig {
 				.setTableCacheRefresh(RediSearchConfig.DEFAULT_TABLE_CACHE_REFRESH.toSeconds()).setCluster(false)
 				.setCaCertPath(null).setKeyPassword(null).setKeyPath(null).setCertPath(null)
 				.setNarrowScanCursorCount(0).setAggregationGroupLimit(1000000).setAggregationPushdownEnabled(true)
-				.setDynamicFilteringEnabled(true)
+				.setDynamicFilteringEnabled(true).setAtomicHashUpdatesEnabled(false)
 				.setDynamicFilteringWaitTimeout(RediSearchConfig.DEFAULT_DYNAMIC_FILTERING_WAIT_TIMEOUT));
 	}
 
@@ -41,6 +41,7 @@ public class TestConfig {
 		Map<String, String> properties = ImmutableMap.<String, String>builder().put("redisearch.uri", uri)
 				.put("redisearch.default-schema-name", defaultSchema).put("redisearch.resp2", "true")
 				.put("redisearch.aggregation-pushdown.enabled", "false")
+                .put("redisearch.atomic-hash-updates.enabled", "true")
 				.put("redisearch.flex.enabled", "true").put("redisearch.flex.batch-size", "23")
 				.put("redisearch.query-timeout-ms", "1200000")
 				.put("redisearch.narrow-scan-cursor-count", "10000").put("redisearch.aggregation-group-limit", "100")
@@ -67,6 +68,7 @@ public class TestConfig {
 		assertThat(config.getNarrowScanCursorCount()).isEqualTo(10000);
 		assertThat(config.getAggregationGroupLimit()).isEqualTo(100);
 		assertThat(config.isAggregationPushdownEnabled()).isFalse();
+        assertThat(config.isAtomicHashUpdatesEnabled()).isTrue();
 		assertThat(config.isDynamicFilteringEnabled()).isFalse();
 		assertThat(config.getDynamicFilteringWaitTimeout()).isEqualTo(new Duration(3, TimeUnit.SECONDS));
 	}

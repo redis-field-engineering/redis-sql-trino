@@ -23,6 +23,19 @@ import io.trino.testing.QueryRunner;
 class TestFlexWrites extends AbstractTestQueryFramework {
     private RediSearchServer server;
 
+    @Test
+    void testTruncatePreservesFlexSchemaAndComments() {
+        assertUpdate("CREATE TABLE fw_truncate (id bigint, note varchar) COMMENT 'retained'");
+        try {
+            assertUpdate("INSERT INTO fw_truncate SELECT n, 'value' FROM UNNEST(sequence(1, 41)) t(n)", 41);
+            assertUpdate("TRUNCATE TABLE fw_truncate");
+            assertThat(query("SELECT count(*) FROM fw_truncate")).matches("VALUES BIGINT '0'");
+            assertThat(computeActual("SHOW CREATE TABLE fw_truncate").getOnlyValue().toString()).contains("retained");
+            assertUpdate("INSERT INTO fw_truncate VALUES (7, 'again')", 1);
+            assertThat(query("SELECT id FROM fw_truncate")).matches("VALUES BIGINT '7'");
+        } finally { assertUpdate("DROP TABLE fw_truncate"); }
+    }
+
     @Override
     protected QueryRunner createQueryRunner() throws Exception {
         server = closeAfterClass(new RediSearchServer(RedisEnterprise.Deployment.FLEX));

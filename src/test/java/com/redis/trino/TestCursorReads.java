@@ -62,6 +62,115 @@ public class TestCursorReads extends AbstractTestQueryFramework {
     }
 
     @Test
+    public void testMemoryReservationAndLimitCleanup() throws Exception {
+        String index = "memory_accounted";
+        redisearch.getConnection().sync().ftCreate(index, CreateArgs.builder().withPrefix(index + ":").build(),
+                List.of(NumericFieldArgs.builder().name("id").build()));
+        redisearch.writeHashes(index + ":", 100);
+        redisearch.awaitIndexed(index);
+        TypeManager types = (TypeManager) java.lang.reflect.Proxy.newProxyInstance(
+                TypeManager.class.getClassLoader(), new Class<?>[] {TypeManager.class},
+                (proxy, method, args) -> io.trino.spi.type.DoubleType.DOUBLE);
+        AtomicReference<Cursor> live = new AtomicReference<>();
+        AtomicReference<CompletableFuture<String>> deletion = new AtomicReference<>();
+        RediSearchSession session = new RediSearchSession(types, new RediSearchConfig()
+                .setUri(redisearch.getRedisURI()).setCluster(deployment().isCluster()).setCursorCount(7)) {
+            @Override
+            public CompletableFuture<String> cursorDeleteAsync(Connection scan, RediSearchTableHandle table, Cursor cursor) {
+                CompletableFuture<String> result = super.cursorDeleteAsync(scan, table, cursor);
+                deletion.set(result);
+                return result;
+            }
+
+            @Override
+            public AggregateResult result(ExactHashReader exactReader, RediSearchRowReader reader, Optional<Cursor> cursor,
+                    AggregationReply<String> reply, RediSearchReadStats stats) {
+                reply.getCursor().ifPresent(live::set);
+                return super.result(exactReader, reader, cursor, reply, stats);
+            }
+        };
+        var reserved = new java.util.concurrent.atomic.AtomicLong();
+        var table = new RediSearchTableHandle(new SchemaTableName("default", index), index);
+        var column = new RediSearchColumnHandle("id", io.trino.spi.type.DoubleType.DOUBLE,
+                RediSearchFieldType.NUMERIC, false, true, Optional.empty());
+        try {
+            try (var source = new RediSearchPageSource(session, table, List.of(column), Optional.empty(), reserved::set)) {
+                assertThat(reserved.get()).as("initial decoded batch is reserved").isPositive();
+                source.getNextSourcePage();
+                assertThat(reserved.get()).as("page construction keeps a reservation").isPositive();
+            }
+            assertThat(reserved.get()).as("close releases the reservation").isZero();
+            assertThatThrownBy(() -> new RediSearchPageSource(session, table, List.of(column), Optional.empty(), bytes -> {
+                reserved.set(bytes);
+                if (bytes > 0) {
+                    throw new IllegalStateException("test memory limit");
+                }
+            })).hasMessage("test memory limit");
+            assertThat(reserved.get()).as("failed construction releases the reservation").isZero();
+            assertCursorDeleted(session, index, live.get(), deletion.get());
+        } finally {
+            session.shutdown();
+        }
+    }
+
+    @Test
+    public void testLocalTopNSelectionReservesMemoryAndClosesRejectedCursor() throws Exception {
+        String index = "topn_memory";
+        redisearch.getConnection().sync().ftCreate(index, CreateArgs.builder().withPrefix(index + ":").build(),
+                List.of(io.lettuce.core.search.arguments.TagFieldArgs.builder().name("sort_value").build()));
+        for (int i = 0; i < 100; i++) {
+            redisearch.getConnection().sync().hset(index + ":" + i,
+                    Map.of("sort_value", "x".repeat(1000) + i, "payload", "p".repeat(100000)));
+        }
+        redisearch.awaitIndexed(index);
+        TypeManager types = (TypeManager) java.lang.reflect.Proxy.newProxyInstance(
+                TypeManager.class.getClassLoader(), new Class<?>[] {TypeManager.class},
+                (proxy, method, args) -> io.trino.spi.type.VarcharType.VARCHAR);
+        AtomicReference<Cursor> live = new AtomicReference<>();
+        AtomicReference<CompletableFuture<String>> deletion = new AtomicReference<>();
+        RediSearchSession session = new RediSearchSession(types, new RediSearchConfig()
+                .setUri(redisearch.getRedisURI()).setCluster(deployment().isCluster()).setCursorCount(7)) {
+            @Override
+            public CompletableFuture<String> cursorDeleteAsync(Connection scan, RediSearchTableHandle table, Cursor cursor) {
+                live.set(cursor);
+                CompletableFuture<String> result = super.cursorDeleteAsync(scan, table, cursor);
+                deletion.set(result);
+                return result;
+            }
+        };
+        var reserved = new java.util.concurrent.atomic.AtomicLong();
+        var peak = new java.util.concurrent.atomic.AtomicLong();
+        var table = new RediSearchTableHandle(new SchemaTableName("default", index), index)
+                .withTopN(List.of(new RediSearchSortItem("sort_value", true, true)), 3);
+        var output = RediSearchBuiltinField.KEY.getColumnHandle();
+        try {
+            try (var source = new RediSearchPageSource(session, table, List.of(output), Optional.empty(), bytes -> {
+                reserved.set(bytes);
+                peak.accumulateAndGet(bytes, Math::max);
+            })) {
+                assertThat(peak.get()).as("selection batch and retained VARCHAR winner keys are reserved").isGreaterThan(7000);
+                assertThat(source.getNextSourcePage().getPositionCount()).isEqualTo(3);
+            }
+            assertThat(reserved.get()).isZero();
+            assertThatThrownBy(() -> new RediSearchPageSource(session, table, List.of(output), Optional.empty(), bytes -> {
+                reserved.set(bytes);
+                if (bytes > 0) { throw new IllegalStateException("topn memory limit"); }
+            })).hasMessage("topn memory limit");
+            assertThat(reserved.get()).as("rejected local selection releases reservations").isZero();
+            assertCursorDeleted(session, index, live.get(), deletion.get());
+            var payload = new RediSearchColumnHandle("payload", io.trino.spi.type.VarcharType.VARCHAR,
+                    RediSearchFieldType.TEXT, false, false, Optional.empty());
+            assertThatThrownBy(() -> new RediSearchPageSource(session, table, List.of(payload), Optional.empty(), bytes -> {
+                reserved.set(bytes);
+                if (bytes > 50000) { throw new IllegalStateException("topn hydration limit"); }
+            })).hasRootCauseMessage("topn hydration limit");
+            assertThat(reserved.get()).as("failed hydration releases reservations after all callbacks complete").isZero();
+        } finally {
+            session.shutdown();
+        }
+    }
+
+    @Test
     public void testRejectsInitialWarningAndDeletesItsCursor() throws Exception {
         redisearch.getConnection().sync().ftCreate("warned_initial", CreateArgs.builder().withPrefix("warned_initial:").build(),
                 List.of(NumericFieldArgs.builder().name("id").build()));
@@ -192,7 +301,8 @@ public class TestCursorReads extends AbstractTestQueryFramework {
 
 	@Test
 	public void testScanAndAggregationMetrics() {
-		Metrics scan = connectorMetrics("SELECT count(DISTINCT id) FROM many");
+		// DISTINCT can now group in Redis; use a document projection to exercise parallel scan metrics.
+		Metrics scan = connectorMetrics("SELECT id FROM many");
 		assertThat(count(scan, "redis.aggregate.requests")).isEqualTo(scanAggregateRequests());
 		assertThat(count(scan, "redis.cursor.requests")).isPositive();
 		assertThat(count(scan, "redis.rows.received")).isEqualTo(100);

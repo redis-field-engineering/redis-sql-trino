@@ -24,6 +24,7 @@
 package com.redis.trino;
 
 import static io.trino.spi.type.BigintType.BIGINT;
+import static io.trino.spi.type.BooleanType.BOOLEAN;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.RealType.REAL;
@@ -55,7 +56,7 @@ public class RediSearchAggregation {
 	public static final String AVG = "avg";
 	public static final String SUM = "sum";
 	public static final String COUNT = "count";
-	private static final List<String> SUPPORTED_AGGREGATION_FUNCTIONS = Arrays.asList(MAX, MIN, AVG, SUM, COUNT);
+	private static final List<String> SUPPORTED_AGGREGATION_FUNCTIONS = Arrays.asList(MAX, MIN, AVG, SUM, COUNT, "count_if");
 	private static final List<Type> NUMERIC_TYPES = Arrays.asList(REAL, DOUBLE, TINYINT, SMALLINT, INTEGER, BIGINT);
 	// Epoch milliseconds, which only have a smallest and largest: integers, which Redis formats in full
 	private static final List<Type> TIMESTAMP_TYPES = Arrays.asList(TIMESTAMP_MILLIS, TIMESTAMP_TZ_MILLIS);
@@ -64,6 +65,7 @@ public class RediSearchAggregation {
 	private final Optional<RediSearchColumnHandle> columnHandle;
 	private final String alias;
 	private final boolean countingValues;
+	private final Optional<RediSearchColumnHandle> filterColumn;
 
 	public RediSearchAggregation(String functionName, Type outputType, Optional<RediSearchColumnHandle> columnHandle,
 			String alias) {
@@ -75,16 +77,30 @@ public class RediSearchAggregation {
 	 *                       which {@link #valueExpression} and {@link #hasValueExpression} return for each document,
 	 *                       rather than by Redis's SUM or AVG of the column
 	 */
-	@JsonCreator
 	public RediSearchAggregation(@JsonProperty("functionName") String functionName,
 			@JsonProperty("outputType") Type outputType,
 			@JsonProperty("columnHandle") Optional<RediSearchColumnHandle> columnHandle,
 			@JsonProperty("alias") String alias, @JsonProperty("countingValues") boolean countingValues) {
+		this(functionName, outputType, columnHandle, alias, countingValues, Optional.empty());
+	}
+
+	@JsonCreator
+	public RediSearchAggregation(@JsonProperty("functionName") String functionName,
+			@JsonProperty("outputType") Type outputType,
+			@JsonProperty("columnHandle") Optional<RediSearchColumnHandle> columnHandle,
+			@JsonProperty("alias") String alias, @JsonProperty("countingValues") boolean countingValues,
+			@JsonProperty("filterColumn") Optional<RediSearchColumnHandle> filterColumn) {
 		this.functionName = functionName;
 		this.outputType = outputType;
 		this.columnHandle = columnHandle;
 		this.alias = alias;
 		this.countingValues = countingValues;
+		this.filterColumn = filterColumn;
+	}
+
+	@JsonProperty
+	public Optional<RediSearchColumnHandle> getFilterColumn() {
+		return filterColumn;
 	}
 
 	@JsonProperty
@@ -140,11 +156,26 @@ public class RediSearchAggregation {
 		return "__has_" + alias;
 	}
 
+	/** COUNT(column), unlike COUNT(*), sums a present-value indicator. */
+	@JsonIgnore
+	public boolean isCountColumn() {
+		return COUNT.equals(functionName) && columnHandle.isPresent();
+	}
+
+	@JsonIgnore
+	public boolean isConditionalCount() {
+		return COUNT.equals(functionName) && (columnHandle.isPresent() || filterColumn.isPresent());
+	}
+
 	/**
 	 * A conservative bound on every partial sum, including sums before negative values cancel.
 	 */
 	@JsonIgnore
 	public OptionalLong getIntegerSumRowLimit() {
+		if (isConditionalCount()) {
+			// SUM of indicators uses doubles, so every intermediate count must remain exact too.
+			return OptionalLong.of((1L << 53) - 1);
+		}
 		if (!SUM.equals(functionName) || columnHandle.filter(RediSearchColumnHandle::isIntegerWidening).isEmpty()) {
 			return OptionalLong.empty();
 		}
@@ -177,16 +208,20 @@ public class RediSearchAggregation {
 	 * 1 for a document with a value, and 0 for one without: for arithmetic, one with all of its columns' values.
 	 */
 	public String hasValueExpression() {
-		return String.join(" && ", getInputFields().stream().map(field -> "exists(@" + field + ")").toList());
+		String present = String.join(" && ", getInputFields().stream().map(field -> "exists(@" + field + ")").toList());
+		// Boolean.parseBoolean, used by the row reader, accepts TRUE in any ASCII letter case too.
+		return filterColumn.map(column -> present + " && lower(@" + column.getName() + ") == \"true\"").orElse(present);
 	}
 
 	/**
 	 * @return the fields the aggregation reads: its column's, or the columns its arithmetic reads
 	 */
 	public List<String> getInputFields() {
-		RediSearchColumnHandle column = columnHandle.orElseThrow();
-		return column.getExpression().map(expression -> List.copyOf(expression.getColumns().keySet()))
-				.orElse(List.of(column.getName()));
+		java.util.LinkedHashSet<String> fields = new java.util.LinkedHashSet<>();
+		columnHandle.ifPresent(column -> fields.addAll(column.getExpression()
+				.map(expression -> List.copyOf(expression.getColumns().keySet())).orElse(List.of(column.getName()))));
+		filterColumn.ifPresent(column -> fields.add(column.getName()));
+		return List.copyOf(fields);
 	}
 
 	/**
@@ -226,15 +261,41 @@ public class RediSearchAggregation {
 			return Optional.empty();
 		}
 		// Reducers aggregate every document in a group
-		if (function.isDistinct() || function.getFilter().isPresent()) {
+		if (function.isDistinct() || !function.getSortItems().isEmpty()) {
 			return Optional.empty();
 		}
-		if (COUNT.equals(function.getFunctionName())) {
-			// COUNT counts documents, which is count(*). count(column) skips nulls, so Trino computes it.
-			if (!function.getArguments().isEmpty()) {
+		if ("count_if".equals(function.getFunctionName())) {
+			if (function.getFilter().isPresent() || function.getArguments().size() != 1
+					|| !(function.getArguments().get(0) instanceof Variable variable)
+					|| !(assignments.get(variable.getName()) instanceof RediSearchColumnHandle column)
+					|| !BOOLEAN.equals(column.getType()) || column.isHidden() || column.getExpression().isPresent()
+					|| !RediSearchQueryBuilder.isProperty(column.getName())) {
 				return Optional.empty();
 			}
-			return Optional.of(new RediSearchAggregation(COUNT, function.getOutputType(), Optional.empty(), alias));
+			return Optional.of(new RediSearchAggregation(COUNT, function.getOutputType(), Optional.empty(), alias, false,
+					Optional.of(column)));
+		}
+		Optional<RediSearchColumnHandle> filter = Optional.empty();
+		if (function.getFilter().isPresent()) {
+			if (!(function.getFilter().orElseThrow() instanceof Variable variable)
+					|| !(assignments.get(variable.getName()) instanceof RediSearchColumnHandle column)
+					|| !BOOLEAN.equals(column.getType()) || column.isHidden() || column.getExpression().isPresent()
+					|| !RediSearchQueryBuilder.isProperty(column.getName())) {
+				return Optional.empty();
+			}
+			filter = Optional.of(column);
+		}
+		if (COUNT.equals(function.getFunctionName())) {
+			if (function.getArguments().isEmpty()) {
+				return Optional.of(new RediSearchAggregation(COUNT, function.getOutputType(), Optional.empty(), alias, false, filter));
+			}
+			if (function.getArguments().size() != 1 || !(function.getArguments().get(0) instanceof Variable variable)
+					|| !(assignments.get(variable.getName()) instanceof RediSearchColumnHandle column)
+					|| column.isHidden() || column.getExpression().isPresent()
+					|| !RediSearchQueryBuilder.isProperty(column.getName())) {
+				return Optional.empty();
+			}
+			return Optional.of(new RediSearchAggregation(COUNT, function.getOutputType(), Optional.of(column), alias, false, filter));
 		}
 		// Other variants, such as max(x, n), return arrays
 		if (function.getArguments().size() != 1) {
@@ -261,8 +322,11 @@ public class RediSearchAggregation {
 		if (column.getExpression().isPresent() && !countingValues) {
 			return Optional.empty();
 		}
+		if (filter.isPresent() && !countingValues) {
+			return Optional.empty();
+		}
 		return Optional.of(new RediSearchAggregation(functionName, function.getOutputType(), parameterColumnHandle,
-				alias, countingValues));
+				alias, countingValues, filter));
 	}
 
 	@Override
@@ -276,12 +340,12 @@ public class RediSearchAggregation {
 		RediSearchAggregation that = (RediSearchAggregation) o;
 		return Objects.equals(functionName, that.functionName) && Objects.equals(outputType, that.outputType)
 				&& Objects.equals(columnHandle, that.columnHandle) && Objects.equals(alias, that.alias)
-				&& countingValues == that.countingValues;
+				&& countingValues == that.countingValues && Objects.equals(filterColumn, that.filterColumn);
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(functionName, outputType, columnHandle, alias, countingValues);
+		return Objects.hash(functionName, outputType, columnHandle, alias, countingValues, filterColumn);
 	}
 
 	@Override

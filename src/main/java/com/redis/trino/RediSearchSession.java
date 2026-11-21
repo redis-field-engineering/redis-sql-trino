@@ -127,6 +127,8 @@ import io.trino.spi.type.VarcharType;
 
 public class RediSearchSession {
 
+    static final String ROW_MARKER = "__trino_row_marker";
+
     private static final Logger log = Logger.get(RediSearchSession.class);
 
     private final TypeManager typeManager;
@@ -475,15 +477,19 @@ public class RediSearchSession {
     }
 
     /**
-     * Fails unless rows written to the table can be read back. The connector writes hashes, which an index on JSON
-     * documents never sees; DELETE works on both.
+     * Validates mappings before writes. JSON writes are limited to unambiguous scalar object paths.
      */
     public void verifyWritable(SchemaTableName tableName) {
         RediSearchTable table = getTable(tableName);
         if (table.getIndexInfo().getKeyType().filter(type -> type == RediSearchIndexInfo.KeyType.JSON).isPresent()) {
-            throw new TrinoException(NOT_SUPPORTED, format(
-                    "Index %s is on JSON documents; the connector only writes hashes, so only DELETE is supported",
-                    table.getTableHandle().getIndex()));
+            if (config.isFlexEnabled()) {
+                throw new TrinoException(NOT_SUPPORTED, format(
+                        "Index %s is on JSON documents; the Flex writer only writes hashes, so only DELETE is supported",
+                        table.getTableHandle().getIndex()));
+            }
+            new RediSearchJsonWriter(table.getIndexInfo());
+        } else if (table.getIndexInfo().getFields().stream().anyMatch(field -> field.getIdentifier().equals(ROW_MARKER))) {
+            throw new TrinoException(NOT_SUPPORTED, "HASH writes cannot overwrite the reserved row marker field: " + ROW_MARKER);
         }
         if (config.isFlexEnabled() && table.getIndexInfo().getFields().stream()
                 .anyMatch(field -> field.getIdentifier().equals(RediSearchFlexWriteBuffer.ROW_MARKER))) {
@@ -609,6 +615,7 @@ public class RediSearchSession {
         }
         RediSearchIndexInfo indexInfo = indexInfoOptional.get();
         Set<String> fields = new HashSet<>();
+        fields.add(ROW_MARKER);
         ImmutableList.Builder<RediSearchColumnHandle> columns = ImmutableList.builder();
         for (RediSearchBuiltinField builtinfield : RediSearchBuiltinField.values()) {
             fields.add(builtinfield.getName());
@@ -616,6 +623,9 @@ public class RediSearchSession {
         if (config.isFlexEnabled()) { fields.add(RediSearchFlexWriteBuffer.ROW_MARKER); }
         Map<String, String> declaredTypes = RediSearchColumnTypes.read(sync, index);
         for (RediSearchIndexInfo.Field indexedField : indexInfo.getFields()) {
+            if (indexedField.getAttribute().equals(ROW_MARKER)) {
+                continue;
+            }
             RediSearchColumnHandle column = buildColumnHandle(indexedField, indexInfo.getKeyType(),
                     Optional.ofNullable(declaredTypes.get(indexedField.getAttribute())));
             fields.add(column.getName());
@@ -647,7 +657,7 @@ public class RediSearchSession {
             columns.add(builtinfield.getColumnHandle());
         }
         RediSearchTableHandle tableHandle = new RediSearchTableHandle(schemaTableName, index);
-        return new RediSearchTable(tableHandle, columns.build(), indexInfo);
+        return new RediSearchTable(tableHandle, RediSearchColumnTypes.orderColumns(columns.build(), declaredTypes), indexInfo);
     }
 
     private Optional<RediSearchIndexInfo> indexInfo(String index) {
@@ -691,8 +701,9 @@ public class RediSearchSession {
         // whose values FILTER can't compare, so the connector keeps their equal rows itself.
         boolean filterable = keyType.isPresent()
                 && (type == RediSearchFieldType.TAG || type == RediSearchFieldType.TEXT);
-        return new RediSearchColumnHandle(field.getAttribute(), columnType(field, declaredType), type, false, true,
-                field.getSeparator(), filterable);
+        Type sqlType = columnType(field, declaredType);
+        return new RediSearchColumnHandle(field.getAttribute(), sqlType, type, false, !isEncodedScalar(sqlType),
+                field.getSeparator(), filterable && !isEncodedScalar(sqlType));
     }
 
     /**
@@ -783,8 +794,13 @@ public class RediSearchSession {
             log.debug("Running Redis command tokens: %s", JsonCodec.listJsonCodec(String.class).toJson(aggregation.getCommandArguments()));
         }
         stats.aggregateRequests.increment();
-        AggregationReply<String> reply = stats.redisRequest(() -> scan.sync.ftAggregate(
-                aggregation.getIndex(), aggregation.getQuery(), aggregation.getArgs()));
+        AggregationReply<String> reply;
+        try {
+            reply = stats.redisRequest(() -> scan.sync.ftAggregate(
+                    aggregation.getIndex(), aggregation.getQuery(), aggregation.getArgs()));
+        } catch (RuntimeException failure) {
+            throw table.getNativeQuery().isPresent() ? RediSearchQueryErrors.classifyNativeQuery(failure) : failure;
+        }
         Optional<Cursor> liveCursor = nextCursor(reply, Optional.empty());
         try {
             AggregateResult result = result(exactReader, aggregation.getReader(), Optional.empty(), reply, stats);
@@ -938,6 +954,10 @@ public class RediSearchSession {
             case NUMERIC:
                 return NumericFieldArgs.builder().name(columnName).build();
             case TAG:
+                // Encoded columns are scan-only: indexing the entire collection/binary payload wastes memory.
+                if (isEncodedScalar(columnType)) {
+                    return TagFieldArgs.builder().name(columnName).noIndex().build();
+                }
                 // Case-sensitive like SQL, so tag queries return fewer rows for Trino to drop
                 return TagFieldArgs.builder().name(columnName).separator(TAG_SEPARATOR).caseSensitive().build();
             case TEXT:
@@ -950,7 +970,7 @@ public class RediSearchSession {
     }
 
     /**
-     * The index field type for a column, which must index the values {@link RediSearchPageSink#value} writes for it.
+     * The field type for a column's stored encoding. Encoded scalar/complex TAG fields are NOINDEX.
      */
     public static RediSearchFieldType toFieldType(Type type) {
         // Written as "true" and "false"
@@ -998,7 +1018,30 @@ public class RediSearchSession {
         if (type.equals(UuidType.UUID)) {
             return RediSearchFieldType.TAG;
         }
+        if (RediSearchComplexValues.isComplex(type)) {
+            if (type instanceof io.trino.spi.type.ArrayType array) {
+                toFieldType(array.getElementType());
+            } else if (type instanceof io.trino.spi.type.MapType map) {
+                toFieldType(map.getKeyType());
+                toFieldType(map.getValueType());
+            } else if (type instanceof io.trino.spi.type.RowType row) {
+                row.getFieldTypes().forEach(RediSearchSession::toFieldType);
+            }
+            return RediSearchFieldType.TAG;
+        }
+        if (isEncodedScalar(type)) {
+            return RediSearchFieldType.TAG;
+        }
         throw new TrinoException(NOT_SUPPORTED, "Unsupported column type: " + type);
+    }
+
+    // Lossless textual encodings whose comparisons must remain in Trino.
+    static boolean isEncodedScalar(Type type) {
+        return type.equals(io.trino.spi.type.VarbinaryType.VARBINARY)
+                || type instanceof io.trino.spi.type.TimeType
+                || RediSearchTemporalValues.supports(type)
+                || RediSearchComplexValues.isComplex(type)
+                || type.getBaseName().equals(io.trino.spi.type.StandardTypes.JSON);
     }
 
     // A cursor lives on the node that ran FT.AGGREGATE. Lettuce's cluster client would route cursor commands there over

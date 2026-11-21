@@ -20,6 +20,7 @@ import io.lettuce.core.search.AggregationReply;
 import io.trino.spi.PageBuilder;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ConnectorPageSource;
+import io.trino.spi.connector.MemoryContext;
 import io.trino.spi.connector.SourcePage;
 import io.trino.spi.metrics.Metrics;
 
@@ -49,9 +50,16 @@ final class RediSearchCursorFreePageSource implements ConnectorPageSource {
     private long retainedBytes;
     private long completedBytes;
     private boolean finished;
+    private final MemoryContext memoryContext;
 
     RediSearchCursorFreePageSource(RediSearchSession session, RediSearchTableHandle table,
             List<RediSearchColumnHandle> columns) {
+        this(session, table, columns, MemoryContext.NO_LIMIT);
+    }
+
+    RediSearchCursorFreePageSource(RediSearchSession session, RediSearchTableHandle table,
+            List<RediSearchColumnHandle> columns, MemoryContext memoryContext) {
+        this.memoryContext = java.util.Objects.requireNonNull(memoryContext, "memoryContext is null");
         this.session = session;
         this.table = table;
         this.columns = List.copyOf(columns);
@@ -112,6 +120,7 @@ final class RediSearchCursorFreePageSource implements ConnectorPageSource {
                         return size;
                     });
                     rows = batch.iterator();
+                    memoryContext.setBytes(retainedMemory());
                     continue;
                 }
                 String[] row = rows.next();
@@ -124,15 +133,20 @@ final class RediSearchCursorFreePageSource implements ConnectorPageSource {
                     }
                 }
             }
+            memoryContext.setBytes(retainedMemory());
             if (builder.isEmpty()) {
                 return null;
             }
             var page = builder.build();
             builder.reset();
+            memoryContext.setBytes(retainedMemory());
             completedBytes += page.getSizeInBytes();
             return SourcePage.create(page);
         } catch (CompletionException failure) {
             close();
+            if (table.getNativeQuery().isPresent() && failure.getCause() instanceof RuntimeException cause) {
+                throw RediSearchQueryErrors.classifyNativeQuery(cause);
+            }
             throwIfUnchecked(failure.getCause());
             throw failure;
         } catch (RuntimeException | Error failure) {
@@ -190,8 +204,7 @@ final class RediSearchCursorFreePageSource implements ConnectorPageSource {
     public long getReadTimeNanos() { return stats.readTimeNanos(); }
     @Override
     public Metrics getMetrics() { return stats.metrics(); }
-    @Override
-    public long getMemoryUsage() {
+    private long retainedMemory() {
         long bytes = retainedBytes + builder.getRetainedSizeInBytes();
         if (pending != null && pending.isDone() && !pending.isCompletedExceptionally()) {
             for (var shard : pending.join().getReplies()) {
@@ -220,5 +233,6 @@ final class RediSearchCursorFreePageSource implements ConnectorPageSource {
         retainedBytes = 0;
         rows = Collections.emptyIterator();
         builder.reset();
+        memoryContext.setBytes(0);
     }
 }

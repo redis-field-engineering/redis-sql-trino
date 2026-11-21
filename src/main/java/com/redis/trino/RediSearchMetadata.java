@@ -26,6 +26,7 @@ package com.redis.trino;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.ImmutableList.toImmutableList;
+import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.RealType.REAL;
@@ -72,6 +73,8 @@ import io.trino.spi.connector.ConnectorTableLayout;
 import io.trino.spi.connector.ConnectorTableMetadata;
 import io.trino.spi.connector.ConnectorTableProperties;
 import io.trino.spi.connector.ConnectorTableVersion;
+import io.trino.spi.connector.ConnectorViewDefinition;
+import io.trino.spi.connector.RelationCommentMetadata;
 import io.trino.spi.connector.Constraint;
 import io.trino.spi.connector.ConstraintApplicationResult;
 import io.trino.spi.connector.LimitApplicationResult;
@@ -104,11 +107,13 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 	private final RediSearchSession rediSearchSession;
 	private final String schemaName;
+	private final RediSearchRelationMetadata relationMetadata;
 	private final AtomicReference<Runnable> rollbackAction = new AtomicReference<>();
 
 	public RediSearchMetadata(RediSearchSession rediSearchSession) {
 		this.rediSearchSession = requireNonNull(rediSearchSession, "rediSearchSession is null");
 		this.schemaName = rediSearchSession.getConfig().getDefaultSchema();
+		this.relationMetadata = new RediSearchRelationMetadata(rediSearchSession.sync());
 	}
 
 	@Override
@@ -143,10 +148,14 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 	@Override
 	public List<SchemaTableName> listTables(ConnectorSession session, Optional<String> optionalSchemaName) {
+		if (optionalSchemaName.isPresent() && !optionalSchemaName.orElseThrow().equals(schemaName)) {
+			return List.of();
+		}
 		ImmutableList.Builder<SchemaTableName> tableNames = ImmutableList.builder();
 		for (String tableName : rediSearchSession.getAllTables()) {
 			tableNames.add(new SchemaTableName(schemaName, tableName));
 		}
+		tableNames.addAll(listViews(session, optionalSchemaName));
 		return tableNames.build();
 	}
 
@@ -169,6 +178,11 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		// Filter before fetching metadata so only visible indexes are inspected
 		for (SchemaTableName tableName : relationFilter.apply(ImmutableSet.copyOf(listTables(session, schemaName)))) {
 			try {
+				Optional<ConnectorViewDefinition> view = getView(session, tableName);
+				if (view.isPresent()) {
+					relationColumns.add(RelationColumnsMetadata.forView(tableName, view.orElseThrow().getColumns()));
+					continue;
+				}
 				relationColumns.add(RelationColumnsMetadata.forTable(tableName,
 						getTableMetadata(session, tableName).getColumns()));
 			} catch (NotFoundException e) {
@@ -181,7 +195,141 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	@Override
 	public ColumnMetadata getColumnMetadata(ConnectorSession session, ConnectorTableHandle tableHandle,
 			ColumnHandle columnHandle) {
-		return ((RediSearchColumnHandle) columnHandle).toColumnMetadata();
+		RediSearchColumnHandle column = (RediSearchColumnHandle) columnHandle;
+		String index = ((RediSearchTableHandle) tableHandle).getIndex();
+		return ColumnMetadata.builderFrom(column.toColumnMetadata())
+				.setComment(Optional.ofNullable(relationMetadata.comments(index).get("column:" + column.getName()))).build();
+	}
+
+	@Override
+	public void setTableComment(ConnectorSession session, ConnectorTableHandle tableHandle, Optional<String> comment) {
+		relationMetadata.setComment(((RediSearchTableHandle) tableHandle).getIndex(), Optional.empty(), comment);
+	}
+
+	@Override
+	public void setColumnComment(ConnectorSession session, ConnectorTableHandle tableHandle, ColumnHandle columnHandle,
+			Optional<String> comment) {
+		relationMetadata.setComment(((RediSearchTableHandle) tableHandle).getIndex(),
+				Optional.of(((RediSearchColumnHandle) columnHandle).getName()), comment);
+	}
+
+	@Override
+	public List<SchemaTableName> listViews(ConnectorSession session, Optional<String> optionalSchemaName) {
+		if (optionalSchemaName.isPresent() && !optionalSchemaName.orElseThrow().equals(schemaName)) {
+			return List.of();
+		}
+		return relationMetadata.viewNames(schemaName).stream().map(name -> new SchemaTableName(schemaName, name)).toList();
+	}
+
+	@Override
+	public Map<SchemaTableName, ConnectorViewDefinition> getViews(ConnectorSession session, Optional<String> optionalSchemaName) {
+		if (optionalSchemaName.isPresent() && !optionalSchemaName.orElseThrow().equals(schemaName)) {
+			return Map.of();
+		}
+		Map<SchemaTableName, ConnectorViewDefinition> views = new LinkedHashMap<>();
+		relationMetadata.views(schemaName).forEach((name, definition) -> views.put(new SchemaTableName(schemaName, name), definition));
+		return Map.copyOf(views);
+	}
+
+	@Override
+	public Optional<ConnectorViewDefinition> getView(ConnectorSession session, SchemaTableName name) {
+		if (!name.getSchemaName().equals(schemaName)) {
+			return Optional.empty();
+		}
+		return relationMetadata.view(schemaName, name.getTableName());
+	}
+
+	@Override
+	public void createView(ConnectorSession session, SchemaTableName name, ConnectorViewDefinition definition,
+			Map<String, Object> properties, SaveMode saveMode) {
+		if (!name.getSchemaName().equals(schemaName)) {
+			throw new TrinoException(StandardErrorCode.SCHEMA_NOT_FOUND, "Schema does not exist: " + name.getSchemaName());
+		}
+		if (!properties.isEmpty()) {
+			throw new TrinoException(StandardErrorCode.INVALID_VIEW_PROPERTY, "View properties are not supported");
+		}
+		if (getTableHandle(session, name, Optional.empty(), Optional.empty()) != null) {
+			throw new TrinoException(StandardErrorCode.ALREADY_EXISTS, "Table already exists: " + name);
+		}
+		relationMetadata.createView(schemaName, name.getTableName(), definition, saveMode == SaveMode.REPLACE, saveMode == SaveMode.IGNORE);
+	}
+
+	@Override
+	public void dropView(ConnectorSession session, SchemaTableName name) {
+		if (!name.getSchemaName().equals(schemaName)) {
+			throw new io.trino.spi.connector.ViewNotFoundException(name);
+		}
+		relationMetadata.dropView(schemaName, name.getTableName());
+	}
+
+	@Override
+	public void renameView(ConnectorSession session, SchemaTableName source, SchemaTableName target) {
+		if (!source.getSchemaName().equals(schemaName) || !target.getSchemaName().equals(schemaName)) {
+			throw new TrinoException(StandardErrorCode.NOT_SUPPORTED, "Views can only be renamed within the configured schema");
+		}
+		if (getTableHandle(session, target, Optional.empty(), Optional.empty()) != null) {
+			throw new TrinoException(StandardErrorCode.ALREADY_EXISTS, "Table already exists: " + target);
+		}
+		relationMetadata.renameView(schemaName, source.getTableName(), target.getTableName());
+	}
+
+	@Override
+	public void setViewComment(ConnectorSession session, SchemaTableName name, Optional<String> comment) {
+		updateView(session, name, definition -> new ConnectorViewDefinition(definition.getOriginalSql(), definition.getCatalog(),
+				definition.getSchema(), definition.getColumns(), comment, definition.getOwner(), definition.isRunAsInvoker(), definition.getPath()));
+	}
+
+	@Override
+	public void setViewColumnComment(ConnectorSession session, SchemaTableName name, String columnName, Optional<String> comment) {
+		updateView(session, name, definition -> {
+			List<ConnectorViewDefinition.ViewColumn> columns = definition.getColumns().stream()
+					.map(column -> column.getName().equals(columnName)
+							? new ConnectorViewDefinition.ViewColumn(column.getName(), column.getType(), comment) : column).toList();
+			return new ConnectorViewDefinition(definition.getOriginalSql(), definition.getCatalog(), definition.getSchema(), columns,
+					definition.getComment(), definition.getOwner(), definition.isRunAsInvoker(), definition.getPath());
+		});
+	}
+
+	@Override
+	public Iterator<RelationCommentMetadata> streamRelationComments(ConnectorSession session, Optional<String> schema,
+			UnaryOperator<Set<SchemaTableName>> relationFilter) {
+		ImmutableList.Builder<RelationCommentMetadata> comments = ImmutableList.builder();
+		for (SchemaTableName name : relationFilter.apply(Set.copyOf(listTables(session, schema)))) {
+			try {
+				Optional<ConnectorViewDefinition> view = getView(session, name);
+				comments.add(RelationCommentMetadata.forRelation(name, view.isPresent() ? view.orElseThrow().getComment()
+						: getTableMetadata(session, name).getComment()));
+			}
+			catch (NotFoundException e) {
+				// A relation can disappear while information_schema/system metadata is being listed.
+			}
+		}
+		return comments.build().iterator();
+	}
+
+	private void updateView(ConnectorSession session, SchemaTableName name,
+			UnaryOperator<ConnectorViewDefinition> update) {
+		if (!name.getSchemaName().equals(schemaName)) {
+			throw new io.trino.spi.connector.ViewNotFoundException(name);
+		}
+		relationMetadata.updateView(schemaName, name.getTableName(), update);
+	}
+
+	private void checkViewCollision(ConnectorSession session, SchemaTableName name) {
+		if (getView(session, name).isPresent()) {
+			throw new TrinoException(StandardErrorCode.ALREADY_EXISTS, "View already exists: " + name);
+		}
+	}
+
+	private void saveInitialComments(ConnectorSession session, ConnectorTableMetadata metadata) {
+		if (metadata.getComment().isEmpty() && metadata.getColumns().stream().noneMatch(column -> column.getComment().isPresent())) {
+			return;
+		}
+		String index = rediSearchSession.getTable(metadata.getTable()).getTableHandle().getIndex();
+		Map<String, String> comments = new LinkedHashMap<>();
+		metadata.getComment().ifPresent(comment -> comments.put("table", comment));
+		metadata.getColumns().forEach(column -> column.getComment().ifPresent(comment -> comments.put("column:" + column.getName(), comment)));
+		relationMetadata.initializeComments(index, comments);
 	}
 
 	@Override
@@ -189,22 +337,58 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		if (saveMode == SaveMode.REPLACE) {
 			throw new TrinoException(StandardErrorCode.NOT_SUPPORTED, "This connector does not support replacing tables");
 		}
+		if (saveMode == SaveMode.IGNORE && (getTableHandle(session, tableMetadata.getTable(), Optional.empty(), Optional.empty()) != null
+				|| getView(session, tableMetadata.getTable()).isPresent())) {
+			return;
+		}
+		checkViewCollision(session, tableMetadata.getTable());
 		rediSearchSession.createTable(tableMetadata.getTable(), buildColumnHandles(tableMetadata));
+		saveInitialComments(session, tableMetadata);
+	}
+
+	@Override
+	public void truncateTable(ConnectorSession session, ConnectorTableHandle tableHandle) {
+		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
+		RediSearchTruncate.truncate(rediSearchSession, new RediSearchTableHandle(table.getSchemaTableName(), table.getIndex()));
 	}
 
 	@Override
 	public void dropTable(ConnectorSession session, ConnectorTableHandle tableHandle) {
 		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
 		rediSearchSession.dropTable(table.getSchemaTableName());
+		relationMetadata.deleteComments(table.getIndex());
 	}
 
 	@Override
 	public void addColumn(ConnectorSession session, ConnectorTableHandle tableHandle, ColumnMetadata column,
 			ColumnPosition position) {
-		if (!(position instanceof ColumnPosition.Last)) {
-			throw new TrinoException(StandardErrorCode.NOT_SUPPORTED, "This connector only supports adding columns at the end");
+		validateColumnName(column.getName());
+		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
+		Map<String, Type> ordered = new LinkedHashMap<>();
+		if (position instanceof ColumnPosition.First) {
+			ordered.put(column.getName(), column.getType());
 		}
-		rediSearchSession.addColumn(((RediSearchTableHandle) tableHandle).getSchemaTableName(), column);
+		for (RediSearchColumnHandle existing : rediSearchSession.getTable(table.getSchemaTableName()).getColumns()) {
+			if (!existing.isHidden()) {
+				ordered.put(existing.getName(), existing.getType());
+				if (position instanceof ColumnPosition.After after && existing.getName().equals(after.columnName())) {
+					ordered.put(column.getName(), column.getType());
+				}
+			}
+		}
+		if (position instanceof ColumnPosition.Last) {
+			ordered.put(column.getName(), column.getType());
+		}
+		if (!ordered.containsKey(column.getName())) {
+			throw new TrinoException(StandardErrorCode.COLUMN_NOT_FOUND, "Column position does not exist: " + position);
+		}
+		rediSearchSession.addColumn(table.getSchemaTableName(), column);
+		if (!(position instanceof ColumnPosition.Last)) {
+			RediSearchColumnTypes.write(rediSearchSession.sync(), table.getIndex(), ordered);
+		}
+		if (column.getComment().isPresent()) {
+			relationMetadata.setComment(((RediSearchTableHandle) tableHandle).getIndex(), Optional.of(column.getName()), column.getComment());
+		}
 	}
 
 	@Override
@@ -214,11 +398,17 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		if (replace) {
 			throw new TrinoException(StandardErrorCode.NOT_SUPPORTED, "This connector does not support replacing tables");
 		}
+		checkViewCollision(session, tableMetadata.getTable());
 		List<RediSearchColumnHandle> columns = buildColumnHandles(tableMetadata);
 
 		rediSearchSession.createTable(tableMetadata.getTable(), columns);
 
-		setRollback(() -> rediSearchSession.dropTable(tableMetadata.getTable()));
+		setRollback(() -> {
+			String index = rediSearchSession.getTable(tableMetadata.getTable()).getTableHandle().getIndex();
+			rediSearchSession.dropTable(tableMetadata.getTable());
+			relationMetadata.deleteComments(index);
+		});
+		saveInitialComments(session, tableMetadata);
 
 		return new RediSearchOutputTableHandle(tableMetadata.getTable(),
 				columns.stream().filter(c -> !c.isHidden()).collect(Collectors.toList()));
@@ -329,6 +519,16 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	}
 
 	@Override
+	public Optional<io.trino.spi.connector.TableFunctionApplicationResult<ConnectorTableHandle>> applyTableFunction(
+			ConnectorSession session, io.trino.spi.function.table.ConnectorTableFunctionHandle function) {
+		if (function instanceof RediSearchNativeSearch.Handle handle) {
+			return Optional.of(new io.trino.spi.connector.TableFunctionApplicationResult<>(handle.getTable(),
+					handle.getColumns().stream().map(column -> (ColumnHandle) column).toList()));
+		}
+		return Optional.empty();
+	}
+
+	@Override
 	public Optional<LimitApplicationResult<ConnectorTableHandle>> applyLimit(ConnectorSession session,
 			ConnectorTableHandle table, long limit) {
 		if (rediSearchSession.getConfig().isFlexEnabled()) {
@@ -385,11 +585,12 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		}
 		boolean local = sortItems.size() == 1 && topNCount <= 1000
 				&& assignments.get(sortItems.get(0).getName()) instanceof RediSearchColumnHandle candidate
-				&& candidate.getType() == io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
+				&& (candidate.getType() == io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS
+						|| candidate.getType().equals(BIGINT) || candidate.getType() instanceof io.trino.spi.type.VarcharType);
 		ImmutableList.Builder<RediSearchSortItem> sort = ImmutableList.builder();
 		for (SortItem sortItem : sortItems) {
 			RediSearchColumnHandle column = (RediSearchColumnHandle) assignments.get(sortItem.getName());
-			if (column == null || column.getFieldType() != RediSearchFieldType.NUMERIC || !column.isSupportsPredicates()
+			if (column == null || (!local && column.getFieldType() != RediSearchFieldType.NUMERIC) || !column.isSupportsPredicates()
 					|| (!local && !SORTABLE_TYPES.contains(column.getType())) || !RediSearchQueryBuilder.isProperty(column.getName())) {
 				return Optional.empty();
 			}
@@ -417,7 +618,10 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			return Optional.empty();
 		}
 
-		// Only exact substring LIKE expressions on HASH fields are consumed; other wildcard shapes stay in Trino
+		// Pipeline filters run after HASH values load, before a limit/group/sort can discard rows.
+		boolean hash = rediSearchSession.getTable(handle.getSchemaTableName()).getIndexInfo().getKeyType()
+				.filter(RediSearchIndexInfo.KeyType.HASH::equals).isPresent();
+		Map<String, String> filters = new LinkedHashMap<>(handle.getFilters());
 		Map<ColumnHandle, Domain> supported = new HashMap<>();
 		Map<ColumnHandle, Domain> unsupported = new HashMap<>();
 		Map<ColumnHandle, Domain> domains = constraint.getSummary().getDomains()
@@ -425,6 +629,11 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		for (Map.Entry<ColumnHandle, Domain> entry : domains.entrySet()) {
 			RediSearchColumnHandle column = (RediSearchColumnHandle) entry.getKey();
 			Domain domain = entry.getValue();
+			Optional<String> booleanFilter = hash ? RediSearchQueryBuilder.booleanDomainFilter(column, domain) : Optional.empty();
+			if (booleanFilter.isPresent()) {
+				mergeFilter(filters, column.getName(), booleanFilter.orElseThrow());
+				continue;
+			}
 
 			if (rediSearchSession.canQuery(handle, column, domain)) {
 				supported.put(column, domain);
@@ -433,11 +642,17 @@ public class RediSearchMetadata implements ConnectorMetadata {
 					unsupported.put(column, domain);
 				}
 			} else {
-				unsupported.put(column, domain);
+				Optional<String> presence = hash ? RediSearchQueryBuilder.presenceFilter(column, domain)
+						.or(() -> RediSearchQueryBuilder.stringDomainFilter(column, domain)) : Optional.empty();
+				if (presence.isPresent()) {
+					mergeFilter(filters, column.getName(), presence.orElseThrow());
+				} else {
+					log.debug("Retaining predicate in Trino: index %s column %s domain %s", handle.getIndex(), column.getName(), domain);
+					unsupported.put(column, domain);
+				}
 			}
 		}
 
-		Map<String, String> filters = new LinkedHashMap<>(handle.getFilters());
 		List<ConnectorExpression> remaining = new java.util.ArrayList<>();
 		for (ConnectorExpression expression : ConnectorExpressions.extractConjuncts(constraint.getExpression())) {
 			if (expression instanceof Call call
@@ -445,15 +660,10 @@ public class RediSearchMetadata implements ConnectorMetadata {
 					&& call.getArguments().size() == 2 && call.getArguments().get(0) instanceof Variable variable
 					&& call.getArguments().get(1) instanceof Constant constant && constant.getValue() instanceof Slice pattern
 					&& constraint.getAssignments().get(variable.getName()) instanceof RediSearchColumnHandle column
-					&& rediSearchSession.getTable(handle.getSchemaTableName()).getIndexInfo().getKeyType()
-							.filter(RediSearchIndexInfo.KeyType.HASH::equals).isPresent()) {
+					&& hash) {
 				Optional<String> filter = RediSearchQueryBuilder.containsFilter(column, pattern.toStringUtf8());
 				if (filter.isPresent()) {
-					String previous = filters.get(column.getName());
-					if (previous == null) { filters.put(column.getName(), filter.get()); }
-					else if (!previous.equals(filter.get()) && !previous.contains("(" + filter.get() + ")")) {
-						filters.put(column.getName(), "(" + previous + ") && (" + filter.get() + ")");
-					}
+					mergeFilter(filters, column.getName(), filter.orElseThrow());
 					continue;
 				}
 			}
@@ -470,6 +680,15 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 		return Optional.of(new ConstraintApplicationResult<>(handle, TupleDomain.withColumnDomains(unsupported),
 				ConnectorExpressions.and(remaining), false));
+	}
+
+	private static void mergeFilter(Map<String, String> filters, String field, String filter) {
+		String previous = filters.get(field);
+		if (previous == null) {
+			filters.put(field, filter);
+		} else if (!previous.equals(filter) && !previous.contains("(" + filter + ")")) {
+			filters.put(field, "(" + previous + ") && (" + filter + ")");
+		}
 	}
 
 	/**
@@ -531,6 +750,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			List<List<ColumnHandle>> groupingSets) {
 		log.debug("applyAggregation aggregates=%s groupingSets=%s", aggregates, groupingSets);
 		if (rediSearchSession.getConfig().isFlexEnabled() || !rediSearchSession.getConfig().isAggregationPushdownEnabled()) {
+			log.debug("Rejecting aggregation pushdown: Flex mode or disabled by redisearch.aggregation-pushdown.enabled");
 			return Optional.empty();
 		}
 		RediSearchTableHandle table = (RediSearchTableHandle) handle;
@@ -538,9 +758,11 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		verify(!groupingSets.isEmpty(), "No grouping sets provided");
 		// GROUPBY would run before a LIMIT or SORTBY, over every document rather than the first ones
 		if (!table.getTermAggregations().isEmpty() || table.getLimit().isPresent() || !table.getSort().isEmpty()) {
+			log.debug("Rejecting aggregation pushdown: input already has grouping, a limit or ordering");
 			return Optional.empty();
 		}
 		if (groupingSets.size() != 1) {
+			log.debug("Rejecting aggregation pushdown: multiple grouping sets are not translated");
 			return Optional.empty();
 		}
 		if (!groupingSets.get(0).isEmpty()) {
@@ -570,10 +792,17 @@ public class RediSearchMetadata implements ConnectorMetadata {
 				log.debug("Rejecting aggregation pushdown: unsupported aggregate %s", function);
 				return Optional.empty();
 			}
+			if ((aggregation.get().isConditionalCount() || aggregation.get().getFilterColumn().isPresent())
+					&& rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo().getKeyType()
+							.filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
+				// JSON arrays/nulls have different existence and scalar extraction semantics.
+				log.debug("Rejecting conditional aggregate pushdown: only scalar HASH fields are supported");
+				return Optional.empty();
+			}
 			if (aggregation.get().getIntegerSumRowLimit().isPresent()) {
 				OptionalLong documents = rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo().getNumDocs();
 				if (!aggregation.get().isIntegerSumSafe(documents)) {
-					log.debug("Rejecting integer SUM pushdown: index %s has document count %s, safe row limit %s",
+					log.debug("Rejecting integer aggregate pushdown: index %s has document count %s, safe row limit %s",
 							table.getIndex(), documents, aggregation.get().getIntegerSumRowLimit());
 					return Optional.empty();
 				}
@@ -587,18 +816,35 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			aggregations.add(aggregation.get());
 		}
 		for (ColumnHandle columnHandle : groupingSets.get(0)) {
+			if (((RediSearchColumnHandle) columnHandle).getType().equals(DOUBLE)
+					&& !rediSearchSession.isCaseSupported(table.getIndex())) {
+				log.debug("Rejecting DOUBLE GROUP BY pushdown: signed-zero normalization requires case()");
+				return Optional.empty();
+			}
 			Optional<RediSearchAggregationTerm> termAggregation = RediSearchAggregationTerm
 					.fromColumnHandle(columnHandle);
 			if (termAggregation.isEmpty()) {
+				log.debug("Rejecting GROUP BY pushdown: key %s cannot preserve its SQL representation", columnHandle);
 				return Optional.empty();
 			}
 			terms.add(termAggregation.get());
 		}
 		ImmutableList<RediSearchAggregation> aggregationList = aggregations.build();
-		if (aggregationList.isEmpty()) {
-			return Optional.empty();
-		}
 		ImmutableList<RediSearchAggregationTerm> termList = terms.build();
+		if (aggregationList.isEmpty()) {
+			if (termList.isEmpty() || rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo().getKeyType()
+					.filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
+				return Optional.empty();
+			}
+			// Redis requires a reducer, although SQL DISTINCT only needs group keys. Keep this internal;
+			// Trino receives the distinct keys (including NULL), then evaluates any outer COUNT exactly.
+			Set<String> inputNames = assignments.values().stream().map(RediSearchColumnHandle.class::cast)
+					.map(RediSearchColumnHandle::getName).collect(Collectors.toSet());
+			String alias = "__trino_distinct_rows";
+			while (inputNames.contains(alias)) { alias += "_"; }
+			aggregationList = ImmutableList.of(new RediSearchAggregation(RediSearchAggregation.COUNT, BIGINT,
+					Optional.empty(), alias));
+		}
 		// Over RESP2, the shards of a sharded database send its coordinator the doubles they compute rounded to 12
 		// significant digits, which no mantissa and exponent computed after it merges them could restore
 		if (!rediSearchSession.isResp3()
@@ -641,11 +887,24 @@ public class RediSearchMetadata implements ConnectorMetadata {
 				.copyOf(getColumnHandles(session, tableHandle).values().stream().map(RediSearchColumnHandle.class::cast)
 						.map(RediSearchColumnHandle::toColumnMetadata).collect(Collectors.toList()));
 
-		return new ConnectorTableMetadata(tableName, columns);
+		String index = tableHandle.getIndex();
+		Map<String, String> comments = relationMetadata.comments(index);
+		columns = columns.stream().map(column -> ColumnMetadata.builderFrom(column)
+				.setComment(Optional.ofNullable(comments.get("column:" + column.getName()))).build()).toList();
+		return new ConnectorTableMetadata(tableName, columns, Map.of(), Optional.ofNullable(comments.get("table")));
 	}
 
 	private List<RediSearchColumnHandle> buildColumnHandles(ConnectorTableMetadata tableMetadata) {
+		tableMetadata.getColumns().forEach(column -> validateColumnName(column.getName()));
 		return tableMetadata.getColumns().stream().map(m -> new RediSearchColumnHandle(m.getName(), m.getType(),
-				RediSearchSession.toFieldType(m.getType()), m.isHidden(), true, Optional.empty())).collect(Collectors.toList());
+				RediSearchSession.toFieldType(m.getType()), m.isHidden(), !RediSearchSession.isEncodedScalar(m.getType()), Optional.empty())).collect(Collectors.toList());
 	}
+	private void validateColumnName(String name) {
+		boolean reserved = rediSearchSession.getConfig().isCaseInsensitiveNames()
+				? name.equalsIgnoreCase(RediSearchSession.ROW_MARKER) : name.equals(RediSearchSession.ROW_MARKER);
+		if (reserved) {
+			throw new TrinoException(StandardErrorCode.NOT_SUPPORTED, "Column name is reserved for connector row storage: " + name);
+		}
+	}
+
 }

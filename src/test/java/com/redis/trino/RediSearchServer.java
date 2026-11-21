@@ -9,6 +9,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.utility.DockerImageName;
+
 import com.google.common.collect.ImmutableMap;
 import com.redis.trino.RedisEnterprise.Deployment;
 
@@ -52,6 +55,8 @@ public class RediSearchServer implements Closeable {
 
     private final RedisEnterprise.Database database;
 
+    private final GenericContainer<?> openSource;
+
     private final RedisClient client;
 
     private final StatefulRedisConnection<String, String> connection;
@@ -61,22 +66,59 @@ public class RediSearchServer implements Closeable {
     }
 
     public RediSearchServer(Deployment deployment) {
-        this.cluster = deployment == Deployment.FLEX ? RedisEnterprise.sharedFlex() : RedisEnterprise.shared();
-        this.database = cluster.createDatabase(deployment);
+        String ossImage = System.getProperty("redisearch.test.oss-image");
+        if (ossImage != null) {
+            if (deployment != Deployment.NON_SHARDED) {
+                throw new IllegalArgumentException("redisearch.test.oss-image only supports NON_SHARDED test classes");
+            }
+            this.cluster = null;
+            this.database = null;
+            this.openSource = new GenericContainer<>(DockerImageName.parse(ossImage)).withExposedPorts(6379);
+            try {
+                openSource.start();
+            } catch (RuntimeException | Error e) {
+                try {
+                    openSource.close();
+                } catch (RuntimeException | Error cleanup) {
+                    e.addSuppressed(cleanup);
+                }
+                throw e;
+            }
+        } else {
+            this.openSource = null;
+            this.cluster = deployment == Deployment.FLEX ? RedisEnterprise.sharedFlex() : RedisEnterprise.shared();
+            this.database = cluster.createDatabase(deployment);
+        }
+        RedisClient connectingClient = null;
+        StatefulRedisConnection<String, String> connected;
         try {
-            this.client = RedisClient.create(RedisURI.create(getRedisURI()));
-            this.connection = client.connect();
-        } catch (RuntimeException e) {
-            cluster.deleteDatabase(database);
+            connectingClient = RedisClient.create(RedisURI.create(getRedisURI()));
+            connected = connectingClient.connect();
+        } catch (RuntimeException | Error e) {
+            RedisClient failedClient = connectingClient;
+            try {
+                if (failedClient == null) {
+                    stopBackend();
+                } else {
+                    closeAll(failedClient::shutdown, () -> failedClient.getResources().shutdown(), this::stopBackend);
+                }
+            } catch (RuntimeException | Error cleanup) {
+                e.addSuppressed(cleanup);
+            }
             throw e;
         }
+        this.client = connectingClient;
+        this.connection = connected;
     }
 
     public Deployment getDeployment() {
-        return database.getDeployment();
+        return openSource == null ? database.getDeployment() : Deployment.NON_SHARDED;
     }
 
     public String getRedisURI() {
+        if (openSource != null) {
+            return RedisURI.Builder.redis(openSource.getHost(), openSource.getMappedPort(6379)).build().toString();
+        }
         return database.getRedisURI();
     }
 
@@ -180,10 +222,37 @@ public class RediSearchServer implements Closeable {
 
     @Override
     public void close() {
-        connection.close();
-        client.shutdown();
-        client.getResources().shutdown();
-        cluster.deleteDatabase(database);
+        closeAll(connection::close, client::shutdown, () -> client.getResources().shutdown(), this::stopBackend);
+    }
+
+    /** Attempt every cleanup, preserving the first failure and suppressing later ones. */
+    private static void closeAll(Runnable... steps) {
+        Throwable failure = null;
+        for (Runnable step : steps) {
+            try {
+                step.run();
+            } catch (RuntimeException | Error e) {
+                if (failure == null) {
+                    failure = e;
+                } else {
+                    failure.addSuppressed(e);
+                }
+            }
+        }
+        if (failure instanceof RuntimeException runtime) {
+            throw runtime;
+        }
+        if (failure instanceof Error error) {
+            throw error;
+        }
+    }
+
+    private void stopBackend() {
+        if (openSource != null) {
+            openSource.close();
+        } else {
+            cluster.deleteDatabase(database);
+        }
     }
 
 }

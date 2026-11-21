@@ -79,10 +79,10 @@ public class TestFilterPushdown extends AbstractTestQueryFramework {
 
 	@Test
 	public void testIsNull() {
-		// Redis can't match a missing field, so Trino evaluates these
-		assertThat(query("SELECT id FROM beers WHERE abv IS NULL")).isNotFullyPushedDown(FilterNode.class)
+		// HASH pipeline filters test loaded field existence even though the index query cannot match absence.
+		assertThat(query("SELECT id FROM beers WHERE abv IS NULL")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '5'");
-		assertThat(query("SELECT id FROM beers WHERE abv IS NOT NULL")).isNotFullyPushedDown(FilterNode.class)
+		assertThat(query("SELECT id FROM beers WHERE abv IS NOT NULL")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '1', '2', '3', '4'");
 		assertThat(query("SELECT id FROM beers WHERE abv > 5 OR abv IS NULL")).matches("VALUES VARCHAR '3', '4', '5'");
 		assertThat(query("SELECT id FROM beers WHERE style IS NULL")).matches("VALUES VARCHAR '4'");
@@ -92,7 +92,7 @@ public class TestFilterPushdown extends AbstractTestQueryFramework {
 
 	@Test
 	public void testVarcharRanges() {
-		assertThat(query("SELECT id FROM beers WHERE id <> '1'")).isNotFullyPushedDown(FilterNode.class)
+		assertThat(query("SELECT id FROM beers WHERE id <> '1'")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '2', '3', '4', '5'");
 		assertThat(query("SELECT id FROM beers WHERE id BETWEEN '2' AND '3'")).matches("VALUES VARCHAR '2', '3'");
 		assertThat(query("SELECT id FROM beers WHERE name > 'H'")).matches("VALUES VARCHAR '1', '4', '5'");

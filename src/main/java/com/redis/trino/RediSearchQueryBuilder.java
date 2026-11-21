@@ -149,6 +149,9 @@ public class RediSearchQueryBuilder {
 			return false;
 		}
 		Type type = column.getType();
+		// Boolean.parseBoolean also accepts uppercase TRUE and treats other present strings as false.
+		// A TAG query for canonical 'true'/'false' would exclude valid SQL matches.
+		if (type.equals(BOOLEAN)) { return false; }
 		switch (column.getFieldType()) {
 		case NUMERIC:
 			return isBigintPrefilter(column, domain) || isNumericType(type) && values.getRanges().getOrderedRanges().stream().allMatch(
@@ -345,18 +348,98 @@ public class RediSearchQueryBuilder {
 		return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
 	}
 
-	/** Exact substring LIKE, without wildcard expansion, normalization or tokenization. */
+	/** Exact simple LIKE shapes, without wildcard expansion, normalization or tokenization. */
 	static Optional<String> containsFilter(RediSearchColumnHandle column, String pattern) {
 		if (!column.isFilterable() || !(column.getType() instanceof VarcharType) || !isProperty(column.getName())
-				|| pattern.length() < 3 || !pattern.startsWith("%") || !pattern.endsWith("%")) {
+				|| FILTER_UNSUPPORTED_CHARACTERS.matcher(pattern).find() || pattern.indexOf('_') >= 0) {
 			return Optional.empty();
 		}
-		String literal = pattern.substring(1, pattern.length() - 1);
-		if (literal.indexOf('%') >= 0 || literal.indexOf('_') >= 0 || FILTER_UNSUPPORTED_CHARACTERS.matcher(literal).find()) {
+		boolean leading = pattern.startsWith("%");
+		boolean trailing = pattern.endsWith("%");
+		int start = leading ? 1 : 0;
+		int end = trailing && pattern.length() > start ? pattern.length() - 1 : pattern.length();
+		String literal = pattern.substring(start, end);
+		if (literal.indexOf('%') >= 0) {
 			return Optional.empty();
 		}
-		return Optional.of("exists(@" + column.getName() + ") && contains(@" + column.getName() + ", "
-				+ stringLiteral(literal) + ") > 0");
+		String field = property(column.getName());
+		String quoted = stringLiteral(literal);
+		String predicate;
+		if (literal.isEmpty() && (leading || trailing)) {
+			return Optional.of("exists(" + field + ")");
+		} else if (leading && trailing) {
+			predicate = "contains(" + field + ", " + quoted + ") > 0";
+		} else if (trailing) {
+			predicate = "startswith(" + field + ", " + quoted + ") > 0";
+		} else if (leading) {
+			// Let Redis calculate both lengths, so offsets use its own string representation for Unicode.
+			predicate = "strlen(" + field + ") >= strlen(" + quoted + ") && substr(" + field
+					+ ", strlen(" + field + ") - strlen(" + quoted + "), strlen(" + quoted + ")) == " + quoted;
+		} else {
+			predicate = field + " == " + quoted;
+		}
+		return Optional.of("exists(" + field + ") && " + predicate);
+	}
+
+	/** Only HASH callers may use these: a missing field is SQL NULL, including for unindexed columns. */
+	static Optional<String> presenceFilter(RediSearchColumnHandle column, Domain domain) {
+		if (column.isHidden() || column.getExpression().isPresent() || !isProperty(column.getName())) {
+			return Optional.empty();
+		}
+		if (domain.isOnlyNull()) {
+			return Optional.of("!exists(" + property(column.getName()) + ")");
+		}
+		if (!domain.isNullAllowed() && domain.getValues().isAll()) {
+			return Optional.of("exists(" + property(column.getName()) + ")");
+		}
+		return Optional.empty();
+	}
+
+	/** Matches exactly the HASH boolean decoder, including noncanonical values written by other clients. */
+	static Optional<String> booleanDomainFilter(RediSearchColumnHandle column, Domain domain) {
+		if (!column.getType().equals(BOOLEAN) || column.isHidden() || column.getExpression().isPresent()
+				|| !isProperty(column.getName()) || domain.isAll() || domain.isNone()) {
+			return Optional.empty();
+		}
+		String field = property(column.getName());
+		boolean yes = domain.includesNullableValue(true);
+		boolean no = domain.includesNullableValue(false);
+		if (!yes && !no) { return Optional.of("!exists(" + field + ")"); }
+		String match = "exists(" + field + ")";
+		if (!(yes && no)) {
+			match += " && lower(" + field + ") " + (yes ? "==" : "!=") + " \"true\"";
+		}
+		return Optional.of(domain.isNullAllowed() ? "!exists(" + field + ") || (" + match + ")" : match);
+	}
+
+	/** Exact SQL VARCHAR domains on loaded HASH strings, including nullable OR and lexical ranges. */
+	static Optional<String> stringDomainFilter(RediSearchColumnHandle column, Domain domain) {
+		if (!column.isFilterable() || !(column.getType() instanceof VarcharType) || !isProperty(column.getName())
+				|| domain.getValues().isAll() || domain.getValues().isNone()) {
+			return Optional.empty();
+		}
+		String field = property(column.getName());
+		List<String> alternatives = new ArrayList<>();
+		for (Range range : domain.getValues().getRanges().getOrderedRanges()) {
+			List<String> comparisons = new ArrayList<>();
+			if (!range.isLowUnbounded()) {
+				Slice boundary = (Slice) range.getLowBoundedValue();
+				String lower = boundary.toStringUtf8();
+				if (!io.airlift.slice.Slices.utf8Slice(lower).equals(boundary)
+						|| FILTER_UNSUPPORTED_CHARACTERS.matcher(lower).find()) { return Optional.empty(); }
+				comparisons.add(field + (range.isLowInclusive() ? " >= " : " > ") + stringLiteral(lower));
+			}
+			if (!range.isHighUnbounded()) {
+				Slice boundary = (Slice) range.getHighBoundedValue();
+				String upper = boundary.toStringUtf8();
+				if (!io.airlift.slice.Slices.utf8Slice(upper).equals(boundary)
+						|| FILTER_UNSUPPORTED_CHARACTERS.matcher(upper).find()) { return Optional.empty(); }
+				comparisons.add(field + (range.isHighInclusive() ? " <= " : " < ") + stringLiteral(upper));
+			}
+			alternatives.add("(" + String.join(" && ", comparisons) + ")");
+		}
+		String match = "exists(" + field + ") && (" + anyOf(alternatives) + ")";
+		return Optional.of(domain.isNullAllowed() ? "!exists(" + field + ") || (" + match + ")" : match);
 	}
 
 	/**
@@ -507,6 +590,9 @@ public class RediSearchQueryBuilder {
 	}
 
 	private Stream<Reducer> reducers(RediSearchAggregation aggregation) {
+		if (aggregation.isConditionalCount()) {
+			return Stream.of(Reducer.sum(property(aggregation.getHasValueField())).as(aggregation.getAlias()));
+		}
 		if (aggregation.isCountingValues()) {
 			// The sum, and the number of values it adds up
 			return Stream.of(Reducer.sum(property(aggregation.getValueField())).as(aggregation.getAlias()),
@@ -518,11 +604,16 @@ public class RediSearchQueryBuilder {
 	}
 
 	public Optional<GroupBy> group(RediSearchTableHandle table) {
+		return group(table, Map.of());
+	}
+
+	public Optional<GroupBy> group(RediSearchTableHandle table, Map<String, String> normalizedKeys) {
 		List<RediSearchAggregationTerm> terms = table.getTermAggregations();
 		List<RediSearchAggregation> aggregates = table.getMetricAggregations();
 		List<String> groupFields = new ArrayList<>();
 		if (terms != null && !terms.isEmpty()) {
-			groupFields = terms.stream().map(RediSearchAggregationTerm::getTerm).collect(Collectors.toList());
+			groupFields = terms.stream().map(RediSearchAggregationTerm::getTerm)
+					.map(field -> normalizedKeys.getOrDefault(field, field)).collect(Collectors.toList());
 		}
 		List<Reducer> reducers = aggregates.stream().flatMap(aggregation -> {
 			Stream<Reducer> values = reducers(aggregation);

@@ -18,6 +18,7 @@ import io.lettuce.core.search.arguments.TagFieldArgs;
 import io.lettuce.core.search.arguments.TextFieldArgs;
 import io.trino.spi.type.BigintType;
 import io.trino.sql.planner.plan.FilterNode;
+import io.trino.sql.planner.plan.AggregationNode;
 import io.trino.sql.planner.plan.ProjectNode;
 import io.trino.testing.AbstractTestQueryFramework;
 import io.trino.testing.QueryRunner;
@@ -33,6 +34,10 @@ public class TestWrites extends AbstractTestQueryFramework {
 		return Deployment.NON_SHARDED;
 	}
 
+	protected Map<String, String> writeProperties() {
+		return Map.of();
+	}
+
 	@Override
 	protected QueryRunner createQueryRunner() throws Exception {
 		redisearch = closeAfterClass(new RediSearchServer(deployment()));
@@ -43,7 +48,7 @@ public class TestWrites extends AbstractTestQueryFramework {
 						NumericFieldArgs.builder().name("$.score").as("score").build()));
 		redisearch.awaitIndexed("docs");
 		redis.jsonSet("doc:1", JsonPath.ROOT_PATH, "{\"id\": \"1\", \"message\": \"json doc\", \"score\": 3}");
-		return RediSearchQueryRunner.createRediSearchQueryRunner(redisearch);
+		return RediSearchQueryRunner.createRediSearchQueryRunner(redisearch, List.of(), Map.of(), writeProperties());
 	}
 
 	@Test
@@ -202,8 +207,10 @@ public class TestWrites extends AbstractTestQueryFramework {
 			assertExactAggregation("SELECT g, avg(b), avg(r), sum(r) FROM exact_aggregates GROUP BY g",
 					"VALUES (VARCHAR 'a', DOUBLE '1.5', REAL '0.15', REAL '0.3'), "
 							+ "(VARCHAR 'b', DOUBLE '2', REAL '0.1', REAL '0.1')");
-			assertExactAggregation("SELECT r, count(*) FROM exact_aggregates GROUP BY r",
-					"VALUES (REAL '0.1', BIGINT '2'), (REAL '0.2', BIGINT '1')");
+			// REAL decoding can collapse distinct external spellings, so grouping remains in Trino.
+			assertThat(query("SELECT r, count(*) FROM exact_aggregates GROUP BY r"))
+					.isNotFullyPushedDown(AggregationNode.class)
+					.matches("VALUES (REAL '0.1', BIGINT '2'), (REAL '0.2', BIGINT '1')");
 		} finally {
 			assertUpdate("DROP TABLE exact_aggregates");
 		}
@@ -327,24 +334,169 @@ public class TestWrites extends AbstractTestQueryFramework {
 
 	@Test
 	public void testUnsupportedColumnTypes() {
-		assertQueryFails("CREATE TABLE unsupported_types (t time)", "Unsupported column type: time\\(3\\)");
-		assertQueryFails("CREATE TABLE unsupported_types AS SELECT ARRAY[1] a",
-				"Unsupported column type: array\\(integer\\)");
+		assertQueryFails("CREATE TABLE unsupported_types AS SELECT INTERVAL '1' DAY a",
+				"Unsupported column type: interval day\\(1\\)");
 		assertThat(computeActual("SHOW TABLES LIKE 'unsupported_types'").getRowCount()).isZero();
 	}
 
 	@Test
 	public void testJsonIndexWrites() {
-		// The connector writes hashes, which a JSON index never sees
-		assertQueryFails("INSERT INTO docs (id, message, score) VALUES ('9', 'json insert', 1)",
-				"Index docs is on JSON documents; the connector only writes hashes, so only DELETE is supported");
-		assertQueryFails("UPDATE docs SET message = 'changed' WHERE id = '1'",
-				"Index docs is on JSON documents; the connector only writes hashes, so only DELETE is supported");
-		assertQueryFails("MERGE INTO docs t USING (VALUES ('9')) s(id) ON t.id = s.id "
-				+ "WHEN NOT MATCHED THEN INSERT (id) VALUES (s.id)",
-				"Index docs is on JSON documents; the connector only writes hashes, so only DELETE is supported");
-		assertThat(redisearch.getConnection().sync().keys("docs:*")).isEmpty();
+		assertUpdate("INSERT INTO docs (id, message, score) VALUES ('9', 'json insert', 1)", 1);
+		assertUpdate("UPDATE docs SET message = 'changed', score = 2 WHERE id = '9'", 1);
+		assertThat(query("SELECT message, score FROM docs WHERE id = '9'"))
+				.matches("VALUES (VARCHAR 'changed', DOUBLE '2')");
+		assertUpdate("UPDATE docs SET message = NULL WHERE id = '9'", 1);
+		assertThat(query("SELECT message FROM docs WHERE id = '9'"))
+				.matches("VALUES CAST(NULL AS varchar)");
+		assertUpdate("MERGE INTO docs t USING (VALUES ('9', 5), ('10', 6)) s(id, score) ON t.id = s.id "
+				+ "WHEN MATCHED THEN UPDATE SET score = s.score "
+				+ "WHEN NOT MATCHED THEN INSERT (id, score) VALUES (s.id, s.score)", 2);
+		assertThat(query("SELECT id, score FROM docs WHERE id IN ('9', '10')"))
+				.matches("VALUES (VARCHAR '9', DOUBLE '5'), (VARCHAR '10', DOUBLE '6')");
+		assertUpdate("DELETE FROM docs WHERE id IN ('9', '10')", 2);
 		assertThat(query("SELECT id, message, score FROM docs"))
 				.matches("VALUES (VARCHAR '1', VARCHAR 'json doc', DOUBLE '3')");
 	}
+
+	@Test
+	public void testJsonNestedWritesPreserveUnrelatedProperties() {
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		redis.ftCreate("nested_writes", CreateArgs.builder().on(TargetType.JSON).withPrefix("nested_write:").build(),
+				List.of(TagFieldArgs.builder().name("$.id").as("id").build(),
+						TagFieldArgs.builder().name("$.profile.name").as("display_name").build()));
+		redisearch.awaitIndexed("nested_writes");
+		redis.jsonSet("nested_write:existing", JsonPath.ROOT_PATH,
+				"{\"id\":\"existing\",\"profile\":{\"name\":\"old\",\"keep\":\"yes\"},\"other\":17}");
+		try {
+			assertUpdate("INSERT INTO nested_writes (id, display_name) VALUES ('new', 'Ada')", 1);
+			assertUpdate("UPDATE nested_writes SET display_name = 'Grace' WHERE id = 'existing'", 1);
+			assertThat(redis.jsonGetRaw("nested_write:existing", JsonPath.ROOT_PATH).toString())
+					.contains("keep", "yes", "other", "17", "Grace");
+			assertUpdate("UPDATE nested_writes SET display_name = NULL WHERE id = 'existing'", 1);
+			assertThat(query("SELECT id, display_name FROM nested_writes"))
+					.matches("VALUES (VARCHAR 'existing', CAST(NULL AS varchar)), (VARCHAR 'new', VARCHAR 'Ada')");
+			redis.jsonSet("nested_write:missing", JsonPath.ROOT_PATH, "{\"id\":\"missing\"}");
+			assertUpdate("UPDATE nested_writes SET display_name = 'created' WHERE id = 'missing'", 1);
+			assertThat(query("SELECT display_name FROM nested_writes WHERE id = 'missing'"))
+					.matches("VALUES VARCHAR 'created'");
+			assertQueryFails("INSERT INTO nested_writes (\"$\") VALUES ('{}')",
+					"JSON writes require an indexed scalar path for column: \\$");
+		} finally {
+			assertUpdate("DROP TABLE nested_writes");
+		}
+	}
+
+	@Test
+	public void testEncodedScalarTypes() {
+		assertUpdate("CREATE TABLE encoded_types (b varbinary, t time(12), ts timestamp(6), early timestamp(0))");
+		try {
+			assertUpdate("INSERT INTO encoded_types VALUES (X'00FF8041', TIME '23:59:59.123456789012', "
+					+ "TIMESTAMP '1969-12-31 23:59:59.123456', TIMESTAMP '2024-01-02 03:04:05')", 1);
+			assertThat(query("SELECT * FROM encoded_types"))
+					.matches("VALUES (X'00FF8041', TIME '23:59:59.123456789012', "
+							+ "TIMESTAMP '1969-12-31 23:59:59.123456', TIMESTAMP '2024-01-02 03:04:05')");
+			assertThat(query("SELECT count(*) FROM encoded_types WHERE b = X'00FF8041' AND "
+					+ "t > TIME '20:00:00' AND ts < TIMESTAMP '1970-01-01 00:00:00'"))
+					.matches("VALUES BIGINT '1'");
+		} finally {
+			assertUpdate("DROP TABLE encoded_types");
+		}
+	}
+	@Test
+	public void testComplexAndFullPrecisionTypes() {
+		assertUpdate("CREATE TABLE complex_types (a array(bigint), m map(integer, array(varchar)), "
+				+ "r row(x bigint, y varchar), j json, ts timestamp(12), z timestamp(12) with time zone, "
+				+ "t time(12) with time zone)");
+		String values = "(ARRAY[BIGINT '9007199254740993', NULL], CAST(MAP(ARRAY[1], ARRAY[ARRAY['x', NULL]]) AS MAP(INTEGER, ARRAY(VARCHAR))), "
+				+ "CAST(ROW(BIGINT '9007199254740993', 'y') AS ROW(x bigint, y varchar)), JSON '{\"a\":[true,null]}', "
+				+ "TIMESTAMP '1969-12-31 23:59:59.123456789012', TIMESTAMP '2024-01-02 03:04:05.123456789012 UTC', "
+				+ "TIME '12:34:56.123456789012-07:00')";
+		try {
+			assertUpdate("INSERT INTO complex_types VALUES " + values, 1);
+			assertThat(query("SELECT a, m, r, json_format(j), ts, z, t FROM complex_types"))
+					.matches("SELECT a, m, r, json_format(j), ts, z, t FROM (VALUES " + values + ") v(a,m,r,j,ts,z,t)");
+			assertUpdate("CREATE TABLE complex_copy AS SELECT * FROM complex_types", 1);
+			try {
+				assertThat(query("SELECT a, m, r, json_format(j), ts, z, t FROM complex_copy"))
+						.matches("SELECT a, m, r, json_format(j), ts, z, t FROM complex_types");
+			} finally {
+				assertUpdate("DROP TABLE complex_copy");
+			}
+		} finally {
+			assertUpdate("DROP TABLE complex_types");
+		}
+	}
+
+	@Test
+	public void testNullOnlyHashRowsSurvive() {
+		assertUpdate("CREATE TABLE null_only_rows (x bigint)");
+		try {
+			assertUpdate("INSERT INTO null_only_rows VALUES (NULL), (1)", 2);
+			assertThat(query("SELECT x FROM null_only_rows"))
+					.matches("VALUES CAST(NULL AS bigint), BIGINT '1'");
+			assertUpdate("UPDATE null_only_rows SET x = NULL WHERE x = 1", 1);
+			assertThat(query("SELECT * FROM null_only_rows"))
+					.matches("VALUES CAST(NULL AS bigint), CAST(NULL AS bigint)");
+			assertThat(query("SHOW COLUMNS FROM null_only_rows"))
+					.matches("SELECT CAST('x' AS varchar), CAST('bigint' AS varchar), CAST('' AS varchar), CAST('' AS varchar)");
+			assertThat(query("SELECT count(*) FROM null_only_rows WHERE x IS NULL")).matches("VALUES BIGINT '2'");
+		} finally {
+			assertUpdate("DROP TABLE null_only_rows");
+		}
+	}
+
+	@Test
+	public void testReservedHashMarkerCannotOverwriteApplicationFields() {
+		assertQueryFails("CREATE TABLE marker_reserved (__trino_row_marker varchar)",
+				"Column name is reserved for connector row storage: __trino_row_marker");
+		assertUpdate("CREATE TABLE marker_reserved (id varchar)");
+		try {
+			assertQueryFails("ALTER TABLE marker_reserved ADD COLUMN __trino_row_marker varchar",
+					"Column name is reserved for connector row storage: __trino_row_marker");
+		} finally {
+			assertUpdate("DROP TABLE marker_reserved");
+		}
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		redis.ftCreate("marker_external", CreateArgs.builder().withPrefix("marker_external:").build(),
+				List.of(TagFieldArgs.builder().name(RediSearchSession.ROW_MARKER).as("application_value").build()));
+		redisearch.awaitIndexed("marker_external");
+		redis.hset("marker_external:1", RediSearchSession.ROW_MARKER, "application data");
+		try {
+			assertQueryFails("INSERT INTO marker_external (application_value) VALUES ('overwrite')",
+					"HASH writes cannot overwrite the reserved row marker field: __trino_row_marker");
+			assertQueryFails("UPDATE marker_external SET application_value = 'overwrite'",
+					"HASH writes cannot overwrite the reserved row marker field: __trino_row_marker");
+			assertThat(redis.hget("marker_external:1", RediSearchSession.ROW_MARKER)).isEqualTo("application data");
+		} finally {
+			assertUpdate("DROP TABLE marker_external");
+		}
+	}
+
+	@Test
+	public void testHashWritesResolveIndexedAliases() {
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		redis.ftCreate("hash_alias_writes", CreateArgs.builder().withPrefix("hash_alias_write:").build(),
+				List.of(TagFieldArgs.builder().name("raw_name").as("sql_name").build()));
+		redisearch.awaitIndexed("hash_alias_writes");
+		redis.hset("hash_alias_write:seed", "raw_name", "seed");
+		try {
+			assertUpdate("INSERT INTO hash_alias_writes (sql_name) VALUES ('new')", 1);
+			String key = (String) computeActual("SELECT __key FROM hash_alias_writes WHERE sql_name = 'new'").getOnlyValue();
+			assertThat(redis.hget(key, "raw_name")).isEqualTo("new");
+			assertThat(redis.hexists(key, "sql_name")).isFalse();
+			assertUpdate("UPDATE hash_alias_writes SET sql_name = 'changed' WHERE sql_name = 'new'", 1);
+			assertThat(redis.hget(key, "raw_name")).isEqualTo("changed");
+			assertUpdate("UPDATE hash_alias_writes SET sql_name = NULL WHERE sql_name = 'changed'", 1);
+			assertThat(redis.hget(key, "raw_name")).isNull();
+			assertThat(query("SELECT count(*) FROM hash_alias_writes WHERE sql_name IS NULL")).matches("VALUES BIGINT '1'");
+			assertQueryFails("INSERT INTO hash_alias_writes (sql_name, raw_name) VALUES ('a', 'b')",
+					"Conflicting assignments to aliases of HASH field: raw_name");
+			assertQueryFails("UPDATE hash_alias_writes SET sql_name = 'a', raw_name = 'b' WHERE sql_name = 'seed'",
+					"Conflicting assignments to aliases of HASH field: raw_name");
+			assertThat(redis.hget("hash_alias_write:seed", "raw_name")).isEqualTo("seed");
+		} finally {
+			assertUpdate("DROP TABLE hash_alias_writes");
+		}
+	}
+
 }

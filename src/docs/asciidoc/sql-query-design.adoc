@@ -1,0 +1,104 @@
+= SQL query execution: implemented extensions and next steps
+
+This design records the work for issues #175–#182.
+It distinguishes SQL that Trino already evaluates from operations translated to Redis.
+The acceptance tests accompanying code are the executable contract; the proposals below do not advertise unimplemented features.
+
+== Implemented extensions
+
+[cols="1,3,3",options="header"]
+|===
+|Issue |New execution path |Bounds and remaining work
+|#175
+|`TABLE(catalog.system.search(TABLE_NAME => 'places', QUERY => '@name:redis', SCHEMA_NAME => 'default'))` exposes explicit native Search predicates through the normal typed cursor scan. The schema argument defaults to the catalog's configured schema. Full-text and GEO predicates can compose with SQL filters and aggregations.
+|The function checks SELECT access to the underlying table's output columns, including its exposed `__key`. Query text is one Redis command argument; it is never reinterpreted as a SQL equality predicate. Vector parameters, distance/score columns and GEOSHAPE typed APIs are not implemented.
+|#176
+|HASH `count(column)` sums a loaded field's existence indicator. `count_if(boolean_column)` sums the true-value indicator of a direct stored BOOLEAN HASH column, matching the row reader's case-insensitive boolean interpretation. The SPI translator can also translate simple BOOLEAN filters if supplied directly.
+|SQL NULL is an absent HASH field. Indicator sums require a known document count below 2^53; the existing runtime COUNT guard checks index growth. Trino 484 turns SQL aggregate FILTER clauses into masks before connector pushdown, so those clauses remain in Trino despite the SPI capability. JSON, DISTINCT aggregate calls, ordered aggregates, computed boolean filters and filtered MIN/MAX remain in Trino.
+|#177
+|Grouping-only HASH aggregation uses Redis GROUPBY with an internal, unprojected COUNT reducer. This supports SELECT DISTINCT and enables Trino's single-DISTINCT rewrite to transfer distinct keys before its final aggregate.
+|The existing unfiltered document-count/group budget applies. NULL keys are retained so Trino can apply COUNT's NULL semantics. Unsafe BIGINT/DECIMAL, decoded BOOLEAN/UUID/CHAR/DATE/REAL, timestamp and encoded-type grouping retains Trino execution. This is exact key grouping, not approximate distinct counting.
+|#178
+|DOUBLE group keys use a synthetic `case(exists(@field), @field + 0, NULL)` expression so Redis's separate -0 and +0 hash keys become one SQL group. Original source fields remain intact for reducers and arithmetic, and original output names are restored after grouping.
+|This requires the probed `case()` capability. Aliases avoid source/output collisions. Other exact numeric/grouping extensions below remain proposals.
+|#179
+|HASH `IS NULL` and `IS NOT NULL` use loaded-value `exists()` pipeline predicates. BOOLEAN domains use loaded case-insensitive true detection, matching the decoder even for external `TRUE` and non-true strings; unsafe canonical TAG prefilters are not used, including in dynamic filters. Loaded VARCHAR domains support exact lexical comparisons, equality values not expressible as TAG queries, and nullable OR domains. Simple literal, prefix, suffix and contains LIKE shapes use exact string functions before grouping, ordering or LIMIT.
+|JSON remains in Trino. LIKE with an interior wildcard, `_`, ESCAPE or unsupported controls retains its residual. Suffix offsets use Redis strlen for both operands, avoiding Java UTF-16 length assumptions; tests include non-ASCII and supplementary characters. Lexical bounds containing controls retain Trino filtering.
+|#180
+|The existing bounded late-materialization TopN path now handles BIGINT and VARCHAR as well as TIMESTAMP(3). A scan selects exact keys and order values; only winning documents' projected fields are fetched.
+|One indexed HASH sort key, NULLS LAST, LIMIT at most 1,000. BIGINT uses exact stored integer recovery; VARCHAR uses Trino-compatible UTF-8 byte ordering rather than Java UTF-16 ordering. Selection batches, retained winner keys and hydration allocations reserve Trino memory, with failure cleanup. It still scans matching keys. DECIMAL, JSON, multiple keys and NULLS FIRST require further work.
+|#181
+|Grouping-only aggregation, formerly rejected because no SQL reducer was present, is now accepted within the existing exact grouping contract.
+|Joins, windows, multiple grouping sets and aggregates over a grouped handle still execute in Trino. Dynamic join filtering remains available.
+|#182
+|DEBUG diagnostics identify aggregation disabled by configuration, preexisting limit/order/grouping, multiple grouping sets, unsafe grouping keys, conditional JSON aggregates, row-count precision limits, RESP2 floating results and retained predicates.
+|No precision, residual-filter, cardinality, retry or RESP2 safeguard is removed. Exposing these reasons directly in EXPLAIN needs a stable plan annotation rather than mutable coordinator state.
+|===
+
+== #175: extending the explicit native Search API
+
+The implemented read-only `system.search(table_name, query, schema_name)` table function returns the table's declared columns and its Redis `__key`.
+The analyzer resolves the table and its types before execution and checks underlying column SELECT privileges.
+Its serialized table handle preserves the native query while normal filters, grouping, ordering and scan partitions are applied.
+The existing cursor, timeout, incomplete-result detection, cancellation and metrics paths are reused.
+
+Further work should add a typed parameters argument, typed/vector/geo wrappers, and explicit score/distance columns once their output contracts are defined.
+Values need separate parameter binding rather than manual concatenation into native query text.
+KNN ranking, full-text scores and GEOSHAPE relations need independent tests because their order/score semantics differ.
+Acceptance for those extensions requires raw Redis versus SQL comparison for text stopwords/stemming, geo units/coordinates, vector dimensionality/distance, invalid parameters, HASH/JSON and sharded deployments.
+
+== #177: extending exact DISTINCT
+
+The current grouping path is a first stage, not the final DISTINCT optimization.
+The next stage can recognize a single global COUNT DISTINCT over an already grouped handle and add a second GROUPBY/COUNT pipeline, excluding only its NULL key before counting.
+For grouped COUNT DISTINCT, a two-stage plan groups `(SQL group keys, distinct value)` and then reduces by the original keys; groups containing only NULL distinct values must still produce zero rather than disappear.
+The handle must represent pipeline stages explicitly so a subsequent filter/limit cannot be moved across the wrong aggregation.
+
+Redis documents COUNT_DISTINCT as hash-set based and memory heavy, and COUNT_DISTINCTISH as approximate.
+The latter is not a replacement for exact SQL COUNT DISTINCT.
+Grouping raw HASH BIGINT text is insufficient: `1`, `01` and `1.0` can be the same SQL integer, while loading NUMERIC doubles can merge neighboring large IDs.
+Canonicalization or exact source representation is required before moving those groups to Redis.
+A measured memory budget and server cardinality/failure behavior must accompany any wider eligibility; a cached count cannot prevent concurrent growth.
+
+== #178: numeric arithmetic and grouping
+
+Existing integer widening bounds limit every intermediate sum, including before positive and negative values cancel.
+Unknown counts or values outside the exact double range cannot simply be enabled.
+DOUBLE signed-zero normalization now runs before grouping on a synthetic key; missing inputs stay NULL and source signs remain available to arithmetic reducers.
+BOOLEAN case, UUID case, CHAR padding, optional ISO_DATE offsets and REAL narrowing can collapse different stored representations to one SQL value; those groups remain in Trino until a canonical key translator exists.
+Candidate extensions include exact decimal/integer accumulation in the connector near the scan, typed canonical group keys, and capability-specific server expressions with proof of overflow behavior.
+DECIMAL grouping must normalize scale, and arithmetic MIN/MAX must preserve Trino NaN ordering.
+Each implementation needs boundary fixtures around 2^53, integer extrema, decimal scale/precision, NaN/infinities, all-NULL groups and multi-shard cancellation.
+
+== #179 and #180: further predicates and ordering
+
+VARCHAR range translation compares loaded HASH strings with quoted string bounds, avoiding numeric coercion.
+Tests establish ordering of numeric-looking strings, empty values, Unicode and nullable OR domains; bounds containing controls remain in Trino.
+The pipeline comparison saves transfer without claiming an index seek.
+Loading a field precedes testing existence, and nullable domains explicitly include the missing-field alternative.
+
+The bounded local TopN strategy can be extended independently of native Redis SORTBY.
+Multiple keys need a typed comparator per position, including exact DECIMAL scale handling, and a memory bound covering variable-width keys.
+NULLS FIRST can be implemented in the comparator without relying on Redis's missing-value order.
+JSON needs an equivalent deferred document-projection operation and an explicit scalar extraction contract.
+Benchmarks should report keys scanned, exact value fetches, projected document fetches, cursor batches, heap memory and final rows, not only wall time.
+
+== #181: relational execution and Trino 484 planner boundaries
+
+Trino 484's `PushAggregationIntoTableScan` rule accepts one grouping set, simple-reference aggregate arguments, no masks, and a direct TableScan source.
+Aggregate FILTER is passed as a BOOLEAN Variable; a comparison such as `x > 5` normally needs a projected boolean expression first.
+Therefore general filtered aggregate support requires a nullable boolean projection translator, not merely removing `getFilter()` checks.
+That translator must preserve three-valued logic and be usable both by scan evaluation and server APPLY expressions.
+
+Same-catalog joins could use connector `applyJoin` only after a proven backend execution strategy exists; Redis Query Engine has no general relational join operator corresponding to that SPI.
+Dynamic filtering, exact key lookups, late materialization or connector-side hash joins are possible separate strategies, each requiring a bounded memory and concurrency model.
+Cross-catalog joins continue to use Trino.
+Windows require partition-local ordering and frame semantics; Redis group reducers do not provide SQL windows.
+Possible first workloads are bounded top-k per partition with an explicit table function, while general windows remain in Trino.
+Multiple grouping sets can be decomposed into separate server aggregates plus a Trino union, but need snapshot/concurrency semantics and GROUPING identity handling; a direct single GROUPBY translation is insufficient.
+
+== Primary references
+
+* https://redis.io/docs/latest/develop/ai/search-and-query/advanced-concepts/aggregations/[Redis aggregate pipeline, reducers and string/existence functions]
+* https://github.com/trinodb/trino/blob/484/core/trino-main/src/main/java/io/trino/sql/planner/iterative/rule/PushAggregationIntoTableScan.java[Trino 484 aggregation pushdown rule]
+* https://github.com/RediSearch/RediSearch/blob/v2.10.10/src/aggregate/reducers/count_distinct.c[Redis Search reducer NULL and hash-state implementation, historical version]

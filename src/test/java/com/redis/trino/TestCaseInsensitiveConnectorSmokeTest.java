@@ -4,10 +4,12 @@ import static io.trino.tpch.TpchTable.CUSTOMER;
 import static io.trino.tpch.TpchTable.NATION;
 import static io.trino.tpch.TpchTable.ORDERS;
 import static io.trino.tpch.TpchTable.REGION;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import java.text.MessageFormat;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -15,6 +17,7 @@ import com.google.common.collect.ImmutableMap;
 
 import io.lettuce.core.api.sync.RedisCommands;
 import io.lettuce.core.search.arguments.CreateArgs;
+import io.lettuce.core.search.arguments.NumericFieldArgs;
 import io.lettuce.core.search.arguments.TagFieldArgs;
 import io.trino.testing.BaseConnectorSmokeTest;
 import io.trino.testing.QueryRunner;
@@ -37,15 +40,15 @@ public class TestCaseInsensitiveConnectorSmokeTest extends BaseConnectorSmokeTes
 	protected boolean hasBehavior(TestingConnectorBehavior connectorBehavior) {
 		switch (connectorBehavior) {
 		case SUPPORTS_CREATE_SCHEMA:
-		case SUPPORTS_CREATE_VIEW:
 		case SUPPORTS_CREATE_MATERIALIZED_VIEW:
 			return false;
 
+		case SUPPORTS_CREATE_VIEW:
 		case SUPPORTS_CREATE_TABLE:
 			return true;
 
 		case SUPPORTS_ARRAY:
-			return false;
+			return true;
 
 		case SUPPORTS_DROP_COLUMN:
 		case SUPPORTS_RENAME_COLUMN:
@@ -54,9 +57,11 @@ public class TestCaseInsensitiveConnectorSmokeTest extends BaseConnectorSmokeTes
 
 		case SUPPORTS_COMMENT_ON_TABLE:
 		case SUPPORTS_COMMENT_ON_COLUMN:
-			return false;
+			return true;
 
 		case SUPPORTS_TOPN_PUSHDOWN:
+			// Optimization is limited by type, number of sort keys and limit; Trino retains the final sort.
+			// Dedicated tests cover the supported server and late-materialization paths.
 			return false;
 
 		case SUPPORTS_NOT_NULL_CONSTRAINT:
@@ -69,7 +74,7 @@ public class TestCaseInsensitiveConnectorSmokeTest extends BaseConnectorSmokeTes
 			return true;
 
 		case SUPPORTS_TRUNCATE:
-			return false;
+			return true;
 
 		case SUPPORTS_RENAME_TABLE_ACROSS_SCHEMAS:
 			return false;
@@ -89,6 +94,36 @@ public class TestCaseInsensitiveConnectorSmokeTest extends BaseConnectorSmokeTes
 
 		default:
 			return super.hasBehavior(connectorBehavior);
+		}
+	}
+
+	@Test
+	public void testRestrictedTopNWithCaseInsensitiveNames() {
+		var redis = redisearch.getConnection().sync();
+		String index = "MixedCaseRanks";
+		redis.ftCreate(index, CreateArgs.builder().withPrefix("mixed_rank:").build(), List.of(
+				TagFieldArgs.builder().name("id").build(), NumericFieldArgs.builder().name("score").build()));
+		redis.hset("mixed_rank:1", Map.of("id", "z", "score", "1"));
+		redis.hset("mixed_rank:2", Map.of("id", "b", "score", "2"));
+		redis.hset("mixed_rank:3", Map.of("id", "a", "score", "3"));
+		redis.hset("mixed_rank:4", Map.of("id", "missing"));
+		redisearch.awaitIndexed(index);
+		try {
+			var numeric = getDistributedQueryRunner().executeWithPlan(getSession(),
+					"SELECT id FROM MIXEDCASERANKS ORDER BY score DESC LIMIT 2");
+			assertThat(numeric.result().getOnlyColumn()).containsExactly("a", "b");
+			assertThat(getDistributedQueryRunner().getCoordinator().getQueryManager()
+					.getFullQueryInfo(numeric.queryId()).getQueryStats().getPhysicalInputPositions()).isEqualTo(2);
+			// Multiple keys with VARCHAR and NULLS FIRST still require Trino ordering.
+			var strings = getDistributedQueryRunner().executeWithPlan(getSession(),
+					"SELECT id FROM mixedcaseranks ORDER BY id, score LIMIT 1");
+			assertThat(strings.result().getOnlyValue()).isEqualTo("a");
+			assertThat(getDistributedQueryRunner().getCoordinator().getQueryManager()
+					.getFullQueryInfo(strings.queryId()).getQueryStats().getPhysicalInputPositions()).isEqualTo(4);
+			assertThat(computeActual("SELECT id FROM mixedcaseranks ORDER BY score NULLS FIRST LIMIT 1")
+					.getOnlyValue()).isEqualTo("missing");
+		} finally {
+			redis.ftDropindex(index, true);
 		}
 	}
 

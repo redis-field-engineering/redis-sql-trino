@@ -225,7 +225,7 @@ class TestCursorReplay {
             client.setOptions(options.build());
             client.addListener(new RedisConnectionStateListener() {
                 @Override
-                public void onRedisConnected(RedisChannelHandler<?, ?> connection) {
+                public void onRedisConnected(RedisChannelHandler<?, ?> connection, java.net.SocketAddress address) {
                     if (activations.incrementAndGet() > 1) {
                         reconnected.countDown();
                     }

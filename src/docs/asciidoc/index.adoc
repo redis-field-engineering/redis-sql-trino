@@ -37,12 +37,12 @@ This guide describes the current connector source; use a release with the matchi
 |Component |Requirement
 |Trino |{trino-version}. The connector uses Trino's plugin interface; do not assume a plugin built for another Trino release is compatible.
 |Java |64-bit Java 25, at least 25.0.1, for Trino {trino-version}. Use Eclipse Temurin for building this project; its Maven rules accept Temurin or Oracle. The stock Trino container includes its runtime.
-|Redis |A database with the Query Engine and working `FT._LIST`, `FT.INFO`, `FT.SEARCH` and `FT.AGGREGATE`. The default RAM reader also requires `FT.CURSOR`; Software Flex uses the explicit <<flex-reads,cursor-free mode>>. HASH and JSON indexes are readable; creating and updating rows requires HASH indexes.
+|Redis |A database with the Query Engine and working `FT._LIST`, `FT.INFO`, `FT.SEARCH` and `FT.AGGREGATE`. The default RAM reader also requires `FT.CURSOR`; Software Flex uses the explicit <<flex-reads,cursor-free mode>>. HASH and JSON indexes are readable; JSON writes on RAM require supported scalar object paths and `JSON.SET`/`JSON.MERGE`.
 |Network |The coordinator and every Trino worker must reach the Redis endpoint. With the OSS Cluster API enabled, they must also reach the addresses advertised by the cluster.
 |===
 
 Redis Software and Redis Cloud RAM databases are the default development and benchmark targets.
-Redis 8 includes the Query Engine; the optional Open Source example uses `redis:8.4`.
+Redis 8 includes the Query Engine; the optional Open Source example uses `redis:8.10.3`.
 Redis Stack 7.x also includes Search and JSON, but some aggregation expressions need newer Query Engine capabilities.
 The connector probes support for `case()` before using the corresponding aggregation path; see <<aggregations,aggregation correctness>>.
 
@@ -239,6 +239,10 @@ redisearch.uri=redis://localhost:6379
 |`redisearch.aggregation-pushdown.enabled`
 |Compute supported aggregations in Redis. Set to `false` to compute them in Trino from cursor batches when large aggregations interfere with latency-sensitive queries. This transfers more rows and can make aggregations substantially slower. Filters still push down.
 |`true`
+
+|`redisearch.atomic-hash-updates.enabled`
+|Use one single-key Lua script for each HASH UPDATE/MERGE update, preventing interleaved HSET/HDEL visibility. Requires EVAL and underlying command ACLs and adds script overhead. Does not enable multi-row transactions, rollback or retry-safe writes.
+|`false`
 
 |`redisearch.table-cache-refresh`
 |Seconds after which the connector describes a cached index again (`FT.INFO`, its saved column types and a few documents), in the background: queries keep planning with the cached schema meanwhile. An index no query reads for ten times as long is dropped from the cache, and the next query waits for it. Fields added and indexes dropped outside Trino can take this long to show. `0` disables the cache.
@@ -476,7 +480,7 @@ Use fully qualified `catalog.schema.table` names when a client has no default ca
 <<pushdown,Pushdown>> describes which parts run in Redis.
 
 |`SHOW SCHEMAS`, `SHOW TABLES`, `SHOW COLUMNS`, `DESCRIBE`, `SHOW CREATE TABLE`, `information_schema`
-|`SHOW TABLES` lists the indexes returned by `FT._LIST`.
+|`SHOW TABLES` lists the indexes returned by `FT._LIST` and stored SQL views.
 
 |`EXPLAIN`
 |The table scan shows the filters, limit and aggregations sent to Redis.
@@ -489,24 +493,33 @@ Use fully qualified `catalog.schema.table` names when a client has no default ca
 |Columns get the same <<create-table-types,field types>> as in `CREATE TABLE`. A query with a column of another type fails before the table is created.
 
 |`INSERT`, `INSERT \... SELECT`
-|Hash indexes only: the connector writes hashes, which an index on JSON documents never sees, so it fails on a JSON index.
-Each row is a new hash with key `<prefix><ULID>`, where `<prefix>` is the index's first key prefix.
+|Writes hashes or JSON documents, with JSON restricted to indexed scalar object paths.
+Each row has a new key `<prefix><ULID>`, where `<prefix>` is the index's first key prefix.
 
 |`UPDATE`
-|Hash indexes only. Setting a column to `NULL` removes the field from the hash.
+|Writes HASH fields or a JSON object merge-patch. Setting a column to `NULL` removes the HASH field or JSON leaf.
 
 |`DELETE`
 |Deletes the matching keys, on hash and JSON indexes.
 
 |`MERGE`
-|Hash indexes only, except that `WHEN MATCHED THEN DELETE` also works on JSON indexes.
+|Insert/update branches use the same HASH/JSON restrictions as INSERT and UPDATE; delete-only branches also work on other JSON mappings.
 
 |`ALTER TABLE \... ADD COLUMN`
-|Adds a field to the index with `FT.ALTER`. Columns are always added at the end.
+|Adds a field to the index with `FT.ALTER`. FIRST and AFTER positions are saved in the connector's type metadata; Redis field order is unchanged.
 Queries on the table <<index-not-ready,fail>> until Redis finishes reindexing its documents.
 
 |`DROP TABLE`
 |Drops the index *and deletes its documents* (`FT.DROPINDEX \... DD`).
+
+|`TRUNCATE TABLE`
+|Enumerates indexed keys to a temporary spool before pipelined single-key `UNLINK` batches. Keys disappear immediately; Redis reclaims value memory asynchronously. Preserves the index, declared types and comments. Concurrent writes are not isolated, and completed deletions are not rolled back on failure.
+
+|`CREATE VIEW`, `CREATE OR REPLACE VIEW`, `ALTER VIEW \... RENAME TO`, `DROP VIEW`
+|Persists ordinary SQL views. Rename is limited to the configured schema. Materialized views and view properties remain unsupported.
+
+|`COMMENT ON TABLE`, `COMMENT ON COLUMN`, `COMMENT ON VIEW`
+|Persists table, column, view and view-column comments. Assigning NULL clears a comment.
 |===
 
 These statements fail with a `This connector does not support \...` error:
@@ -514,12 +527,20 @@ These statements fail with a `This connector does not support \...` error:
 * `CREATE SCHEMA`, `DROP SCHEMA`, `ALTER SCHEMA`
 * `CREATE OR REPLACE TABLE`
 * `ALTER TABLE \... RENAME TO`, `DROP COLUMN`, `RENAME COLUMN`, `ALTER COLUMN \... SET DATA TYPE`
-* `TRUNCATE`
-* `COMMENT ON`
-* `CREATE VIEW`, `CREATE MATERIALIZED VIEW`
+* `CREATE MATERIALIZED VIEW`
 * Queries on table versions (`FOR VERSION AS OF`, `FOR TIMESTAMP AS OF`)
 
 Writes also fail when fault-tolerant execution is enabled (`retry-policy` other than `NONE`).
+
+=== Views and comments
+
+Ordinary SQL views are stored in the string key `__trino:views:v1:<schema>`, shared by catalogs using that schema on the same database.
+Table and column comments use `__trino:comments:v1:<index>`; view comments are part of the stored definition.
+Definitions preserve their owner/invoker mode, resolved catalog/schema and search path.
+Registry updates use a single-key compare-and-set script, work on Redis Cluster and require `GET`, `SET`, `DEL` and `EVAL` access to the metadata keys.
+Each registry is limited to 1 MiB; metadata is cached for one Trino metadata transaction and invalidated by that transaction's own changes.
+Deleting or evicting these keys removes their definitions/comments. An ACL that denies optional metadata reads leaves index discovery available but hides that optional metadata; mutations fail explicitly.
+`TRUNCATE` additionally requires `UNLINK` and temporary disk space proportional to the indexed key bytes.
 
 === Writing rows and changing tables
 
@@ -549,6 +570,8 @@ INSERT sends one pipelined `HSET` per row, using a generated ULID key under the 
 A prefix without a trailing `:` has one appended; if no usable prefix is found, the writer uses `<table>:`.
 An INSERT into an externally created index therefore requires a compatible key prefix for its rows to be indexed.
 NULL values and omitted columns are not written.
+HASH inserts and updates preserve an internal `__trino_row_marker` field so an all-NULL row continues to exist when its final ordinary field is removed.
+That field is reserved, excluded from schema sampling, and cannot be declared as a SQL column.
 SQL columns do not declare Redis keys or enforce primary-key uniqueness.
 Two INSERTs with the same `order_id` create two hashes.
 UPDATE and MERGE match SQL predicates; they do not turn an ordinary ID column into a uniqueness constraint.
@@ -593,9 +616,19 @@ For externally owned indexes, removing an index without its documents must be do
 |BOOLEAN, DATE
 |TAG
 |`true` or `false`, and ISO dates such as `2024-01-02`
+
+|VARBINARY, JSON, TIME(p), TIME(p) WITH TIME ZONE, and TIMESTAMP(p) with or without time zone where p differs from 3
+|TAG NOINDEX
+|Lossless text encodings; temporal precision 0 through 12 is supported. These encoded values are evaluated in Trino for predicates, grouping and ordering.
+
+|ARRAY, MAP, ROW of supported types
+|TAG NOINDEX
+|`trino:v1:` followed by a typed, lossless nested-value encoding. SQL NULLs, collection order and map-key types are preserved; structural operations run in Trino.
 |===
 
-Other types, such as ARRAY, MAP, ROW, VARBINARY and TIME, fail with `Unsupported column type`.
+Other types, including intervals, fail with `Unsupported column type`.
+The added encodings store whole HASH fields; they do not expose nested SQL values as native JSON or vector indexes.
+See {project-url}/blob/master/src/docs/asciidoc/sql-write-design.adoc[storage formats and remaining write protocol work] for interoperability details.
 
 [[column-types-key]]
 Redis keeps only each field's index type, which columns of several Trino types share.
@@ -619,6 +652,28 @@ To read the table with the default types instead, delete the key (`DEL __trino:c
 
 TAG fields created by the connector aren't full-text TEXT fields.
 They're `CASESENSITIVE` and split values into tags on the ASCII unit separator (`\x1f`) instead of `,`, so Redis can prefilter `=` and `IN` on values containing commas, and doesn't return rows that only differ in case.
+
+=== Native text and GEO search
+
+Use the explicit `system.search` table function for Redis Query Engine predicate syntax:
+
+[source,sql]
+----
+SELECT id, name
+FROM TABLE(redisearch.system.search(
+    TABLE_NAME => 'beers',
+    QUERY => '@name:pocus',
+    SCHEMA_NAME => 'default'))
+WHERE abv > 5;
+----
+
+`TABLE_NAME` and `QUERY` are required nonempty strings; `SCHEMA_NAME` defaults to the catalog's configured schema.
+The function resolves that table's typed columns and exposes `__key`; it checks underlying table-column SELECT privileges.
+Native full-text and GEO radius predicates are passed as one Query Engine query argument, combined with SQL filters using explicit parentheses.
+The normal cursor, timeout, incomplete-result, projection and aggregation paths still apply.
+This function deliberately accepts native query syntax; ordinary SQL equality retains its SQL semantics.
+Tables protected by row filters or column masks are currently rejected by this function.
+Vector parameter binding, vector distances, full-text scores and dedicated geospatial SQL functions are not yet exposed.
 
 [[execution]]
 == Execution and correctness
@@ -657,7 +712,7 @@ Unsafe large or unbounded BIGINT ranges, unsafe timestamp bounds, nullable domai
 Redis compares REAL values from their stored text (for example `1.1`), rather than the widened binary float (`1.100000023841858`).
 
 TAG fields::
-`=` and `IN` are eligible for VARCHAR, CHAR, BOOLEAN, DATE and UUID columns.
+`=` and `IN` are eligible for VARCHAR, CHAR, DATE and UUID columns.
 The connector compares values in their stored representation: for example `true`, `2024-01-02` or a lowercase UUID.
 DATE ranges of at most 1,000 days can become a list of date tags.
 +
@@ -675,13 +730,18 @@ A value made only of stop words, or a field on an index with custom `STOPWORDS`,
 This is SQL equality, not an SQL interface to arbitrary Redis full-text query syntax.
 
 Other string predicates::
-Trino evaluates `IS NULL`, `IS NOT NULL`, predicates combined with `OR ... IS NULL`, and VARCHAR inequality or range comparisons.
-On eligible HASH field names, `LIKE '%literal%'` can use an exact Redis `contains` filter when the literal has no additional `%` or `_` wildcard, ESCAPE clause or control character.
-Other LIKE patterns and JSON LIKE remain in Trino.
+On HASH indexes, loaded-value pipeline filters handle `IS NULL`, `IS NOT NULL`, and eligible VARCHAR equality, inequality, ranges and nullable domains.
+These filters can reduce transferred rows and allow later LIMIT/grouping; they do not imply an indexed lexical range lookup.
+Simple LIKE literal, prefix, suffix and contains patterns also run in Redis when there is no interior `%`, `_`, ESCAPE clause or unsupported control character.
+Other LIKE patterns and JSON LIKE remain in Trino; JSON NULL/range predicates also retain their existing fallback.
 Redis wildcard matching alone is insufficient for SQL LIKE correctness: its word boundaries, case handling and expansion limits differ.
 
 For control characters, unsupported field names and padded CHAR comparisons, exact equality can remain in Trino even when Redis supplies a prefilter.
 Use `EXPLAIN` to check the chosen plan rather than assuming every indexed predicate is fully consumed.
+
+HASH BOOLEAN domains use loaded-value existence and case-insensitive true-value comparisons, matching the row reader even when an external writer stores `TRUE` or a non-true string.
+Missing fields remain SQL NULL; non-true nonmissing strings follow the reader's false-value interpretation.
+Boolean dynamic join filters do not use a TAG prefilter that could exclude such stored values.
 
 [[aggregations]]
 ==== Aggregations
@@ -691,8 +751,11 @@ Numeric reducer inputs are REAL, DOUBLE and integer types; `min`/`max` also supp
 DECIMAL reducers stay in Trino.
 If one aggregate in the same aggregation cannot be translated, or Trino must filter input rows itself, Trino computes that aggregation.
 
-`count(column)`, DISTINCT aggregates and filtered aggregates stay in Trino.
-Redis's COUNT counts documents, whereas SQL `count(column)` excludes NULL values.
+On HASH indexes, `count(column)` sums loaded-field existence indicators instead of Redis's document COUNT, so it excludes SQL NULLs, including on unindexed fields.
+`count_if(boolean_column)` counts stored true values. Indicator sums use the same exact-integer row-count and runtime growth guards as integer sums.
+FILTER clauses currently become Trino aggregation masks and remain in Trino, even when the underlying BOOLEAN field is stored directly.
+Eligible HASH `SELECT DISTINCT` and single-DISTINCT rewrites can group exact keys in Redis within the existing group budget, transferring those keys for Trino's final counting step.
+Unsafe BIGINT/DECIMAL and encoded grouping retain Trino execution; no approximate distinct reducer replaces SQL's exact answer.
 Trino also evaluates HAVING after the groups are returned.
 
 For supported SUM and AVG fields, the connector computes a sum of present values and their count using `case()` and `exists()` expressions.
@@ -708,6 +771,7 @@ This preserves the Redis double result; it does not give arbitrary-precision dec
 With RESP2, eligible floating aggregations stay in Trino because precision can be lost between shards before the coordinator replies.
 
 NUMERIC-backed BIGINT grouping stays in Trino so adjacent large integers do not collapse into one double group.
+BOOLEAN, UUID, CHAR, REAL and TIMESTAMP(3) grouping also stay in Trino until stored spellings and narrowing can be normalized to the same SQL keys exactly.
 DECIMAL grouping and floating grouping with unsupported field names also stay in Trino.
 Other pushed-down BIGINT computations are exact only within double's integer precision range; reading exact stored values does not recover precision already lost in an aggregate.
 Widened INTEGER/SMALLINT/TINYINT SUM inputs have conservative document-count bounds; an unknown or excessive count retains Trino computation.
@@ -738,10 +802,11 @@ Trino sorts the returned candidates to produce the final order.
 BIGINT and DECIMAL sort keys do not use this path because Redis double ordering can lose precision.
 JSON ordering stays in Trino.
 
-A separate HASH optimization supports one TIMESTAMP(3) sort key, `NULLS LAST`, and a limit of at most 1,000.
+A separate HASH optimization supports one TIMESTAMP(3), BIGINT or VARCHAR sort key, `NULLS LAST`, and a limit of at most 1,000.
 It scans keys and exact order values, keeps a bounded set of candidates, and loads their projected fields with pipelined `HMGET` only after selection finishes.
 This reduces wide-row retrieval but still scans the matching keys.
-TIMESTAMP WITH TIME ZONE, multiple timestamp sort keys, larger limits and other null ordering remain in Trino.
+VARCHAR comparison uses UTF-8 byte order and BIGINT retains exact stored integers.
+TIMESTAMP WITH TIME ZONE, multiple keys on this path, larger limits and other null ordering remain in Trino.
 Selection checks the configured timeout over the scan and emits no candidates if it fails.
 
 ==== Joins and optimizer statistics
@@ -900,7 +965,7 @@ The statement and pushdown references above describe the supported paths.
 Additional limits to keep in mind:
 
 * Redis Query Engine indexes define the table set; arbitrary keyspace structures are not SQL tables.
-* JSON writes are limited to document deletion; INSERT and UPDATE require HASH indexes.
+* JSON INSERT/UPDATE/MERGE require supported indexed scalar object paths; arrays, wildcards, overlapping paths and whole-document replacement remain unsupported.
 * GEO, GEOSHAPE and VECTOR fields read as VARCHAR. This connector does not translate SQL into native geospatial or vector-similarity queries.
 * Type discovery samples unindexed fields and does not infer an exhaustive schema from every document.
 * NUMERIC indexing and Redis aggregation use doubles; stored-value recovery does not make every pushed-down numeric computation exact.
@@ -1007,6 +1072,14 @@ cd {github-repo}
 The distribution is `target/{artifact-id}-{project-version}.zip`; the unpacked plugin directory is `target/{artifact-id}-{project-version}/`.
 The build above skips tests.
 Run `./mvnw test` with Docker available for the integration suite; the default test environment provisions Redis Software.
+The Open Source compatibility suite starts disposable single-shard containers, selected with `redisearch.test.oss-image`:
+
+[source,console]
+----
+./mvnw test -Dredisearch.test.oss-image=redis:8.10.3 -Dtest=TestWrites,TestAtomicHashWrites,TestAtomicHashAcl,TestNativeSearch,TestAggregationPushdown,TestTagAndLikePushdown,TestSqlRelationMetadata,TestCursorReads
+----
+
+CI configures this suite for Redis 8.4 and 8.10.3; sharded test classes require the default Software environment.
 The README's {project-url}/blob/master/README.adoc#building-from-source[build and benchmark instructions] describe profiles for alternate Redis targets and the query benchmark.
 A source build uses the version in `pom.xml`, which can differ from the release version printed in this published guide.
 Set `REDIS_SQL_TRINO_VERSION` to the actual built version before using the repository's Compose file, rather than relying on its default directory name.

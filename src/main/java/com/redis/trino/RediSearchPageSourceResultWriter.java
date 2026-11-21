@@ -47,6 +47,7 @@ import static java.lang.Math.multiplyExact;
 import static java.lang.String.format;
 
 import java.math.BigDecimal;
+import java.util.Base64;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 
@@ -58,6 +59,8 @@ import io.trino.spi.type.CharType;
 import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.Int128;
 import io.trino.spi.type.Type;
+import io.trino.spi.type.TimeType;
+import io.trino.spi.type.VarbinaryType;
 import io.trino.spi.type.VarcharType;
 
 /**
@@ -80,6 +83,12 @@ public final class RediSearchPageSourceResultWriter {
 	 * The writer for a column's values, chosen once per column rather than for each value.
 	 */
 	public static ValueWriter writer(Type type) {
+		if (RediSearchComplexValues.isComplex(type)) {
+			return (output, value) -> RediSearchComplexValues.decode(type, output, value);
+		}
+		if (RediSearchTemporalValues.supports(type)) {
+			return (output, value) -> RediSearchTemporalValues.decode(type, output, value);
+		}
 		if (type.getBaseName().equals(JSON)) {
 			return (output, value) -> type.writeObject(output,
 					Json.unchecked(io.trino.plugin.base.util.JsonTypeUtil.jsonParse(utf8Slice(value))));
@@ -137,6 +146,16 @@ public final class RediSearchPageSourceResultWriter {
 		if (type.equals(TIMESTAMP_MILLIS)) {
 			return RediSearchPageSourceResultWriter::timestampMicros;
 		}
+		if (type instanceof TimeType time) {
+			return value -> {
+				long picos = parseInteger(type, value);
+				long step = (long) Math.pow(10, 12 - time.getPrecision());
+				if (picos < 0 || picos >= 86_400_000_000_000_000L || picos % step != 0) {
+					throw invalidValue(type, value);
+				}
+				return picos;
+			};
+		}
 		if (type.equals(TIMESTAMP_TZ_MILLIS)) {
 			return value -> packDateTimeWithZone(parseInteger(type, value), UTC_KEY);
 		}
@@ -151,7 +170,7 @@ public final class RediSearchPageSourceResultWriter {
 	}
 
 	// Redis returns the results of reducers, and other clients may write integers, in other forms, e.g. 42.0 or 4.2e1
-	private static long parseInteger(Type type, String value) {
+	static long parseInteger(Type type, String value) {
 		try {
 			return Long.parseLong(value);
 		} catch (NumberFormatException e) {
@@ -182,6 +201,9 @@ public final class RediSearchPageSourceResultWriter {
 		}
 		if (type instanceof CharType charType) {
 			return (output, value) -> type.writeSlice(output, truncateToLengthAndTrimSpaces(utf8Slice(value), charType));
+		}
+		if (type.equals(VarbinaryType.VARBINARY)) {
+			return (output, value) -> type.writeSlice(output, io.airlift.slice.Slices.wrappedBuffer(Base64.getDecoder().decode(value)));
 		}
 		if (type.equals(UUID)) {
 			return (output, value) -> type.writeSlice(output, javaUuidToTrinoUuid(java.util.UUID.fromString(value)));

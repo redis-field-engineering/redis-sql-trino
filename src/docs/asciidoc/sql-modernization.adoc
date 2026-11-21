@@ -1,0 +1,59 @@
+= SQL, Trino and Redis modernization
+
+This implementation revisits the gaps in https://github.com/redis-field-engineering/redis-sql-trino/issues/185[issue #185].
+The Trino 484 / Java 25 baseline is retained; this work adds capabilities and current SPI integration.
+Historical unsupported or not-planned decisions are context, not permanent restrictions.
+
+== Implementation status
+
+[cols="1,3,3",options="header"]
+|===
+|Issue |Implemented |Remaining work
+|#167 |Cluster-compatible namespace design |Multiple schemas and schema lifecycle
+|#168 |Ordinary views, replace, comments, same-schema rename and drop |Materialized views, refresh and authorization changes
+|#169 |ADD COLUMN FIRST/AFTER |Physical rename, drop and type conversion
+|#170 |HASH/JSON TRUNCATE with key spool and pipelined UNLINK |Safe table replacement
+|#171 |Durable table/column/view comments, atomic metadata and batched initialization |Lifecycle with future schema evolution
+|#172 |Scalar object-path JSON INSERT/UPDATE/MERGE and nested aliases |Arrays, wildcards and whole-document replacement
+|#173 |ARRAY/MAP/ROW, VARBINARY, JSON and full temporal precision on HASH |Native nested indexing and encoded-type predicates
+|#174 |Opt-in single-document HASH atomic update visibility |Multi-document transactions and retry-safe execution
+|#175 |Native text/GEO search table function with SQL composition |Vector binding, score/distance outputs and typed wrappers
+|#176 |HASH COUNT(column) and COUNT_IF(stored BOOLEAN) |General FILTER masks and computed conditions
+|#177 |Exact bounded DISTINCT key grouping before transfer |Multi-stage distinct reduction and wider canonical keys
+|#178 |Canonical grouping guards and exact boundary coverage |Further exact numeric/decimal and arithmetic strategies
+|#179 |HASH NULL, lexical VARCHAR and simple exact LIKE filters |General wildcards and broader JSON predicates
+|#180 |Exact BIGINT/VARCHAR late-materialized TopN |Multiple keys, other NULL ordering and JSON
+|#181 |Grouping-only pushdown and relational feasibility design |Join/window execution and multiple grouping sets
+|#182 |DEBUG rejection reasons and scan/TopN MemoryContext |Tighter proven bounds and EXPLAIN annotations
+|#183 |Reconciled statement/type/execution documentation |Keep references current as capabilities land
+|#184 |Accurate view/comment/array/TRUNCATE flags and restricted TopN tests |NOT NULL and negative-date capability contracts
+|===
+
+HASH writes resolve physical indexed aliases and preserve all-NULL rows with a reserved marker.
+Encoded complex values reject a top-level encoded NULL; nested NULLs remain valid.
+Grouping retains Trino execution when stored representations cannot yet be normalized to exact SQL equality.
+These restrictions can be replaced by proven normalization or another execution strategy.
+
+== Detailed designs
+
+* link:sql-metadata-design.adoc[Metadata, namespaces, views, evolution and replacement]
+* link:sql-write-design.adoc[JSON mapping, value encodings, atomic updates and retry protocol]
+* link:sql-query-design.adoc[Pushdown, Search, grouping, ordering and relational execution]
+
+== Validation environments
+
+Independent Maven test JVMs own separate Redis Software clusters; `redisearch.test.cluster-label` names their Docker containers and `redisearch.build-directory` isolates build output and reports.
+OSS compatibility tests use a disposable container per class; CI configures Redis 8.4 and 8.10.3.
+Software suites cover single-shard and OSS Cluster API databases; product tests load the packaged plugin in stock Trino.
+
+Performance assertions compare exact results, plans and source metrics: grouped DISTINCT transfers keys, conditional counts return aggregates, and local TopN loads projected fields for selected candidates.
+No new full-data ClickBench timings or comparative speedups are claimed.
+Paid Cloud qualification and existing Flex capability issues remain separate from Docker validation.
+
+Validation recorded on November 21, 2026:
+
+* Full `package` build with normal static checks and bounded JUnit parallelism: 491 tests reported, zero failures/errors, 12 expected skips.
+* Redis OSS 8.4 and 8.10.3 compatibility suites: 137 tests each, zero failures/errors/skips; the final Boolean predicate regression was also checked on each version.
+* Stock Trino 484 with the packaged plugin: 20 product cases, zero failures/errors/skips, including native Search, views/comments/TRUNCATE and native JSON/ARRAY/TIMESTAMP(12) round trips on normal and sharded databases.
+
+The tests used disposable, isolated Docker environments. Earlier overloaded parallel runs correctly rejected explicit backend timeout warnings; serialized retries passed without relaxing production timeout or incomplete-result safeguards.
