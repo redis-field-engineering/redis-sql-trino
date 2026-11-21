@@ -125,7 +125,9 @@ public class RedisEnterprise implements Closeable {
 
 	// The latest Redis Enterprise Software release; databases use the newest Redis version it supports
 	public static final DockerImageName IMAGE = DockerImageName.parse("redislabs/redis:8.2.0-78.18");
-	public static final DockerImageName FLEX_IMAGE = DockerImageName.parse("redislabs/redis:8.2.6-58");
+	// Software 8.2.6-58; the release label is not a published Docker tag. Pin the published amd64/arm64 image index.
+	public static final DockerImageName FLEX_IMAGE = DockerImageName.parse(
+			"redislabs/redis@sha256:679d117a56fc26cf94a394e2c2e619a51235b109254b189ae65f9da499b293e6");
 
 	private static final Logger log = Logger.get(RedisEnterprise.class);
 
