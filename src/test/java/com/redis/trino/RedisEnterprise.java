@@ -67,6 +67,8 @@ public class RedisEnterprise implements Closeable {
 		 * One shard, which clients reach through the database endpoint (redisearch.cluster=false).
 		 */
 		NON_SHARDED(1),
+		/** Software 8.2.6+ Search-on-Flex, through a single proxy endpoint. */
+		FLEX(1),
 		/**
 		 * Two shards behind the OSS Cluster API, which clients reach through the cluster topology
 		 * (redisearch.cluster=true).
@@ -123,6 +125,7 @@ public class RedisEnterprise implements Closeable {
 
 	// The latest Redis Enterprise Software release; databases use the newest Redis version it supports
 	public static final DockerImageName IMAGE = DockerImageName.parse("redislabs/redis:8.2.0-78.18");
+	public static final DockerImageName FLEX_IMAGE = DockerImageName.parse("redislabs/redis:8.2.6-58");
 
 	private static final Logger log = Logger.get(RedisEnterprise.class);
 
@@ -140,6 +143,8 @@ public class RedisEnterprise implements Closeable {
 	private static final JsonCodec<Object> JSON_BODY = JsonCodec.jsonCodec(Object.class);
 
 	private static RedisEnterprise shared;
+	private static RedisEnterprise sharedFlex;
+	private final boolean flashEnabled;
 
 	private final Optional<String> networkAlias;
 	private final String password = UUID.randomUUID().toString();
@@ -162,6 +167,14 @@ public class RedisEnterprise implements Closeable {
 		return shared;
 	}
 
+	public static synchronized RedisEnterprise sharedFlex() {
+		if (sharedFlex == null) {
+			sharedFlex = new RedisEnterprise(Optional.empty(), FLEX_IMAGE, true);
+			ReportLeakedContainers.ignoreContainerId(sharedFlex.container.getContainerId());
+		}
+		return sharedFlex;
+	}
+
 	/**
 	 * A cluster on {@code network} under {@code networkAlias}, for clients in other containers. Sharded databases
 	 * advertise the node's address on that network to cluster clients, instead of the host's.
@@ -176,17 +189,22 @@ public class RedisEnterprise implements Closeable {
 	// Sharded databases tell cluster clients to connect to <address>:<database port>, so each database port is
 	// published on the same host port
 	private static class NodeContainer extends GenericContainer<NodeContainer> {
-		NodeContainer(List<Integer> databasePorts) {
-			super(IMAGE);
+		NodeContainer(List<Integer> databasePorts, DockerImageName image) {
+			super(image);
 			databasePorts.forEach(port -> addFixedExposedPort(port, port));
 		}
 	}
 
 	private RedisEnterprise(Optional<Placement> placement) {
+		this(placement, IMAGE, false);
+	}
+
+	private RedisEnterprise(Optional<Placement> placement, DockerImageName image, boolean flashEnabled) {
+		this.flashEnabled = flashEnabled;
 		this.networkAlias = placement.map(Placement::alias);
 		List<Integer> ports = freeHostPorts();
 		freePorts.addAll(ports);
-		NodeContainer node = new NodeContainer(ports);
+		NodeContainer node = new NodeContainer(ports, image);
 		node.withExposedPorts(API_PORT)
 				.withCreateContainerCmdModifier(cmd -> cmd.getHostConfig().withCapAdd(Capability.SYS_RESOURCE))
 				.waitingFor(Wait.forHttps("/v1/bootstrap").forPort(API_PORT).allowInsecure().forStatusCode(200)
@@ -202,15 +220,21 @@ public class RedisEnterprise implements Closeable {
 			container.close();
 			throw e;
 		}
-		log.info("Started Redis Enterprise %s in %s s", IMAGE.getVersionPart(),
+		log.info("Started Redis Enterprise %s in %s s", image.getVersionPart(),
 				Duration.ofNanos(System.nanoTime() - start).toSeconds());
 	}
 
 	private void bootstrap(boolean advertiseHost) {
+		Map<String, Object> paths = new java.util.HashMap<>(Map.of("persistent_path", "/var/opt/redislabs/persist",
+				"ephemeral_path", "/var/opt/redislabs/tmp"));
+		Map<String, Object> nodeSpec = new java.util.HashMap<>();
+		if (flashEnabled) {
+			paths.put("bigstore_path", "/var/opt/redislabs/flash");
+			nodeSpec.put("bigstore_enabled", true);
+		}
+		nodeSpec.put("paths", paths);
 		request("POST", "/v1/bootstrap/create_cluster", ImmutableMap.of("action", "create_cluster", "cluster",
-				Map.of("name", "cluster.local"), "node",
-				Map.of("paths", Map.of("persistent_path", "/var/opt/redislabs/persist", "ephemeral_path",
-						"/var/opt/redislabs/tmp")),
+				Map.of("name", "cluster.local"), "node", nodeSpec,
 				"credentials", Map.of("username", USERNAME, "password", password)), false);
 		await("cluster bootstrap", () -> {
 			HttpResponse<String> response = send("GET", "/v1/bootstrap", null, false);
@@ -271,9 +295,14 @@ public class RedisEnterprise implements Closeable {
 		try {
 			ImmutableMap.Builder<String, Object> spec = ImmutableMap.<String, Object>builder()
 					.put("name", "db" + databaseCount.incrementAndGet()).put("type", "redis")
-					.put("memory_size", DATABASE_MEMORY).put("port", port).put("redis_version", redisVersion)
-					.put("module_list", List.of(Map.of("module_name", "search", "module_args", ""),
-							Map.of("module_name", "ReJSON", "module_args", "")));
+					.put("memory_size", deployment == Deployment.FLEX ? 1024L * 1024 * 1024 : DATABASE_MEMORY)
+					.put("port", port).put("redis_version", redisVersion);
+			if (deployment == Deployment.FLEX) {
+				spec.put("bigstore", true).put("bigstore_ram_size", DATABASE_MEMORY).put("search_on_bigstore", true);
+			} else {
+				spec.put("module_list", List.of(Map.of("module_name", "search", "module_args", ""),
+						Map.of("module_name", "ReJSON", "module_args", "")));
+			}
 			// Opt-in tuning for benchmarks; ordinary tests retain the database defaults.
 			int performanceFactor = Integer.getInteger("benchmark.query-performance-factor", 0);
 			if (performanceFactor > 0) {

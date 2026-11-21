@@ -60,7 +60,7 @@ public class RediSearchSplitManager implements ConnectorSplitManager {
 			ConnectorTableHandle table, Set<ColumnHandle> dynamicFilterColumns, Constraint constraint) {
 		List<RediSearchSplit> splits = List.of(new RediSearchSplit(addresses));
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
-		if (config.getScanSplits() != 1 && RediSearchScanPartition.isDocumentScan(handle)) {
+		if (!config.isFlexEnabled() && config.getScanSplits() != 1 && RediSearchScanPartition.isDocumentScan(handle)) {
 			RediSearchIndexInfo info = redisSession.getTable(handle.getSchemaTableName()).getIndexInfo();
 			List<RediSearchScanPartition> partitions = config.getScanSplits() == 0
 					? autoPlanner.plan(handle, info) : RediSearchScanPartition.plan(config, handle, info);
@@ -69,7 +69,7 @@ public class RediSearchSplitManager implements ConnectorSplitManager {
 						java.util.Optional.of(partition))).toList();
 			}
 		}
-		if (!config.isDynamicFilteringEnabled()
+		if (config.isFlexEnabled() || !config.isDynamicFilteringEnabled()
 				|| !acceptsDynamicFilter((RediSearchTableHandle) table, dynamicFilterColumns)) {
 			return new FixedSplitSource(splits);
 		}

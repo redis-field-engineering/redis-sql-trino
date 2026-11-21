@@ -271,6 +271,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	@Override
 	public ConnectorMergeTableHandle beginMerge(ConnectorSession session, ConnectorTableHandle tableHandle,
 			Map<Integer, Collection<ColumnHandle>> updateCaseColumns, RetryMode retryMode) {
+		rediSearchSession.verifyWritesSupported();
 		checkRetry(retryMode);
 		RediSearchTableHandle table = (RediSearchTableHandle) tableHandle;
 		// DELETE has no update cases and works on any index. Inserts from MERGE are checked by the merge sink, since
@@ -328,6 +329,10 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	@Override
 	public Optional<LimitApplicationResult<ConnectorTableHandle>> applyLimit(ConnectorSession session,
 			ConnectorTableHandle table, long limit) {
+		if (rediSearchSession.getConfig().isFlexEnabled()) {
+			return Optional.empty();
+		}
+
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
 
 		if (limit == 0) {
@@ -361,6 +366,10 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	@Override
 	public Optional<TopNApplicationResult<ConnectorTableHandle>> applyTopN(ConnectorSession session,
 			ConnectorTableHandle table, long topNCount, List<SortItem> sortItems, Map<String, ColumnHandle> assignments) {
+		if (rediSearchSession.getConfig().isFlexEnabled()) {
+			return Optional.empty();
+		}
+
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
 		// Sorting the first rows, or the groups, would differ from sorting the documents
 		if (handle.getLimit().isPresent() || !handle.getSort().isEmpty() || !handle.getTermAggregations().isEmpty()
@@ -396,6 +405,10 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	@Override
 	public Optional<ConstraintApplicationResult<ConnectorTableHandle>> applyFilter(ConnectorSession session,
 			ConnectorTableHandle table, Constraint constraint) {
+		if (rediSearchSession.getConfig().isFlexEnabled()) {
+			return Optional.empty();
+		}
+
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
 		// The first rows of a sort, filtered, aren't the first of the filtered rows
 		if (!handle.getSort().isEmpty() || handle.getLimit().isPresent()) {
@@ -515,7 +528,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			ConnectorTableHandle handle, List<AggregateFunction> aggregates, Map<String, ColumnHandle> assignments,
 			List<List<ColumnHandle>> groupingSets) {
 		log.debug("applyAggregation aggregates=%s groupingSets=%s", aggregates, groupingSets);
-		if (!rediSearchSession.getConfig().isAggregationPushdownEnabled()) {
+		if (rediSearchSession.getConfig().isFlexEnabled() || !rediSearchSession.getConfig().isAggregationPushdownEnabled()) {
 			return Optional.empty();
 		}
 		RediSearchTableHandle table = (RediSearchTableHandle) handle;

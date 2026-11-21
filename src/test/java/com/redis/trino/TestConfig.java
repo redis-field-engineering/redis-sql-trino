@@ -22,6 +22,7 @@ public class TestConfig {
 		assertRecordedDefaults(recordDefaults(RediSearchConfig.class).setUri(null).setInsecure(false).setUsername(null)
 				.setResp2(false).setPassword(null).setDefaultSchema(RediSearchConfig.DEFAULT_SCHEMA)
 				.setCaseInsensitiveNames(false)
+				.setFlexEnabled(false).setFlexBatchSize(1000)
 				.setCursorCount(RediSearchConfig.DEFAULT_CURSOR_COUNT)
 				.setQueryTimeoutMillis(0)
 				.setScanConnections(RediSearchConfig.DEFAULT_SCAN_CONNECTIONS)
@@ -40,6 +41,7 @@ public class TestConfig {
 		Map<String, String> properties = ImmutableMap.<String, String>builder().put("redisearch.uri", uri)
 				.put("redisearch.default-schema-name", defaultSchema).put("redisearch.resp2", "true")
 				.put("redisearch.aggregation-pushdown.enabled", "false")
+				.put("redisearch.flex.enabled", "true").put("redisearch.flex.batch-size", "23")
 				.put("redisearch.query-timeout-ms", "1200000")
 				.put("redisearch.narrow-scan-cursor-count", "10000").put("redisearch.aggregation-group-limit", "100")
 				.put("redisearch.scan-splits", "8").put("redisearch.scan-partition-field", "id")
@@ -55,6 +57,8 @@ public class TestConfig {
 		assertThat(config.getDefaultSchema()).isEqualTo(expected.getDefaultSchema());
 		assertThat(config.getUri()).isEqualTo(expected.getUri());
 		assertThat(config.isResp2()).isTrue();
+		assertThat(config.isFlexEnabled()).isTrue();
+		assertThat(config.getFlexBatchSize()).isEqualTo(23);
 		assertThat(config.getScanConnections()).isEqualTo(2);
         assertThat(config.getScanSplits()).isEqualTo(8);
         assertThat(config.getScanPartitionField()).isEqualTo("id");
@@ -65,6 +69,20 @@ public class TestConfig {
 		assertThat(config.isAggregationPushdownEnabled()).isFalse();
 		assertThat(config.isDynamicFilteringEnabled()).isFalse();
 		assertThat(config.getDynamicFilteringWaitTimeout()).isEqualTo(new Duration(3, TimeUnit.SECONDS));
+	}
+
+	@Test
+	public void testFlexBatchBounds() {
+		for (String size : java.util.List.of("0", "10001")) {
+			assertThatThrownBy(() -> new ConfigurationFactory(Map.of("redisearch.uri", "redis://localhost:6379",
+					"redisearch.flex.batch-size", size)).build(RediSearchConfig.class))
+					.isInstanceOf(RuntimeException.class).hasMessageContaining("redisearch.flex.batch-size");
+		}
+		for (String size : java.util.List.of("1", "10000")) {
+			assertThat(new ConfigurationFactory(Map.of("redisearch.uri", "redis://localhost:6379",
+					"redisearch.flex.batch-size", size)).build(RediSearchConfig.class).getFlexBatchSize())
+					.isEqualTo(Integer.parseInt(size));
+		}
 	}
 
 	@Test

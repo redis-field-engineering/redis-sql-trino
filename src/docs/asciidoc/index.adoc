@@ -37,7 +37,7 @@ This guide describes the current connector source; use a release with the matchi
 |Component |Requirement
 |Trino |{trino-version}. The connector uses Trino's plugin interface; do not assume a plugin built for another Trino release is compatible.
 |Java |64-bit Java 25, at least 25.0.1, for Trino {trino-version}. Use Eclipse Temurin for building this project; its Maven rules accept Temurin or Oracle. The stock Trino container includes its runtime.
-|Redis |A database with the Query Engine and working `FT._LIST`, `FT.INFO`, `FT.SEARCH`, `FT.AGGREGATE` and `FT.CURSOR` commands. HASH and JSON indexes are readable; creating and updating rows requires HASH indexes.
+|Redis |A database with the Query Engine and working `FT._LIST`, `FT.INFO`, `FT.SEARCH` and `FT.AGGREGATE`. The default RAM reader also requires `FT.CURSOR`; Software Flex uses the explicit <<flex-reads,cursor-free mode>>. HASH and JSON indexes are readable; creating and updating rows requires HASH indexes.
 |Network |The coordinator and every Trino worker must reach the Redis endpoint. With the OSS Cluster API enabled, they must also reach the addresses advertised by the cluster.
 |===
 
@@ -46,11 +46,21 @@ Redis 8 includes the Query Engine; the optional Open Source example uses `redis:
 Redis Stack 7.x also includes Search and JSON, but some aggregation expressions need newer Query Engine capabilities.
 The connector probes support for `case()` before using the corresponding aggregation path; see <<aggregations,aggregation correctness>>.
 
-Flex is not supported on the targets recorded in the project's testing matrix.
-Redis Cloud Essentials Flex has no Query Engine, and the documented Cloud Pro Search-on-Flex beta lacks `FT.AGGREGATE` and NUMERIC fields, which this connector needs.
-The locally tested Redis Software Flex build also rejected required read and DDL operations.
-See {project-url}/blob/master/README.adoc#tested-deployment-matrix[the tested deployment matrix] for pinned versions, checks and limitations, and https://redis.io/docs/latest/operate/rc/databases/create-database/create-flex-database/[Redis's current Flex documentation] for product availability.
+Software Flex on Redis Software 8.2.6+ / Redis 8.8+ has an explicit read-only mode described below.
+Older Flex builds and deployments without Search remain incompatible.
+See {project-url}/blob/master/README.adoc#tested-deployment-matrix[the historical deployment matrix] and https://redis.io/docs/latest/operate/rs/flex/search/[Redis's current Software Flex documentation] for product availability.
 A successful TCP connection or an advertised command alone does not establish connector compatibility.
+
+[[flex-reads]]
+=== Cursor-free Software Flex reads
+
+Set `redisearch.flex.enabled=true` for an existing Software Search-on-Flex database. This reader uses bounded `FT.AGGREGATE` requests sorted by unique `__key`, with a strict keyset filter after each batch. It does not use server cursors or increasing offsets. Short batches continue until an empty response, and warnings or non-increasing keys fail the query rather than returning a successful partial scan.
+
+`redisearch.flex.batch-size` (default 1000, range 1–10000) controls each request, not the total result. HASH and scalar JSON indexes use the same decoding and stored-value precision recovery as the RAM path. Document keys must be valid UTF-8 without ASCII control characters. Redis does not provide a snapshot of concurrent writes through this reader.
+
+This stage supports reads of existing indexes only. All DDL and writes are rejected. SQL predicates, grouping, aggregation, sorting, limits and joins execute in Trino; server pushdowns, dynamic filters and scan partitioning are disabled. Existing metadata sampling limits still apply. Each page searches and sorts the remaining index, so this correctness-first path can be expensive for large full scans. `redisearch.cursor-count` and `redisearch.narrow-scan-cursor-count` do not configure this reader.
+
+The default `redisearch.flex.enabled=false` retains the existing RAM cursor reader. Enabling Flex mode does not make an older Flex server or a database without Search compatible.
 
 [[quick-start]]
 == Quick start with a released plugin
@@ -184,6 +194,14 @@ redisearch.uri=redis://localhost:6379
 
 |`redisearch.cursor-count`
 |Number of rows requested per https://redis.io/docs/latest/commands/ft.cursor-read/[aggregation cursor] batch. `0` uses the server's batch default; it does not cap the total query result.
+|`1000`
+
+|`redisearch.flex.enabled`
+|Read-only Software Flex mode, using cursor-free keyset scans and evaluating SQL operations in Trino. Requires Software 8.2.6+ / Redis 8.8+ with Search on Flex.
+|`false`
+
+|`redisearch.flex.batch-size`
+|Maximum rows per cursor-free request, 1–10000. Does not cap the total scan result.
 |`1000`
 
 |`redisearch.query-timeout-ms`

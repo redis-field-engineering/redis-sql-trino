@@ -78,6 +78,23 @@ public class RediSearchConfig {
 
     private boolean caseInsensitiveNames;
 
+    private boolean flexEnabled;
+    private int flexBatchSize = 1000;
+
+    public boolean isFlexEnabled() { return flexEnabled; }
+
+    @Config("redisearch.flex.enabled")
+    @ConfigDescription("Read-only Software Flex mode: cursor-free scans with SQL operations evaluated by Trino")
+    public RediSearchConfig setFlexEnabled(boolean enabled) { this.flexEnabled = enabled; return this; }
+
+    @Min(1)
+    @Max(10000)
+    public int getFlexBatchSize() { return flexBatchSize; }
+
+    @Config("redisearch.flex.batch-size")
+    @ConfigDescription("Maximum rows per cursor-free Flex scan request")
+    public RediSearchConfig setFlexBatchSize(int size) { this.flexBatchSize = size; return this; }
+
     private long cursorCount = DEFAULT_CURSOR_COUNT;
     private long queryTimeoutMillis;
 
