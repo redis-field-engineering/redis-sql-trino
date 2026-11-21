@@ -14,7 +14,7 @@ The acceptance tests accompanying code are the executable contract; the proposal
 |The function checks SELECT access to the underlying table's output columns, including its exposed `__key`. Query text is one Redis command argument; it is never reinterpreted as a SQL equality predicate. Vector parameters, distance/score columns and GEOSHAPE typed APIs are not implemented.
 |#176
 |HASH `count(column)` sums a loaded field's existence indicator. `count_if(boolean_column)` sums the true-value indicator of a direct stored BOOLEAN HASH column, matching the row reader's case-insensitive boolean interpretation. The SPI translator can also translate simple BOOLEAN filters if supplied directly.
-|SQL NULL is an absent HASH field. Indicator sums require a known document count below 2^53; the existing runtime COUNT guard checks index growth. Trino 484 turns SQL aggregate FILTER clauses into masks before connector pushdown, so those clauses remain in Trino despite the SPI capability. JSON, DISTINCT aggregate calls, ordered aggregates, computed boolean filters and filtered MIN/MAX remain in Trino.
+|SQL NULL is an absent HASH field. Indicator sums require a known document count below 2^53; the existing runtime COUNT guard checks index growth. Trino 484 turns SQL aggregate FILTER clauses into masks before connector pushdown, so those clauses remain in Trino despite the SPI capability. JSON, DISTINCT forms outside the eligible COUNT rewrite, ordered aggregates, computed boolean filters and filtered MIN/MAX remain in Trino.
 |#177
 |Grouping-only HASH aggregation uses Redis GROUPBY with an internal, unprojected COUNT reducer. This supports SELECT DISTINCT. Eligible single-DISTINCT rewrites add a second GROUPBY/REDUCE stage so Redis returns final global or grouped counts.
 |The existing unfiltered document-count/group budget applies. NULL keys are retained; the second stage counts present distinct values so an all-NULL group returns zero. Unsafe BIGINT/DECIMAL, UUID/DATE/REAL, timestamp and encoded-type grouping retains Trino execution. This is exact key grouping, not approximate distinct counting.
@@ -79,7 +79,7 @@ Loading a field precedes testing existence, and nullable domains explicitly incl
 
 The bounded local TopN strategy operates independently of native Redis SORTBY.
 Multiple keys use Trino's typed ordering operators, including exact DECIMAL and floating-point semantics, with memory reservations covering variable-width keys.
-Both NULL orders are handled in the comparator. REAL uses this path because different Redis doubles can decode to equal SQL floats and require a secondary-key comparison.
+Both NULL orders are handled in the comparator. REAL uses this path because different Redis doubles can decode to equal SQL floats and require a secondary-key comparison. DOUBLE also uses it under RESP2 to avoid relying on the precision of intermediate floating sort values; native DOUBLE ordering remains available under RESP3.
 JSON needs an equivalent deferred document-projection operation and an explicit scalar extraction contract.
 Benchmarks should report keys scanned, exact value fetches, projected document fetches, cursor batches, heap memory and final rows, not only wall time.
 

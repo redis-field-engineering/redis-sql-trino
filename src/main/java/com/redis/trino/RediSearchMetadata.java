@@ -591,6 +591,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
                     // Distinct external doubles can decode to the same REAL; Redis must not break SQL ties before
                     // later sort keys. The typed local comparator groups those spellings as the same float.
                     && !column.getType().equals(REAL)
+                    // RESP2 does not guarantee lossless floating shard transport; read exact HASH sort values.
+                    && (!column.getType().equals(DOUBLE) || rediSearchSession.isResp3())
 					&& SORTABLE_TYPES.contains(column.getType()) && RediSearchQueryBuilder.isProperty(column.getName())
 					&& !item.getSortOrder().isNullsFirst();
 		}

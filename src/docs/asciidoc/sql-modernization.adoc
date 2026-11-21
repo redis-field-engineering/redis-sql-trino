@@ -50,12 +50,13 @@ Performance assertions compare exact results, plans and source metrics: eligible
 No new full-data ClickBench timings or comparative speedups are claimed.
 Paid Cloud qualification and existing Flex capability issues remain separate from Docker validation.
 
-Initial implementation validation recorded on November 21, 2026 (before the later Flex integration and extended pushdown follow-up):
+Validation recorded on November 21, 2026:
 
-* Full `package` build with normal static checks and bounded JUnit parallelism: 491 tests reported, zero failures/errors, 12 expected skips.
-* Redis OSS 8.4 and 8.10.3 compatibility suites: 137 tests each, zero failures/errors/skips; the final Boolean predicate regression was also checked on each version.
-* Stock Trino 484 with the packaged plugin: 20 product cases, zero failures/errors/skips, including native Search, views/comments/TRUNCATE and native JSON/ARRAY/TIMESTAMP(12) round trips on normal and sharded databases.
+* Across the full regression run and final targeted reruns, the latest per-class reports contain 585 cases, zero remaining failures/errors and 12 expected skips.
+* The final normal `package` build passed all static checks and 45 affected smoke/RESP2 cases (three expected skips), including single-shard and sharded adjacent-DOUBLE ordering.
+* New DISTINCT, typed TopN, canonical grouping and Unicode expression checks passed on both Redis OSS 8.4 and 8.10.3. CI runs these alongside the existing compatibility suites, with serialized JUnit execution.
+* Stock Trino 484 loaded the final packaged plugin: 22 product cases passed with zero failures/errors/skips, covering both single-shard and sharded databases, including staged DISTINCT and typed multiple-key TopN.
 
-The tests used disposable, isolated Docker environments. Earlier overloaded parallel runs correctly rejected explicit backend timeout warnings; serialized retries passed without relaxing production timeout or incomplete-result safeguards.
+The tests used disposable, isolated Docker environments. Overlapping Software control-plane activation stalled during one validation round; serialized provisioning passed without changing production timeout or incomplete-result guards.
 
-Follow-up focused checks cover both single-shard and sharded Software execution. Canonical CHAR grouping reduced a 1,200-document fixture to six transferred groups, compared with 1,200 source rows when aggregation pushdown was disabled. Typed TopN scanned 1,107 sort-key rows, retained five candidates and fetched 15 projected field values for those winners. These are exact-result and work-reduction assertions, not full-data throughput claims.
+Canonical CHAR grouping reduced a 1,200-document fixture to six transferred groups, compared with 1,200 source rows when aggregation pushdown was disabled. BOOLEAN grouping reduced 1,050 documents to three groups. Typed TopN scanned 1,107 sort-key rows, retained five candidates and fetched 15 projected field values for those winners. These are exact-result and work-reduction assertions, not full-data throughput claims.

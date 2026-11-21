@@ -114,12 +114,12 @@ public class TestCaseInsensitiveConnectorSmokeTest extends BaseConnectorSmokeTes
 			assertThat(numeric.result().getOnlyColumn()).containsExactly("a", "b");
 			assertThat(getDistributedQueryRunner().getCoordinator().getQueryManager()
 					.getFullQueryInfo(numeric.queryId()).getQueryStats().getPhysicalInputPositions()).isEqualTo(2);
-			// Multiple keys with VARCHAR and NULLS FIRST still require Trino ordering.
+			// Typed multiple-key TopN returns only selected candidates to Trino.
 			var strings = getDistributedQueryRunner().executeWithPlan(getSession(),
 					"SELECT id FROM mixedcaseranks ORDER BY id, score LIMIT 1");
 			assertThat(strings.result().getOnlyValue()).isEqualTo("a");
 			assertThat(getDistributedQueryRunner().getCoordinator().getQueryManager()
-					.getFullQueryInfo(strings.queryId()).getQueryStats().getPhysicalInputPositions()).isEqualTo(4);
+					.getFullQueryInfo(strings.queryId()).getQueryStats().getPhysicalInputPositions()).isEqualTo(1);
 			assertThat(computeActual("SELECT id FROM mixedcaseranks ORDER BY score NULLS FIRST LIMIT 1")
 					.getOnlyValue()).isEqualTo("missing");
 		} finally {

@@ -799,6 +799,7 @@ A document scan returning an eligible arithmetic expression computes it in the c
 Without an `ORDER BY`, SQL does not guarantee which matching rows a limit returns.
 
 For HASH indexes, `ORDER BY ... LIMIT` uses Redis `SORTBY` when all sort keys are indexed NUMERIC columns of type DOUBLE, INTEGER, SMALLINT or TINYINT, with supported field names and `NULLS LAST`.
+Native DOUBLE ordering requires RESP3; RESP2 uses the exact local path or retains Trino ordering.
 Trino sorts the returned candidates to produce the final order.
 BIGINT and DECIMAL sort keys do not use this path because Redis double ordering can lose precision.
 JSON ordering stays in Trino.

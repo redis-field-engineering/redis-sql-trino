@@ -607,6 +607,7 @@ A separate runtime count guards against index growth after planning; an unsafe c
 This bound includes intermediate sums before positive and negative values cancel. Narrowing casts and integer arithmetic remain in Trino.
 * `LIMIT`, when Redis evaluates the whole `WHERE` clause
 * `ORDER BY ... LIMIT` on hash indexes, when Redis evaluates the whole `WHERE` clause and every sort key is an indexed NUMERIC column of type DOUBLE, INTEGER, SMALLINT or TINYINT, ordered `NULLS LAST` (the default). Redis sorts documents without a value last and returns only the first rows, which Trino then sorts.
+Native DOUBLE ordering requires RESP3; RESP2 uses the exact local path or retains Trino ordering.
 A separate exact HASH path supports multiple typed order keys, either direction and both NULL orders. It scans matching keys and sort fields, selects candidates with Trino typed comparators, then loads projected fields only for winners. This includes exact BIGINT/DECIMAL, REAL/DOUBLE, text and temporal ordering. The candidate limit is controlled by `redisearch.local-topn.max-candidates` (default 1,000; zero disables; maximum 100,000). It reduces wide-row retrieval but still scans matching keys; JSON ordering stays in Trino.
 * Join keys: in a join, the keys that the other side collects (its dynamic filter) are added to the query of a scan that Redis evaluates them in, under the same rules as `WHERE`. More than 256 keys become the range they span. A scan waits for them for up to `redisearch.dynamic-filtering.wait-timeout` (default 20s).
 
