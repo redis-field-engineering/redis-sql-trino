@@ -64,11 +64,12 @@ public class TestCaseInsensitiveConnectorSmokeTest extends BaseConnectorSmokeTes
 			return true;
 
 		case SUPPORTS_TOPN_PUSHDOWN:
-			// Optimization is limited by type, number of sort keys and limit; Trino retains the final sort.
-			// Dedicated tests cover the supported server and late-materialization paths.
+			// No unconditional contract: JSON, residual predicates and candidate budgets retain Trino sorting.
+			// HASH native/typed TopN is covered separately; see the SQL guide's test capability inventory.
 			return false;
 
 		case SUPPORTS_NOT_NULL_CONSTRAINT:
+			// Redis fields are optional and external writers do not enforce SQL constraints.
 			return false;
 
 		case SUPPORTS_DELETE:
@@ -94,10 +95,31 @@ public class TestCaseInsensitiveConnectorSmokeTest extends BaseConnectorSmokeTes
 			return false;
 
 		case SUPPORTS_NEGATIVE_DATE:
-			return false;
+			// testNegativeDateInsertAndCtas covers the same ISO storage with name normalization enabled.
+			return true;
 
 		default:
 			return super.hasBehavior(connectorBehavior);
+		}
+	}
+
+	@Test
+	public void testNegativeDateInsertAndCtas() {
+		assertUpdate("CREATE TABLE MixedCaseDates (d date)");
+		try {
+			assertUpdate("INSERT INTO MIXEDCASEDATES VALUES (DATE '-0001-01-01'), (DATE '0000-01-01'), (NULL)", 3);
+			assertThat(query("SELECT d FROM mixedcasedates"))
+					.matches("VALUES DATE '-0001-01-01', DATE '0000-01-01', CAST(NULL AS date)");
+			assertThat(query("SELECT d FROM MIXEDCASEDATES WHERE d = DATE '-0001-01-01'"))
+					.matches("VALUES DATE '-0001-01-01'");
+			assertUpdate("CREATE TABLE MixedCaseDatesCopy AS SELECT * FROM MIXEDCASEDATES", 3);
+			try {
+				assertThat(query("SELECT d FROM mixedcasedatescopy")).matches("SELECT d FROM mixedcasedates");
+			} finally {
+				assertUpdate("DROP TABLE MIXEDCASEDATESCOPY");
+			}
+		} finally {
+			assertUpdate("DROP TABLE MIXEDCASEDATES");
 		}
 	}
 

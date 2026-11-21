@@ -114,4 +114,54 @@ public class TestSqlRelationMetadata extends AbstractTestQueryFramework {
             assertUpdate("DROP TABLE relation_source");
         }
     }
+
+    @Test
+    void testCommentsFollowAddColumnAndDropRecreateLifecycle() {
+        assertUpdate("CREATE TABLE comment_lifecycle (id bigint COMMENT 'identifier') COMMENT 'initial table'");
+        try {
+            assertColumnComment("comment_lifecycle", "id", "identifier");
+            assertTableComment("comment_lifecycle", "initial table");
+            assertUpdate("ALTER TABLE comment_lifecycle ADD COLUMN note varchar COMMENT 'added note'");
+            assertColumnComment("comment_lifecycle", "note", "added note");
+            assertColumnComment("comment_lifecycle", "id", "identifier");
+            assertUpdate("COMMENT ON COLUMN comment_lifecycle.note IS 'replacement note'");
+            assertUpdate("COMMENT ON TABLE comment_lifecycle IS 'replacement table'");
+            assertColumnComment("comment_lifecycle", "note", "replacement note");
+            assertTableComment("comment_lifecycle", "replacement table");
+            assertThat(computeActual("SHOW CREATE TABLE comment_lifecycle").getOnlyValue().toString())
+                    .contains("identifier", "replacement note", "replacement table").doesNotContain("initial table", "added note");
+            assertUpdate("COMMENT ON COLUMN comment_lifecycle.note IS NULL");
+            assertUpdate("COMMENT ON TABLE comment_lifecycle IS NULL");
+            assertThat(query("SELECT comment FROM information_schema.columns "
+                    + "WHERE table_schema = 'tpch' AND table_name = 'comment_lifecycle' AND column_name = 'note'"))
+                    .matches("VALUES CAST(NULL AS varchar)");
+            assertThat(query("SELECT comment FROM system.metadata.table_comments "
+                    + "WHERE catalog_name = 'redisearch' AND schema_name = 'tpch' AND table_name = 'comment_lifecycle'"))
+                    .matches("VALUES CAST(NULL AS varchar)");
+            assertUpdate("COMMENT ON TABLE comment_lifecycle IS 'must disappear'");
+            assertUpdate("DROP TABLE comment_lifecycle");
+            assertThat(server.getConnection().sync().exists(RediSearchRelationMetadata.commentsKey("comment_lifecycle"))).isZero();
+            assertUpdate("CREATE TABLE comment_lifecycle (id bigint, note varchar)");
+            assertThat(query("SELECT comment FROM information_schema.columns "
+                    + "WHERE table_schema = 'tpch' AND table_name = 'comment_lifecycle'"))
+                    .matches("VALUES CAST(NULL AS varchar), CAST(NULL AS varchar)");
+            assertThat(computeActual("SHOW CREATE TABLE comment_lifecycle").getOnlyValue().toString())
+                    .doesNotContain("identifier", "replacement note", "must disappear");
+        }
+        finally {
+            assertUpdate("DROP TABLE IF EXISTS comment_lifecycle");
+        }
+    }
+
+    private void assertColumnComment(String table, String column, String comment) {
+        assertThat(query("SELECT comment FROM information_schema.columns WHERE table_schema = 'tpch' AND table_name = '"
+                + table + "' AND column_name = '" + column + "'"))
+                .matches("VALUES VARCHAR '" + comment + "'");
+    }
+
+    private void assertTableComment(String table, String comment) {
+        assertThat(query("SELECT comment FROM system.metadata.table_comments "
+                + "WHERE catalog_name = 'redisearch' AND schema_name = 'tpch' AND table_name = '" + table + "'"))
+                .matches("VALUES VARCHAR '" + comment + "'");
+    }
 }

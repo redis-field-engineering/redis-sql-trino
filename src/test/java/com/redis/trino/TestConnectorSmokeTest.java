@@ -88,11 +88,12 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 			return true;
 
 		case SUPPORTS_TOPN_PUSHDOWN:
-			// Optimization is limited by type, number of sort keys and limit; Trino retains the final sort.
-			// Dedicated tests cover the supported server and late-materialization paths.
+			// No unconditional contract: JSON, residual predicates and candidate budgets retain Trino sorting.
+			// HASH native/typed TopN is covered separately; see the SQL guide's test capability inventory.
 			return false;
 
 		case SUPPORTS_NOT_NULL_CONSTRAINT:
+			// Redis fields are optional and external writers do not enforce SQL constraints.
 			return false;
 
 		case SUPPORTS_DELETE:
@@ -118,7 +119,8 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 			return false;
 
 		case SUPPORTS_NEGATIVE_DATE:
-			return false;
+			// Explicit INSERT/CTAS round trips cover ISO proleptic dates, including years <= 0.
+			return true;
 
 		default:
 			return super.hasBehavior(connectorBehavior);
@@ -129,6 +131,26 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 	protected void assertQuery(String sql) {
 		log.info("assertQuery: %s", sql);
 		super.assertQuery(sql);
+	}
+
+	@Test
+	public void testNegativeDateInsertAndCtas() {
+		assertUpdate("CREATE TABLE negative_dates (d date)");
+		try {
+			assertUpdate("INSERT INTO negative_dates VALUES (DATE '-0001-01-01'), (DATE '0000-01-01'), (DATE '1969-12-31'), (NULL)", 4);
+			assertThat(query("SELECT d FROM negative_dates"))
+					.matches("VALUES DATE '-0001-01-01', DATE '0000-01-01', DATE '1969-12-31', CAST(NULL AS date)");
+			assertThat(query("SELECT d FROM negative_dates WHERE d = DATE '-0001-01-01'"))
+					.matches("VALUES DATE '-0001-01-01'");
+			assertUpdate("CREATE TABLE negative_dates_copy AS SELECT * FROM negative_dates", 4);
+			try {
+				assertThat(query("SELECT d FROM negative_dates_copy")).matches("SELECT d FROM negative_dates");
+			} finally {
+				assertUpdate("DROP TABLE negative_dates_copy");
+			}
+		} finally {
+			assertUpdate("DROP TABLE negative_dates");
+		}
 	}
 
 	@Test
@@ -163,7 +185,7 @@ public class TestConnectorSmokeTest extends BaseConnectorSmokeTest {
 		assertThat(physicalInputPositions(getDistributedQueryRunner().executeWithPlan(getSession(), sql)))
 				.isEqualTo(10);
 		assertQueryOrdered("SELECT orderkey, totalprice FROM orders WHERE orderstatus = 'F' ORDER BY totalprice LIMIT 5");
-		// Not pushed down: a BIGINT key, NULLS FIRST
+		// These use exact typed HASH candidate selection rather than native numeric SORTBY.
 		assertQueryOrdered("SELECT orderkey, totalprice FROM orders ORDER BY totalprice, orderkey DESC LIMIT 5");
 		assertQueryOrdered("SELECT orderkey, totalprice FROM orders ORDER BY totalprice DESC NULLS FIRST LIMIT 5");
 		// A filter or aggregation over the first rows applies to those rows only

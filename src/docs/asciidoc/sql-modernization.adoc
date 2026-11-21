@@ -26,7 +26,7 @@ Historical unsupported or not-planned decisions are context, not permanent restr
 |#181 |Grouping-only pushdown and relational feasibility design |Join/window execution and multiple grouping sets
 |#182 |DEBUG rejection reasons and scan/TopN MemoryContext |Tighter proven bounds and EXPLAIN annotations
 |#183 |Reconciled statement/type/execution documentation |Keep references current as capabilities land
-|#184 |Accurate view/comment/array/TRUNCATE flags and restricted TopN tests |NOT NULL and negative-date capability contracts
+|#184 |Explicit capability/skip inventory, restricted TopN/fallback tests and negative-date round trips |Keep the test contract current as capabilities change
 |===
 
 HASH writes resolve physical indexed aliases and preserve all-NULL rows with a reserved marker.
