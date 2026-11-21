@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import io.lettuce.core.cluster.api.sync.RedisClusterCommands;
+import io.lettuce.core.RedisCommandExecutionException;
 import io.trino.spi.connector.CatalogSchemaName;
 import io.trino.spi.connector.ConnectorViewDefinition;
 import io.trino.spi.connector.ViewNotFoundException;
@@ -96,6 +97,88 @@ class TestRelationMetadata {
         new RediSearchRelationMetadata(concurrent).setComment("t", Optional.empty(), Optional.of("ours"));
         assertThat(new RediSearchRelationMetadata(backing).comments("t"))
                 .containsExactlyInAnyOrderEntriesOf(Map.of("column:other", "concurrent", "table", "ours"));
+    }
+
+    @Test
+    void testDeniedOptionalReadsDoNotHideMutationFailures() {
+        RedisCommandExecutionException denied = new RedisCommandExecutionException("NOPERM metadata key access denied");
+        RediSearchRelationMetadata metadata = new RediSearchRelationMetadata(failing("get", denied));
+        assertThat(metadata.comments("t")).isEmpty();
+        assertThat(metadata.views("default")).isEmpty();
+        // A prior optional read must not turn a write into a successful no-op.
+        assertThatThrownBy(() -> metadata.setComment("t", Optional.empty(), Optional.of("table comment")))
+                .isSameAs(denied);
+        assertThatThrownBy(() -> metadata.initializeComments("t", Map.of("column:id", "identifier")))
+                .isSameAs(denied);
+    }
+
+    @Test
+    void testDeniedMutationPreservesStoredAndCachedComments() {
+        Map<String, String> values = new HashMap<>();
+        RedisClusterCommands<String, String> backing = redis(values);
+        new RediSearchRelationMetadata(backing).setComment("t", Optional.empty(), Optional.of("original"));
+        String original = values.get(RediSearchRelationMetadata.commentsKey("t"));
+        RedisCommandExecutionException denied = new RedisCommandExecutionException("NOPERM EVAL access denied");
+        RediSearchRelationMetadata metadata = new RediSearchRelationMetadata(intercept(backing, "eval", denied));
+        assertThat(metadata.comments("t")).containsEntry("table", "original");
+        assertThatThrownBy(() -> metadata.setComment("t", Optional.empty(), Optional.of("replacement")))
+                .isSameAs(denied);
+        assertThatThrownBy(() -> metadata.setComment("t", Optional.empty(), Optional.empty()))
+                .isSameAs(denied);
+        assertThat(values.get(RediSearchRelationMetadata.commentsKey("t"))).isEqualTo(original);
+        assertThat(metadata.comments("t")).containsEntry("table", "original");
+        assertThatThrownBy(() -> new RediSearchRelationMetadata(intercept(backing, "del", denied)).deleteComments("t"))
+                .isSameAs(denied);
+        assertThat(values.get(RediSearchRelationMetadata.commentsKey("t"))).isEqualTo(original);
+    }
+
+    @Test
+    void testOnlyPermissionFailuresAreOptional() {
+        RedisCommandExecutionException unavailable = new RedisCommandExecutionException("LOADING Redis is loading the dataset");
+        RediSearchRelationMetadata metadata = new RediSearchRelationMetadata(failing("get", unavailable));
+        assertThatThrownBy(() -> metadata.comments("t")).isSameAs(unavailable);
+        assertThatThrownBy(() -> metadata.views("default")).isSameAs(unavailable);
+    }
+
+    @Test
+    void testCommentCacheIsTransactionScopedAndInvalidatedByOwnMutations() {
+        Map<String, String> values = new HashMap<>();
+        RedisClusterCommands<String, String> backing = redis(values);
+        RediSearchRelationMetadata firstTransaction = new RediSearchRelationMetadata(backing);
+        assertThat(firstTransaction.comments("t")).isEmpty();
+        firstTransaction.setComment("t", Optional.empty(), Optional.of("initial"));
+        assertThat(firstTransaction.comments("t")).containsEntry("table", "initial");
+        RediSearchRelationMetadata secondTransaction = new RediSearchRelationMetadata(backing);
+        secondTransaction.setComment("t", Optional.empty(), Optional.of("external"));
+        assertThat(firstTransaction.comments("t")).containsEntry("table", "initial");
+        assertThat(new RediSearchRelationMetadata(backing).comments("t")).containsEntry("table", "external");
+        firstTransaction.setComment("t", Optional.of("id"), Optional.of("identifier"));
+        assertThat(firstTransaction.comments("t"))
+                .containsExactlyInAnyOrderEntriesOf(Map.of("table", "external", "column:id", "identifier"));
+        firstTransaction.deleteComments("t");
+        assertThat(firstTransaction.comments("t")).isEmpty();
+        assertThat(new RediSearchRelationMetadata(backing).comments("t")).isEmpty();
+    }
+
+    private static RedisClusterCommands<String, String> failing(String command, RuntimeException failure) {
+        return intercept(redis(new HashMap<>()), command, failure);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static RedisClusterCommands<String, String> intercept(RedisClusterCommands<String, String> backing,
+            String command, RuntimeException failure) {
+        return (RedisClusterCommands<String, String>) Proxy.newProxyInstance(TestRelationMetadata.class.getClassLoader(),
+                new Class<?>[] {RedisClusterCommands.class}, (proxy, method, args) -> {
+                    if (method.getName().equals(command)) {
+                        throw failure;
+                    }
+                    try {
+                        return method.invoke(backing, args);
+                    }
+                    catch (java.lang.reflect.InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                });
     }
 
     @SuppressWarnings("unchecked")

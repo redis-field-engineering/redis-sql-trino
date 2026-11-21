@@ -112,6 +112,37 @@ public class TestExactLocalTopN extends AbstractTestQueryFramework {
         assertThat(metric(largerMetrics, "redis.exact-hash-read-batches")).isEqualTo(32);
         String disabled = "SELECT id FROM no_local_topn.tpch.topn_wide ORDER BY amount ASC NULLS FIRST, id DESC LIMIT 5";
         assertThat(metric(metrics(disabled), "redis.local-topn.candidates")).isZero();
+        for (String order : List.of("id DESC", "amount ASC NULLS FIRST, id DESC")) {
+            String fallback = "SELECT id FROM no_local_topn.tpch.topn_wide ORDER BY " + order + " LIMIT 5";
+            assertExactOrder(fallback, fallback.replace("no_local_topn.tpch.", ""));
+            Metrics fallbackMetrics = metrics(fallback);
+            assertThat(metric(fallbackMetrics, "redis.rows.received")).isEqualTo(ROWS);
+            assertThat(metric(fallbackMetrics, "redis.local-topn.candidates")).isZero();
+        }
+    }
+
+    @Test
+    public void testJsonOrderingRetainsExactTrinoFallback() {
+        var redis = server.getConnection().sync();
+        redis.ftCreate("topn_json_fallback", io.lettuce.core.search.arguments.CreateArgs.builder()
+                .on(io.lettuce.core.search.arguments.CreateArgs.TargetType.JSON).withPrefix("topn_json_fallback:").build(),
+                List.of(io.lettuce.core.search.arguments.NumericFieldArgs.builder().name("$.id").as("id").build()));
+        RediSearchColumnTypes.write(redis, "topn_json_fallback", Map.of("id", io.trino.spi.type.BigintType.BIGINT));
+        try {
+            redis.jsonSet("topn_json_fallback:1", io.lettuce.core.json.JsonPath.ROOT_PATH, "{\"id\":9007199254740992}");
+            redis.jsonSet("topn_json_fallback:2", io.lettuce.core.json.JsonPath.ROOT_PATH, "{\"id\":9007199254740993}");
+            redis.jsonSet("topn_json_fallback:3", io.lettuce.core.json.JsonPath.ROOT_PATH, "{\"id\":-1}");
+            redis.jsonSet("topn_json_fallback:4", io.lettuce.core.json.JsonPath.ROOT_PATH, "{\"other\":true}");
+            server.awaitIndexed("topn_json_fallback");
+            String sql = "SELECT id FROM topn_json_fallback ORDER BY id DESC NULLS FIRST LIMIT 2";
+            assertThat(computeActual(sql).getOnlyColumn()).containsExactly(null, 9007199254740993L);
+            Metrics fallbackMetrics = metrics(sql);
+            assertThat(metric(fallbackMetrics, "redis.rows.received")).isEqualTo(4);
+            assertThat(metric(fallbackMetrics, "redis.local-topn.candidates")).isZero();
+        } finally {
+            redis.ftDropindex("topn_json_fallback", true);
+            redis.del(RediSearchColumnTypes.key("topn_json_fallback"));
+        }
     }
 
     @Test

@@ -532,6 +532,47 @@ These statements fail with a `This connector does not support \...` error:
 
 Writes also fail when fault-tolerant execution is enabled (`retry-policy` other than `NONE`).
 
+[[test-capability-inventory]]
+=== Test capability flags and expected skips
+
+`TestConnectorSmokeTest` and `TestCaseInsensitiveConnectorSmokeTest` extend Trino 484's `BaseConnectorSmokeTest`.
+`TestShardedConnectorSmokeTest` inherits the first suite with a sharded database.
+A false `TestingConnectorBehavior` flag can select an unsupported-operation assertion or skip an inapplicable test; it does not necessarily disable a SQL query or an optimization.
+These suites do not inherit the larger `BaseConnectorTest` contract.
+
+[cols="2,3,3",options="header"]
+|===
+|Flag or inherited test |Contract |Coverage and reason
+|`SUPPORTS_TOPN_PUSHDOWN=false`
+|No unconditional TopN pushdown guarantee. Trino retains final ordering; JSON, residual filters, disabled optimization and candidate limits can require a full scan.
+|The inherited `testTopN` still checks SQL results. Dedicated smoke tests check native numeric HASH and typed candidate selection. `TestExactLocalTopN` and its sharded subclass cover exact BIGINT/DECIMAL, both NULL orders, budgets and JSON fallback; `TestClickBenchFollowUps` covers TIMESTAMP(3). `TestResp2ExactTopN` covers floating fallback.
+|`SUPPORTS_CREATE_SCHEMA=false`
+|One configured schema; no schema lifecycle.
+|The inherited create-schema test asserts rejection. `testCreateSchemaWithNonLowercaseOwnerName` skips because creating a schema is unsupported. Namespace implementation remains #167.
+|`SUPPORTS_RENAME_TABLE=false`, `SUPPORTS_RENAME_TABLE_ACROSS_SCHEMAS=false`
+|Physical table rename and cross-schema rename are unsupported.
+|The inherited rename-table test checks rejection; `testRenameTableAcrossSchemas` skips because table rename itself is unsupported. This is #169 rather than missing rename coverage.
+|`SUPPORTS_DROP_COLUMN=false`, `SUPPORTS_RENAME_COLUMN=false`
+|Physical column evolution remains unsupported.
+|The smoke base does not contain the full column-evolution suite. ADD COLUMN placement has dedicated tests; migrations remain #169.
+|`SUPPORTS_CREATE_MATERIALIZED_VIEW=false`
+|Ordinary views are supported; materialized views are not.
+|The inherited materialized-view test checks rejection. `testCommentMaterializedViewColumn` skips because the object cannot be created. Materialized-view lifecycle remains #168.
+|`SUPPORTS_NOT_NULL_CONSTRAINT=false`
+|Redis fields are optional, and external writers cannot be made to enforce SQL constraints by this connector.
+|This is an unsupported constraint contract, not a claim that NULL values lack coverage. The larger base's NOT NULL tests are not inherited; nullable writes and all-NULL rows have dedicated regressions.
+|`SUPPORTS_NEGATIVE_DATE=true`
+|ISO proleptic DATE storage supports years before year 1, including year zero.
+|Both smoke suites explicitly round-trip negative dates through INSERT, equality filtering and CTAS; the default suite also runs sharded. The former false flag was a coverage discrepancy, not an established storage limitation.
+|`SUPPORTS_PREDICATE_PUSHDOWN_WITH_VARCHAR_INEQUALITY=false`
+|No blanket guarantee across HASH/JSON and all strings.
+|Eligible HASH lexical comparisons have dedicated exact-filter tests. JSON and unsupported controls retain residual filtering; SQL comparison remains available in Trino.
+|===
+
+CREATE TABLE, ordinary views, comments, ARRAY storage, INSERT/UPDATE/DELETE/MERGE and TRUNCATE flags are true and have dedicated coverage.
+The remaining three expected skips per complete smoke suite are schema creation with a nonlowercase owner, cross-schema table rename and materialized-view column comments, as described above.
+The test sources have no connector-owned `@Disabled` SQL tests; inherited skips are conditional on the capabilities above.
+
 === Views and comments
 
 Ordinary SQL views are stored in the string key `__trino:views:v1:<schema>`, shared by catalogs using that schema on the same database.

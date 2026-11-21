@@ -1,9 +1,16 @@
 package com.redis.trino;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static io.trino.spi.connector.ConnectorMergeSink.UPDATE_OPERATION_NUMBER;
+import static io.trino.spi.type.DoubleType.DOUBLE;
+import static io.trino.spi.type.IntegerType.INTEGER;
+import static io.trino.spi.type.TinyintType.TINYINT;
+import static io.trino.spi.type.VarcharType.VARCHAR;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
@@ -17,6 +24,9 @@ import io.lettuce.core.search.arguments.NumericFieldArgs;
 import io.lettuce.core.search.arguments.TagFieldArgs;
 import io.lettuce.core.search.arguments.TextFieldArgs;
 import io.trino.spi.type.BigintType;
+import io.trino.spi.Page;
+import io.trino.spi.PageBuilder;
+import io.trino.spi.connector.SchemaTableName;
 import io.trino.sql.planner.plan.FilterNode;
 import io.trino.sql.planner.plan.AggregationNode;
 import io.trino.sql.planner.plan.ProjectNode;
@@ -356,6 +366,88 @@ public class TestWrites extends AbstractTestQueryFramework {
 		assertUpdate("DELETE FROM docs WHERE id IN ('9', '10')", 2);
 		assertThat(query("SELECT id, message, score FROM docs"))
 				.matches("VALUES (VARCHAR '1', VARCHAR 'json doc', DOUBLE '3')");
+	}
+
+	@Test
+	public void testJsonInsertSelect() {
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		redis.ftCreate("json_insert_select", CreateArgs.builder().on(TargetType.JSON).withPrefix("json_select:").build(),
+				List.of(TagFieldArgs.builder().name("$.id").as("id").build(),
+						TagFieldArgs.builder().name("$.profile.name").as("display_name").build(),
+						NumericFieldArgs.builder().name("$.score").as("score").build()));
+		redisearch.awaitIndexed("json_insert_select");
+		try {
+			assertUpdate("INSERT INTO json_insert_select (id, display_name, score) "
+					+ "SELECT id, name, score FROM (VALUES ('a', 'Ada', DOUBLE '1.5'), "
+					+ "('b', CAST(NULL AS varchar), DOUBLE '2.5')) s(id, name, score)", 2);
+			assertThat(query("SELECT id, display_name, score FROM json_insert_select"))
+					.matches("VALUES (VARCHAR 'a', VARCHAR 'Ada', DOUBLE '1.5'), (VARCHAR 'b', CAST(NULL AS varchar), DOUBLE '2.5')");
+			assertUpdate("INSERT INTO json_insert_select (id, score) "
+					+ "SELECT id || '_copy', score + 1 FROM json_insert_select", 2);
+			assertThat(query("SELECT id, display_name, score FROM json_insert_select WHERE id LIKE '%_copy'"))
+					.matches("VALUES (VARCHAR 'a_copy', CAST(NULL AS varchar), DOUBLE '2.5'), "
+							+ "(VARCHAR 'b_copy', CAST(NULL AS varchar), DOUBLE '3.5')");
+		} finally {
+			assertUpdate("DROP TABLE json_insert_select");
+		}
+	}
+
+	@Test
+	public void testJsonMergeFailurePropagatesWithoutRollingBackCompletedWrites() {
+		RedisCommands<String, String> redis = redisearch.getConnection().sync();
+		String index = "json_partial_failure";
+		redis.ftCreate(index, CreateArgs.builder().on(TargetType.JSON).withPrefix(index + ":").build(),
+				List.of(NumericFieldArgs.builder().name("$.score").as("score").build()));
+		for (String key : List.of("first", "second", "failed", "untouched")) {
+			redis.jsonSet(index + ":" + key, JsonPath.ROOT_PATH, "{\"score\":0,\"keep\":\"yes\"}");
+		}
+		redisearch.awaitIndexed(index);
+		RediSearchSession session = new RediSearchSession(
+				getDistributedQueryRunner().getCoordinator().getPlannerContext().getTypeManager(),
+				new RediSearchConfig().setUri(redisearch.getRedisURI()).setCluster(deployment().isCluster()));
+		SchemaTableName name = new SchemaTableName("tpch", index);
+		var columns = List.of(new RediSearchColumnHandle("score", DOUBLE, RediSearchFieldType.NUMERIC,
+				false, true, Optional.empty()));
+		var sink = new RediSearchMergeSink(session, new RediSearchPageSink(session, name, columns),
+				new RediSearchMergeTableHandle(new RediSearchTableHandle(name, index), columns, Map.of(0, List.of(0))));
+		try {
+			sink.storeMergedRows(jsonUpdatePage(index, List.of("first"), 1));
+			// A bad later value must be rejected before any mutation in that page is sent.
+			assertThatThrownBy(() -> sink.storeMergedRows(jsonUpdatePage(index, List.of("second", "untouched"), 2, Double.NaN)))
+					.hasMessageContaining("finite number");
+			assertThat(redis.jsonGetRaw(index + ":second", JsonPath.ROOT_PATH).toString()).contains("\"score\":0");
+			assertThat(redis.jsonGetRaw(index + ":untouched", JsonPath.ROOT_PATH).toString()).contains("\"score\":0");
+			// Inject a real Redis command error after schema discovery, rather than mocking a future.
+			redis.del(index + ":failed");
+			redis.set(index + ":failed", "concurrent external writer changed the key type");
+			assertThatThrownBy(() -> sink.storeMergedRows(jsonUpdatePage(index, List.of("second", "failed"), 2, 3)))
+					.isInstanceOf(io.lettuce.core.RedisCommandExecutionException.class)
+					.hasMessageMatching(".*(WRONGTYPE|Existing key has wrong Redis type).*");
+			sink.abort();
+			assertThat(redis.jsonGetRaw(index + ":first", JsonPath.ROOT_PATH).toString()).contains("\"score\":1", "\"keep\":\"yes\"");
+			assertThat(redis.jsonGetRaw(index + ":second", JsonPath.ROOT_PATH).toString()).contains("\"score\":2", "\"keep\":\"yes\"");
+			assertThat(redis.get(index + ":failed")).isEqualTo("concurrent external writer changed the key type");
+			assertThat(redis.jsonGetRaw(index + ":untouched", JsonPath.ROOT_PATH).toString()).contains("\"score\":0");
+		} finally {
+			sink.abort();
+			session.shutdown();
+			for (String key : List.of("first", "second", "failed", "untouched")) {
+				redis.del(index + ":" + key);
+			}
+			redis.ftDropindex(index);
+		}
+	}
+
+	private static Page jsonUpdatePage(String index, List<String> suffixes, double... scores) {
+		PageBuilder page = new PageBuilder(List.of(DOUBLE, TINYINT, INTEGER, VARCHAR));
+		for (int position = 0; position < suffixes.size(); position++) {
+			page.declarePosition();
+			DOUBLE.writeDouble(page.getBlockBuilder(0), scores[position]);
+			TINYINT.writeLong(page.getBlockBuilder(1), UPDATE_OPERATION_NUMBER);
+			INTEGER.writeLong(page.getBlockBuilder(2), 0);
+			VARCHAR.writeString(page.getBlockBuilder(3), index + ":" + suffixes.get(position));
+		}
+		return page.build();
 	}
 
 	@Test
