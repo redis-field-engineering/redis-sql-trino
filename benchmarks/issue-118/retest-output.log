@@ -1,0 +1,75 @@
+Digest: sha256:679d117a56fc26cf94a394e2c2e619a51235b109254b189ae65f9da499b293e6
+Using newest supported Redis database version: 8.8
+{"name": "issue118-ram", "uid": 1, "version": "8.8.0", "port": 12018, "bigstore": false, "bigstore_version": 2, "bigstore_ram_size": 0, "search_on_bigstore": false, "module_list": [{"module_args": "", "module_id": "6c89f77b22ebe4b8c402b9716e210b54", "module_name": "bf", "semantic_version": "8.8.1"}, {"module_args": "", "module_id": "74f1ca3aea40182d2d051061c7bdd905", "module_name": "timeseries", "semantic_version": "8.8.9"}, {"module_args": "", "module_id": "c8a37620596a6f283d5b5f36bc5fa48f", "module_name": "ReJSON", "semantic_version": "8.8.2"}, {"module_args": "", "module_id": "165aaa4800f4c0823518fe7269da8982", "module_name": "search", "semantic_version": "8.8.8"}]}
+{"name": "issue118-flex", "uid": 2, "version": "8.8.0", "port": 12019, "bigstore": true, "bigstore_version": 2, "bigstore_ram_size": 268435456, "search_on_bigstore": true, "module_list": [{"module_args": "", "module_id": "6c89f77b22ebe4b8c402b9716e210b54", "module_name": "bf", "semantic_version": "8.8.1"}, {"module_args": "", "module_id": "c8a37620596a6f283d5b5f36bc5fa48f", "module_name": "ReJSON", "semantic_version": "8.8.2"}, {"module_args": "", "module_id": "165aaa4800f4c0823518fe7269da8982", "module_name": "search", "semantic_version": "8.8.8"}]}
+ram PING: PONG
+ram MODULE LIST: [[name, vectorset, ver, 1, path, /enterprise-managed, args, []], [name, bf, ver, 80801, path, /enterprise-managed, args, []], [name, ReJSON, ver, 80802, path, /enterprise-managed, args, []], [name, timeseries, ver, 80809, path, /enterprise-managed, args, []], [name, search, ver, 80808, path, /enterprise-managed, args, []]]
+ram COMMAND INFO: [[FT._LIST, -1, [readonly, module], 0, 0, 0, [@admin, @slow, @search], [dont_cache], [], []], [FT.AGGREGATE, -3, [readonly, module], 0, 0, 0, [@read, @search], [dont_cache], [], []]]
+flex PING: PONG
+flex MODULE LIST: [[name, search, ver, 80808, path, /enterprise-managed, args, []], [name, vectorset, ver, 1, path, /enterprise-managed, args, []], [name, ReJSON, ver, 80802, path, /enterprise-managed, args, []], [name, bf, ver, 80801, path, /enterprise-managed, args, []]]
+flex COMMAND INFO: [[FT._LIST, -1, [readonly, module], 0, 0, 0, [@admin, @slow, @search], [dont_cache], [], []], [FT.AGGREGATE, -3, [readonly, module], 0, 0, 0, [@read, @search], [dont_cache], [], []]]
+missing PING: PONG
+missing MODULE LIST: [[name, vectorset, ver, 1, path, , args, []]]
+missing COMMAND INFO: [null, null]
+catalog creation without Search: succeeded; no capability rejection
+Software RAM mutations: ADD COLUMN / UPDATE and readback / DELETE and readback passed
+Software RAM numeric SQL: CREATE / INSERT / numeric range / SUM / DROP passed
+Software RAM SQL: CREATE / INSERT / SELECT with filter / COUNT passed
+Software RAM SHOW TABLES: MaterializedResult{rows=[[issue118_ram]], types=[varchar], setSessionProperties={}, resetSessionProperties=[]}
+missing Search CREATE TABLE: QueryFailedException: ERR unknown command 'FT._LIST', with args beginning with:  | FailureException: ERR unknown command 'FT._LIST', with args beginning with:  | FailureException: ERR unknown command 'FT._LIST', with args beginning with:  |
+missing Search SHOW TABLES: QueryFailedException: Error listing tables for catalog missing: ERR unknown command 'FT._LIST', with args beginning with:  | FailureException: Error listing tables for catalog missing: ERR unknown command 'FT._LIST', with args beginning with:  | FailureException: ERR unknown command 'FT._LIST', with args beginning with:  | FailureException: ERR unknown command 'FT._LIST', with args beginning with:  |
+Software Flex FT.AGGREGATE: SUCCEEDED
+Software Flex FT.AGGREGATE LOAD: SUCCEEDED
+Software Flex FT.AGGREGATE WITHCURSOR: RedisCommandExecutionException: SEARCH_FLEX_UNSUPPORTED_ARGUMENT WITHCURSOR is not supported in Redis Flex | RedisCommandExecutionException: SEARCH_FLEX_UNSUPPORTED_ARGUMENT WITHCURSOR is not supported in Redis Flex |
+Software Flex FT.SEARCH fields: SUCCEEDED
+Software Flex SHOW TABLES: MaterializedResult{rows=[[issue118_flex]], types=[varchar], setSessionProperties={}, resetSessionProperties=[]}
+Software Flex SELECT: QueryFailedException: SEARCH_FLEX_UNSUPPORTED_ARGUMENT WITHCURSOR is not supported in Redis Flex | FailureException: SEARCH_FLEX_UNSUPPORTED_ARGUMENT WITHCURSOR is not supported in Redis Flex | FailureException: SEARCH_FLEX_UNSUPPORTED_ARGUMENT WITHCURSOR is not supported in Redis Flex |
+Software Flex CREATE varchar TABLE: succeeded
+Software Flex CREATE numeric TABLE: SUCCEEDED
+ACL denial SHOW TABLES: QueryFailedException: Error listing tables for catalog restricted: NOPERM User issue118 has no permissions to run the 'FT._LIST' command | FailureException: Error listing tables for catalog restricted: NOPERM User issue118 has no permissions to run the 'FT._LIST' command | FailureException: NOPERM User issue118 has no permissions to run the 'FT._LIST' command | FailureException: NOPERM User issue118 has no permissions to run the 'FT._LIST' command |
+connection refused: RedisConnectionException: Unable to connect to 127.0.0.1/<unresolved>:51944 | AnnotatedConnectException: Connection refused (connect failed): /127.0.0.1:51944 | ConnectException: Connection refused (connect failed) |
+result: original diagnostics gap reproduced; Software RAM control passed
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 10.34 s -- in com.redis.trino.TestIssue118Retest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+[INFO] BUILD SUCCESS
+
+PACKAGED TRINO 483 IN DOCKER:
+CREATE TABLE software_ram.tpch.issue118_packaged (id varchar, name varchar)
+CREATE TABLE
+
+INSERT INTO software_ram.tpch.issue118_packaged VALUES ('1', 'docker-desktop')
+INSERT: 1 row
+
+SELECT name FROM software_ram.tpch.issue118_packaged WHERE id = '1'
+{"name":"docker-desktop"}
+
+SELECT count(*) FROM software_ram.tpch.issue118_packaged
+{"_col0":1}
+
+SHOW TABLES FROM software_ram.tpch
+{"Table":"issue118_packaged"}
+
+DROP TABLE software_ram.tpch.issue118_packaged
+DROP TABLE
+
+SHOW TABLES FROM no_search.tpch
+Query 20261121_194609_00008_hcgxs failed: Error listing tables for catalog no_search: ERR unknown command 'FT._LIST', with args beginning with:
+
+CREATE TABLE no_search.tpch.issue118_packaged (id varchar)
+Query 20261121_194609_00009_hcgxs failed: ERR unknown command 'FT._LIST', with args beginning with:
+
+OK
+SHOW TABLES FROM software_flex.tpch
+{"Table":"issue118_packaged_flex"}
+
+SELECT * FROM software_flex.tpch.issue118_packaged_flex
+Query 20261121_194611_00011_hcgxs failed: SEARCH_FLEX_UNSUPPORTED_ARGUMENT WITHCURSOR is not supported in Redis Flex
+
+Observed exit code: 1
+CREATE TABLE software_flex.tpch.issue118_packaged_numeric (id bigint)
+CREATE TABLE
+
+Observed exit code: 0
+OK
+Packaged Docker checks completed; inspect observed Flex outcomes above.

@@ -1,0 +1,81 @@
+= Issue #118 local Docker retest
+
+Tested on 2026-11-21. Issue #118 remains reproducible: a database without Search connects successfully, then table discovery and CREATE TABLE surface raw `ERR unknown command 'FT._LIST'` errors without actionable compatibility guidance.
+
+The updated Software Flex result differs materially from the October evidence: cursor-free aggregation, field loading, returned search fields, and numeric table creation now work. Normal connector scans still fail because they request `WITHCURSOR`.
+
+== Versions and environment
+
+* Source: `979cdae9cdae6d8186fc9e367eb75e31b7d53266` (current `origin/master` when fetched).
+* Connector: `0.4.3-SNAPSHOT`; Trino 483; host test JVM Temurin 25.0.4.1.
+* Docker Desktop; native arm64 Redis Software container.
+* Software: freshly pulled `redislabs/redis:latest`, labels `version=8.2.6`, `release=58`.
+* Image manifest digest: `sha256:679d117a56fc26cf94a394e2c2e619a51235b109254b189ae65f9da499b293e6`.
+* Local image ID: `sha256:ca3a992447e3d76e65828a71fc244f3612a965e745dc27e2d94b26714a9b6cf8`.
+* Both Software databases: Redis 8.8.0, Search 8.8.8, one shard, no replication, OSS Cluster API disabled, plain local TCP, connector RESP3 defaults.
+* RAM: 256 MiB, `bigstore=false`, port 12018.
+* Flex: 1 GiB total / 256 MiB RAM, `bigstore=true`, `bigstore_version=2`, `search_on_bigstore=true`, port 12019.
+* Missing-Search control: `redis:8.4` started directly with the server executable to bypass module-loading entrypoint; Search absent, both command definitions null, port 12020.
+* ACL control: a separate Search-enabled `redis:8.4` container, port 12021, synthetic user denied only `FT._LIST` after granting other commands.
+
+Redis's https://redis.io/docs/latest/operate/rs/release-notes/rs-8-2-releases/[release notes] list Software 8.2.6-58 as the newest release at retest time. The https://redis.io/docs/latest/operate/rs/flex/search/[Software Flex documentation] requires Software 8.2.6+ and Redis 8.8+ for the current Search-on-Flex preview.
+
+== Observed results
+
+[cols="2,3",options="header"]
+|===
+|Probe |Result
+|Software RAM connector control |PASS: connection, table creation, INSERT, row scan, string filter, COUNT, ADD COLUMN, UPDATE/readback, DELETE/readback, numeric creation, range filter, SUM and DROP.
+|Software RAM packaged connector in Trino Docker |PASS: CREATE, INSERT, filtered SELECT, COUNT, SHOW TABLES and DROP.
+|Missing Search PING |PONG. A working connection does not establish Search compatibility.
+|Missing Search catalog creation |Succeeds; no capability rejection.
+|Missing Search CREATE / SHOW TABLES |Raw `ERR unknown command 'FT._LIST'`. No Search requirement or deployment guidance.
+|Software Flex command advertisement |`FT._LIST` and `FT.AGGREGATE` are advertised.
+|Software Flex direct `FT.AGGREGATE` |Succeeds without a cursor, including `LOAD`.
+|Software Flex direct `FT.SEARCH ... RETURN` |Succeeds.
+|Software Flex direct `FT.AGGREGATE ... WITHCURSOR` |`SEARCH_FLEX_UNSUPPORTED_ARGUMENT WITHCURSOR is not supported in Redis Flex`.
+|Software Flex SHOW TABLES |Succeeds.
+|Software Flex connector SELECT |Fails with the same `WITHCURSOR` error, in both embedded Trino and packaged Trino Docker.
+|Software Flex varchar / numeric CREATE TABLE |Both succeed. The October claim that numeric fields are unavailable does not describe this build.
+|ACL control SHOW TABLES |Preserves `NOPERM User issue118 has no permissions to run the 'FT._LIST' command`; not mislabeled as missing Search.
+|Closed local port |`RedisConnectionException` with connection refused; not mislabeled as missing Search or ACL denial.
+|===
+
+The targeted reproduction harness passed its assertions, and the plugin package built successfully. This means the documented observations were reproduced; it does not mean issue #118 is fixed. The complete connector suite was not run. No Cloud target was contacted, so the Cloud Essentials tier behavior was not revalidated. The local control reproduces the absent-command condition only.
+
+See link:retest-output.log[recorded evidence]. Preliminary runs on the repository's older pinned Software image were superseded by the final 8.2.6-58 run above.
+
+== Changes needed for current Software Flex support
+
+. Add a cached capability model and targeted execution probes. Command advertisement alone does not establish cursor support. Preserve ACL and connection errors separately, and make missing Search / unsupported-operation errors actionable (#118).
+. Add a cursor-free scan reader. `RediSearchTranslator.aggregate` currently adds `WITHCURSOR` unconditionally; `RediSearchSession` and the page source rely on cursor reads and deletion. Disabling aggregation pushdown or setting cursor count to zero does not remove that dependency. Verify paging beyond one batch and server result limits before claiming complete scans.
+. Gate planner pushdowns by proven capabilities. Initially let Trino perform unsupported filters, sorting, limits and aggregations over a correct raw-row reader; retain cursor-free server aggregation only where its semantics and result bounds are verified.
+. Gate DDL and mutation behavior separately. Current Software Flex already accepts connector varchar and numeric table creation. The documented remaining restrictions include `FT.ALTER`, `FT.DROPINDEX ... DD`, `SORTABLE` index fields, some TAG query forms and cursors. Start with reads of existing indexes and explicitly reject unsupported operations; add safe schema-rebuild and owned-key deletion strategies only with dedicated tests.
+. Test RAM and Flex independently, including large multi-page scans, cancellation, index readiness, exact numeric values, nulls, JSON restrictions, ACLs and unsupported operations. Preserve the existing RAM reader and execution plan as its own path.
+
+This plan targets Software 8.2.6+ / Redis 8.8+ Search-on-Flex preview. It does not add Search to a deployment where the module is unavailable. No production connector changes were made in this retest.
+
+== Rerun locally
+
+From the repository root:
+
+[source,bash]
+----
+bash benchmarks/issue-118/run.sh > /tmp/issue118-retest.log 2>&1
+----
+
+The script refreshes `redislabs/redis:latest` and recreates only its four named test containers. It uses existing local `redis:8.4` and `trinodb/trino:483` images, downloading them if absent. It runs a temporary Maven reproduction class, packages the plugin, mounts it into Trino Docker, and runs SQL through the CLI inside that container. The temporary test source is removed on exit. The harness is stored outside the ordinary test source tree because it requires these explicitly provisioned endpoints.
+
+All published ports bind to loopback. The management API uses fixed synthetic credentials solely for this isolated test cluster. The test containers remain available for inspection:
+
+* `trino-issue118-software`: management API 19443; RAM 12018; Flex 12019.
+* `trino-issue118-no-search`: 12020.
+* `trino-issue118-acl`: 12021.
+* `trino-issue118-trino`: Trino 18018.
+
+To remove them:
+
+[source,bash]
+----
+docker rm -f trino-issue118-trino trino-issue118-software trino-issue118-no-search trino-issue118-acl
+----
