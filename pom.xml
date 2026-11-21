@@ -5,7 +5,7 @@
     <parent>
         <groupId>io.trino</groupId>
         <artifactId>trino-root</artifactId>
-        <version>483</version>
+        <version>484</version>
     </parent>
 
     <groupId>com.redis</groupId>
@@ -38,17 +38,18 @@
     <properties>
         <github.owner>redis-field-engineering</github.owner>
         <github.repo>redis-sql-trino</github.repo>
-        <lettuce.version>7.8.0.RELEASE</lettuce.version>
-        <!-- Lettuce ${lettuce.version} requires newer Netty/Reactor patch releases than Trino manages;
-             the plugin classloader isolates these from the Trino server -->
-        <dep.netty.version>4.2.19.Final</dep.netty.version>
-        <dep.reactor-core.version>3.8.7</dep.reactor-core.version>
+        <lettuce.version>7.9.0.RELEASE</lettuce.version>
+        <!-- Keep Netty and Reactor current; the plugin classloader isolates these from the Trino server -->
+        <dep.netty.version>4.2.21.Final</dep.netty.version>
+        <dep.reactor-core.version>3.9.0</dep.reactor-core.version>
         <ulid.version>5.2.4</ulid.version>
 
         <!-- Keep Jackson and JUnit families aligned through the inherited BOMs;
              Airlift and provided SPI dependencies retain Trino-managed versions -->
-        <dep.jackson.version>2.22.3</dep.jackson.version>
-        <dep.guava.version>33.7.2-jre</dep.guava.version>
+        <dep.jackson.version>2.23.0</dep.jackson.version>
+        <dep.guava.version>33.8.0-jre</dep.guava.version>
+        <!-- Guava 33.8 requires newer Error Prone annotations than Trino manages -->
+        <dep.errorprone.version>2.52.0</dep.errorprone.version>
         <dep.junit.version>6.1.3</dep.junit.version>
         <dep.junit-platform.version>6.1.3</dep.junit-platform.version>
 
@@ -102,6 +103,11 @@
             <dependency>
                 <groupId>io.trino</groupId>
                 <artifactId>trino-jdbc</artifactId>
+                <version>${project.parent.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.trino</groupId>
+                <artifactId>trino-json</artifactId>
                 <version>${project.parent.version}</version>
             </dependency>
             <dependency>
@@ -186,12 +192,6 @@
         </dependency>
 
         <dependency>
-            <groupId>com.google.inject</groupId>
-            <artifactId>guice</artifactId>
-            <classifier>classes</classifier>
-        </dependency>
-
-        <dependency>
             <groupId>io.airlift</groupId>
             <artifactId>bootstrap</artifactId>
         </dependency>
@@ -199,6 +199,11 @@
         <dependency>
             <groupId>io.airlift</groupId>
             <artifactId>configuration</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.airlift</groupId>
+            <artifactId>guice</artifactId>
         </dependency>
 
         <dependency>
@@ -230,6 +235,11 @@
         <dependency>
             <groupId>io.trino</groupId>
             <artifactId>trino-cache</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.trino</groupId>
+            <artifactId>trino-json</artifactId>
         </dependency>
 
         <dependency>
@@ -395,6 +405,27 @@
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.2.0</version>
+                <executions>
+                    <execution>
+                        <id>unpack-plugin</id>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <phase>package</phase>
+                        <configuration>
+                            <target>
+                                <!-- Trino's packager now creates only the ZIP; Docker and product tests need its directory -->
+                                <delete dir="${project.build.directory}/${project.build.finalName}" />
+                                <unzip dest="${project.build.directory}" src="${project.build.directory}/${project.build.finalName}.zip" />
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>

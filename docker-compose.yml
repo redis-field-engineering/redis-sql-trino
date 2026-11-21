@@ -25,7 +25,7 @@ services:
     
   # Stock Trino with the locally built plugin mounted in. Build it first: ./mvnw package -DskipTests
   trino:
-    image: trinodb/trino:483
+    image: trinodb/trino:484
     hostname: trino
     container_name: trino
     ports:
@@ -39,5 +39,5 @@ services:
       - "host.docker.internal:host-gateway"
     command: ["bash", "/tmp/setup.sh"]
     volumes:
-      - ./target/redis-sql-trino-${REDIS_SQL_TRINO_VERSION:-0.4.2-SNAPSHOT}:/usr/lib/trino/plugin/redisearch:ro
+      - ./target/redis-sql-trino-${REDIS_SQL_TRINO_VERSION:-0.4.3-SNAPSHOT}:/usr/lib/trino/plugin/redisearch:ro
       - ./docker/setup.sh:/tmp/setup.sh:ro

@@ -77,6 +77,30 @@ class TestPackagedPlugin {
 		}
 	}
 
+	@ParameterizedTest
+	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
+	void testMergeAndBooleanValues(String catalog, RediSearchEnvironment env) {
+		String table = table(catalog, "merge_" + Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36));
+		try {
+			assertThat(env.executeTrinoUpdate(
+						"CREATE TABLE " + table + " AS SELECT BIGINT '9007199254740993' id, true active"))
+					.isEqualTo(1);
+			assertThat(env.executeTrinoUpdate("MERGE INTO " + table + " t USING "
+					+ "(VALUES (BIGINT '9007199254740993', false), (BIGINT '9007199254740994', true)) s(id, active) "
+					+ "ON t.id = s.id WHEN MATCHED THEN UPDATE SET active = s.active "
+					+ "WHEN NOT MATCHED THEN INSERT (id, active) VALUES (s.id, s.active)"))
+					.isEqualTo(2);
+			assertThat(env.executeTrino("SELECT id, active FROM " + table + " ORDER BY id"))
+					.containsExactlyInOrder(row(9007199254740993L, false), row(9007199254740994L, true));
+			assertThat(env.executeTrinoUpdate("DELETE FROM " + table + " WHERE id = BIGINT '9007199254740993'"))
+					.isEqualTo(1);
+			assertThat(env.executeTrino("SELECT id, active FROM " + table))
+					.containsOnly(row(9007199254740994L, true));
+		} finally {
+			env.executeTrinoUpdate("DROP TABLE IF EXISTS " + table);
+		}
+	}
+
 	private static String table(String catalog, String name) {
 		return catalog + "." + SCHEMA + "." + name;
 	}

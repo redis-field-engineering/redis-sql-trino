@@ -38,6 +38,7 @@ import io.trino.spi.connector.ConnectorPageSinkProvider;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.ConnectorTableCredentials;
 import io.trino.spi.connector.ConnectorTransactionHandle;
+import io.trino.spi.connector.MemoryContext;
 import io.trino.spi.connector.SchemaTableName;
 
 public class RediSearchPageSinkProvider implements ConnectorPageSinkProvider {
@@ -68,7 +69,7 @@ public class RediSearchPageSinkProvider implements ConnectorPageSinkProvider {
 	@Override
 	public ConnectorMergeSink createMergeSink(ConnectorTransactionHandle transactionHandle, ConnectorSession session,
 			ConnectorMergeTableHandle mergeHandle, Optional<ConnectorTableCredentials> tableCredentials,
-			ConnectorPageSinkId pageSinkId) {
+			ConnectorPageSinkId pageSinkId, MemoryContext memoryContext) {
 		RediSearchMergeTableHandle handle = (RediSearchMergeTableHandle) mergeHandle;
 		return new RediSearchMergeSink(this.session,
 				pageSink(handle.getTableHandle().getSchemaTableName(), handle.getDataColumns()), handle);

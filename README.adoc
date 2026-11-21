@@ -65,7 +65,7 @@ The test suite uses Redis Software. The optional Compose `oss` profile starts Re
 |Component |Version
 
 |Trino
-|483
+|484
 
 |Redis
 |8.x with the Query Engine (tested with 8.4)
@@ -74,8 +74,10 @@ The test suite uses Redis Software. The optional Compose `oss` profile starts Re
 |25
 
 |Lettuce (Redis client)
-|7.8.0
+|7.9.0
 |===
+
+The optional Python benchmark harnesses under `benchmarks/` use Python 3.15.
 
 === Tested deployment matrix
 
@@ -191,7 +193,7 @@ docker compose up
 ----
 
 Use `redis://` for a non-TLS local Redis Software endpoint, or `rediss://` when TLS is enabled.
-Compose runs the stock `trinodb/trino:483` image with the plugin you just built mounted into `/usr/lib/trino/plugin/redisearch`; `docker/setup.sh` writes the catalog from these environment variables.
+Compose runs the stock `trinodb/trino:484` image with the plugin you just built mounted into `/usr/lib/trino/plugin/redisearch`; `docker/setup.sh` writes the catalog from these environment variables.
 If you changed the project version, set `REDIS_SQL_TRINO_VERSION` to match the directory name under `target/`.
 
 Open the Trino CLI and list the indexes exposed as tables:
@@ -262,7 +264,7 @@ See our documentation for https://{project-owner}.github.io/{project-name}/#redi
 
 === Docker image
 
-The `fieldengineering/redis-sql-trino` image is `trinodb/trino:483` with the connector installed, for `linux/amd64` and `linux/arm64`.
+The `fieldengineering/redis-sql-trino` image is `trinodb/trino:484` with the connector installed, for `linux/amd64` and `linux/arm64`.
 The `early-access` tag is built from every push to `master`; `latest` and version tags are published with each release.
 
 [source,console]

@@ -51,6 +51,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 
 import io.airlift.slice.Slice;
+import io.trino.json.Json;
 import io.trino.spi.TrinoException;
 import io.trino.spi.block.BlockBuilder;
 import io.trino.spi.type.CharType;
@@ -79,6 +80,10 @@ public final class RediSearchPageSourceResultWriter {
 	 * The writer for a column's values, chosen once per column rather than for each value.
 	 */
 	public static ValueWriter writer(Type type) {
+		if (type.getBaseName().equals(JSON)) {
+			return (output, value) -> type.writeObject(output,
+					Json.unchecked(io.trino.plugin.base.util.JsonTypeUtil.jsonParse(utf8Slice(value))));
+		}
 		Class<?> javaType = type.getJavaType();
 		if (javaType == boolean.class) {
 			return (output, value) -> type.writeBoolean(output, Boolean.parseBoolean(value));
@@ -180,10 +185,6 @@ public final class RediSearchPageSourceResultWriter {
 		}
 		if (type.equals(UUID)) {
 			return (output, value) -> type.writeSlice(output, javaUuidToTrinoUuid(java.util.UUID.fromString(value)));
-		}
-		if (type.getBaseName().equals(JSON)) {
-			return (output, value) -> type.writeSlice(output,
-					io.trino.plugin.base.util.JsonTypeUtil.jsonParse(utf8Slice(value)));
 		}
 		return unhandled("Unhandled type for Slice: " + type.getDisplayName());
 	}

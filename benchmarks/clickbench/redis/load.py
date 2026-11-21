@@ -43,10 +43,17 @@ def client():
     config = os.environ.get('REDIS_CONNECTION_FILE')
     if config:
         options = json.loads(Path(config).read_text())
+        options.setdefault('protocol', 3)
         cls = redis.RedisCluster if os.environ.get('REDIS_CLUSTER') == 'true' else redis.Redis
         return cls(**options, socket_connect_timeout=10, socket_timeout=1200)
-    return redis.Redis(host='127.0.0.1', port=16379,
+    return redis.Redis(host='127.0.0.1', port=16379, protocol=3,
                        socket_connect_timeout=10, socket_timeout=1200)
+
+
+def info_fields(reply):
+    """Read FT.INFO fields from RESP2 arrays or RESP3 maps, with bytes or text keys."""
+    items = reply.items() if isinstance(reply, dict) else zip(reply[::2], reply[1::2])
+    return {key.decode('utf-8') if isinstance(key, bytes) else key: value for key, value in items}
 
 
 def load_group(task):
@@ -115,17 +122,17 @@ def load(path, expected_rows, limit=None, workers=1, resume=False):
     deadline = time.monotonic() + 3600
     while True:
         raw = r.execute_command('FT.INFO', 'hits')
-        info = dict(zip(raw[::2], raw[1::2]))
-        if int(info.get(b'hash_indexing_failures', 0)):
+        info = info_fields(raw)
+        if int(info.get('hash_indexing_failures', 0)):
             raise RuntimeError('Search indexing failures detected')
-        if not int(info[b'indexing']) and int(info[b'num_docs']) == target:
+        if not int(info['indexing']) and int(info['num_docs']) == target:
             break
         if time.monotonic() > deadline:
-            raise RuntimeError(f'Index incomplete after load: {info[b"num_docs"]} / {target}')
+            raise RuntimeError(f'Index incomplete after load: {info["num_docs"]} / {target}')
         time.sleep(1)
-    raw_errors = info.get(b'Index Errors', [])
-    errors = dict(zip(raw_errors[::2], raw_errors[1::2]))
-    if int(errors.get(b'indexing failures', 0)):
+    raw_errors = info.get('Index Errors', {})
+    errors = info_fields(raw_errors)
+    if int(errors.get('indexing failures', 0)):
         raise RuntimeError('Search indexing failures detected')
     print(f'Verified {count:,} indexed rows', file=sys.stderr)
 
