@@ -150,13 +150,33 @@ The tested local Flex build loaded Search and advertised its commands, but execu
 
 Local Flex accepted TAG indexes with `SKIPINITIALSCAN`, core hash writes, TAG predicates with `NOCONTENT`, `FT.SEARCH ... RETURN 0`, and `FT.DROPINDEX` without `DD`.
 The connector already supplies `SKIPINITIALSCAN` when creating tables.
-*Flex is not supported by the current connector on these tested targets.* Later Redis Software builds need another execution-level compatibility run; `COMMAND INFO` alone cannot establish support.
+These October targets do not support the new cursor-free reader. Current Software Flex read support is described below; `COMMAND INFO` alone cannot establish support.
 
 Follow-up issues:
 
 * https://github.com/redis-field-engineering/redis-sql-trino/issues/118[#118: actionable diagnostics for missing Search capabilities]
 * https://github.com/redis-field-engineering/redis-sql-trino/issues/119[#119: Flex schema discovery and read paths]
 * https://github.com/redis-field-engineering/redis-sql-trino/issues/120[#120: Flex numeric and DDL limitations]
+
+=== Read-only Redis Software Flex
+
+For an existing Search-on-Flex database on *Redis Software 8.2.6+ with Redis 8.8+*, enable the cursor-free reader in the Trino catalog:
+
+[source,properties]
+----
+connector.name=redisearch
+redisearch.uri=redis://your-flex-endpoint:port
+redisearch.flex.enabled=true
+redisearch.flex.batch-size=1000
+----
+
+Flex mode reads existing HASH and scalar JSON indexes with `FT.AGGREGATE`, without `WITHCURSOR` or `FT.CURSOR` commands. Each request sorts by the unique document key and selects keys strictly after the previous batch; even a short batch is followed by another request until an empty batch establishes exhaustion. The existing stored-value recovery retains numeric precision.
+
+This first stage is *read-only*. CREATE, ALTER, DROP, INSERT, UPDATE, DELETE and MERGE are rejected before changing Redis. Trino evaluates SQL filters (including LIKE), joins, grouping, aggregates, ORDER BY and LIMIT. Aggregation/filter/Top-N/limit pushdowns, dynamic filters and scan partitioning are disabled in this mode. The RAM cursor reader remains the default when `redisearch.flex.enabled=false`.
+
+`redisearch.flex.batch-size` accepts 1–10000 rows and bounds each response, not the total result. One batch is prefetched. Each keyset request searches and sorts the remaining index, so large full scans can cost more than RAM cursor scans; benchmark your workload. Scans are not snapshots of concurrent writes. Document keys must be valid UTF-8 without ASCII control characters; unsafe keys fail explicitly. Type discovery continues to sample unindexed fields.
+
+This mode requires the current Software Search-on-Flex preview, including cursor-free aggregation and field loading. It does not enable Search on a database where Search is absent or support the older 8.6 Flex build in the historical matrix. See link:benchmarks/issue-118/README.adoc[the pinned retest] and https://redis.io/docs/latest/operate/rs/flex/search/[Redis's current Software Flex requirements].
 
 == Quick start
 

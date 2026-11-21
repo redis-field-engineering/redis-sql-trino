@@ -423,6 +423,7 @@ public class RediSearchSession {
     }
 
     public void createTable(SchemaTableName schemaTableName, List<RediSearchColumnHandle> columns) {
+        verifyWritesSupported();
         String index = schemaTableName.getTableName();
         if (!sync.ftList().contains(index)) {
             Map<String, Type> types = new LinkedHashMap<>();
@@ -476,6 +477,7 @@ public class RediSearchSession {
      * documents never sees; DELETE works on both.
      */
     public void verifyWritable(SchemaTableName tableName) {
+        verifyWritesSupported();
         RediSearchTable table = getTable(tableName);
         if (table.getIndexInfo().getKeyType().filter(type -> type == RediSearchIndexInfo.KeyType.JSON).isPresent()) {
             throw new TrinoException(NOT_SUPPORTED, format(
@@ -485,6 +487,7 @@ public class RediSearchSession {
     }
 
     public void dropTable(SchemaTableName tableName) {
+        verifyWritesSupported();
         String index = toRemoteTableName(tableName.getTableName());
         sync.ftDropindex(index, true);
         RediSearchColumnTypes.delete(sync, index);
@@ -492,12 +495,20 @@ public class RediSearchSession {
     }
 
     public void addColumn(SchemaTableName schemaTableName, ColumnMetadata columnMetadata) {
+        verifyWritesSupported();
         String tableName = toRemoteTableName(schemaTableName.getTableName());
         FieldArgs field = buildField(columnMetadata.getName(), columnMetadata.getType());
         // Also for an index created outside Trino, whose other columns keep the types read from FT.INFO
         RediSearchColumnTypes.add(sync, tableName, columnMetadata.getName(), columnMetadata.getType());
         sync.ftAlter(tableName, List.of(field));
         tableCache.invalidate(schemaTableName);
+    }
+
+    void verifyWritesSupported() {
+        if (config.isFlexEnabled()) {
+            throw new TrinoException(NOT_SUPPORTED,
+                    "Redis Flex mode currently supports reads of existing indexes only; writes and DDL are not supported");
+        }
     }
 
     private String toRemoteTableName(String tableName) {
@@ -559,7 +570,23 @@ public class RediSearchSession {
     }
 
     private Optional<RediSearchIndexInfo> indexInfo(String index) {
-        return indexInfo(sync, index);
+        return config.isFlexEnabled() ? cursorFreeIndexInfo(sync, index) : indexInfo(sync, index);
+    }
+
+    private static Optional<RediSearchIndexInfo> cursorFreeIndexInfo(RedisClusterCommands<String, String> commands,
+            String index) {
+        try {
+            return Optional.of(RediSearchIndexInfo.parse(commands.dispatch(FT_INFO,
+                    new NestedMultiOutput<>(StringCodec.UTF8), new CommandArgs<>(StringCodec.UTF8).add(index))));
+        } catch (io.lettuce.core.RedisCommandExecutionException failure) {
+            String message = failure.getMessage();
+            if (message != null && (message.startsWith("SEARCH_INDEX_NOT_FOUND ")
+                    || message.contains("Unknown index name") || message.endsWith(": no such index"))) {
+                return Optional.empty();
+            }
+            // Authentication, ACL denial, timeouts and missing capabilities are not a missing table.
+            throw failure;
+        }
     }
 
     private static Optional<RediSearchIndexInfo> indexInfo(RedisClusterCommands<String, String> sync, String index) {
@@ -644,6 +671,23 @@ public class RediSearchSession {
     public AggregateResult aggregate(Connection scan, RediSearchTableHandle table, List<RediSearchColumnHandle> columns,
             ExactHashReader exactReader, RediSearchReadStats stats) {
         return aggregate(scan, table, columns, exactReader, stats, Optional.empty());
+    }
+
+    Optional<RediSearchIndexInfo> cursorFreeIndexInfo(Connection scan, RediSearchTableHandle table,
+            RediSearchReadStats stats) {
+        Optional<RediSearchIndexInfo> info = stats.redisRequest(() -> cursorFreeIndexInfo(scan.sync, table.getIndex()));
+        if (info.isEmpty()) {
+            throw new TableNotFoundException(table.getSchemaTableName());
+        }
+        verifyIndexed(table.getIndex(), info.get());
+        return info;
+    }
+
+    CompletableFuture<AggregationReply<String>> aggregateAsync(Connection scan, Aggregation aggregation,
+            RediSearchReadStats stats) {
+        stats.aggregateRequests.increment();
+        return stats.redisRequestAsync(() -> scan.async.ftAggregate(aggregation.getIndex(),
+                aggregation.getQuery(), aggregation.getArgs()).toCompletableFuture());
     }
 
     public AggregateResult aggregate(Connection scan, RediSearchTableHandle table, List<RediSearchColumnHandle> columns,

@@ -341,7 +341,7 @@ public class RediSearchQueryBuilder {
 	}
 
 	// FILTER doesn't take PARAMS, so values are inlined
-	private static String stringLiteral(String value) {
+	static String stringLiteral(String value) {
 		return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
 	}
 

@@ -61,7 +61,7 @@ public class RediSearchServer implements Closeable {
     }
 
     public RediSearchServer(Deployment deployment) {
-        this.cluster = RedisEnterprise.shared();
+        this.cluster = deployment == Deployment.FLEX ? RedisEnterprise.sharedFlex() : RedisEnterprise.shared();
         this.database = cluster.createDatabase(deployment);
         try {
             this.client = RedisClient.create(RedisURI.create(getRedisURI()));

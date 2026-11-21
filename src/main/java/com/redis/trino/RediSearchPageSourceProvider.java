@@ -61,13 +61,13 @@ public class RediSearchPageSourceProvider implements ConnectorPageSourceProvider
 		this.rediSearchSession = requireNonNull(rediSearchSession, "rediSearchSession is null");
 	}
 
-	// RediSearchPageSource reports no memory usage, so there is nothing to send to memoryContext
+	// Page sources report their buffered memory through getMemoryUsage().
 	@Override
 	public ConnectorPageSource createPageSource(ConnectorTransactionHandle transaction, ConnectorSession session,
 			ConnectorSplit split, ConnectorTableHandle table, Optional<ConnectorTableCredentials> tableCredentials,
 			List<ColumnHandle> columns, DynamicFilter dynamicFilter, MemoryContext memoryContext) {
 		RediSearchTableHandle tableHandle = (RediSearchTableHandle) table;
-		if (rediSearchSession.getConfig().isDynamicFilteringEnabled()
+		if (!rediSearchSession.getConfig().isFlexEnabled() && rediSearchSession.getConfig().isDynamicFilteringEnabled()
 				&& RediSearchSplitManager.acceptsDynamicFilter(tableHandle, dynamicFilter.getColumnsCovered())) {
 			tableHandle = withDynamicFilter(tableHandle, dynamicFilter.getCurrentPredicate());
 			if (tableHandle.getConstraint().isNone()) {
@@ -80,6 +80,9 @@ public class RediSearchPageSourceProvider implements ConnectorPageSourceProvider
 			handles.add((RediSearchColumnHandle) handle);
 		}
 		ImmutableList<RediSearchColumnHandle> columnHandles = handles.build();
+		if (rediSearchSession.getConfig().isFlexEnabled()) {
+			return new RediSearchCursorFreePageSource(rediSearchSession, tableHandle, columnHandles);
+		}
 		return new RediSearchPageSource(rediSearchSession, tableHandle, columnHandles,
 				((RediSearchSplit) split).getPartition());
 	}

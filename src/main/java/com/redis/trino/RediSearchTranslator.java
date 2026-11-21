@@ -142,6 +142,24 @@ public class RediSearchTranslator {
 
 	public Aggregation aggregate(RediSearchTableHandle table, List<RediSearchColumnHandle> outputs,
 			Optional<RediSearchIndexInfo> indexInfo, Optional<RediSearchScanPartition> partition) {
+		return aggregate(table, outputs, indexInfo, partition, Optional.empty(), 0);
+	}
+
+	/** A raw document page, ordered by unique key. No SQL operation may discard or reorder its rows. */
+	public Aggregation aggregatePage(RediSearchTableHandle table, List<RediSearchColumnHandle> outputs,
+			Optional<RediSearchIndexInfo> indexInfo, Optional<String> afterKey, int count) {
+		com.google.common.base.Preconditions.checkArgument(count > 0, "Page size must be positive");
+		com.google.common.base.Preconditions.checkArgument(table.getTermAggregations().isEmpty()
+				&& table.getMetricAggregations().isEmpty() && table.getSort().isEmpty()
+				&& table.getLimit().isEmpty() && table.getConstraint().isAll() && table.getFilters().isEmpty(),
+				"Cursor-free scans require an unmodified document table");
+		afterKey.ifPresent(RediSearchCursorFreePageSource::verifyKey);
+		return aggregate(table, outputs, indexInfo, Optional.empty(), afterKey, count);
+	}
+
+	private Aggregation aggregate(RediSearchTableHandle table, List<RediSearchColumnHandle> outputs,
+			Optional<RediSearchIndexInfo> indexInfo, Optional<RediSearchScanPartition> partition,
+			Optional<String> afterKey, int pageSize) {
 		partition.ifPresent(value -> {
 			com.google.common.base.Preconditions.checkArgument(RediSearchScanPartition.isDocumentScan(table),
 					"Cannot partition a global operation");
@@ -258,7 +276,13 @@ public class RediSearchTranslator {
 		table.getLimit().ifPresent(limit -> args.limit(0, limit));
 		long cursorCount = scan && table.getLimit().isEmpty() && columns.size() <= 2
 				&& config.getNarrowScanCursorCount() > 0 ? config.getNarrowScanCursorCount() : config.getCursorCount();
-		args.withCursor(WithCursor.of(cursorCount > 0 ? cursorCount : null));
+		if (pageSize > 0) {
+			afterKey.ifPresent(key -> args.filter("@__key > " + RediSearchQueryBuilder.stringLiteral(key)));
+			args.sortBy(SortBy.of(new SortProperty("@__key", SortDirection.ASC)).max(pageSize));
+			args.limit(0, pageSize);
+		} else {
+			args.withCursor(WithCursor.of(cursorCount > 0 ? cursorCount : null));
+		}
 		List<RediSearchAggregationTerm> terms = table.getTermAggregations();
 		boolean global = groupBy.isPresent() && (terms == null || terms.isEmpty());
 		Set<String> jsonArrays = new LinkedHashSet<>();
