@@ -331,6 +331,8 @@ public class RedisEnterprise implements Closeable {
 				await("database " + uid + " endpoint", () -> isPingable(host, port));
 				return new Database(uid, host, port, deployment);
 			} catch (RuntimeException e) {
+				// Cleanup can need another activation timeout; report the original failure before that wait.
+				log.warn(e, "Failed to activate test database %s (%s); cleaning up", uid, deployment);
 				// The license counts its shards until it's gone: other test classes would fail to create theirs
 				try {
 					delete(uid);

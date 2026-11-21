@@ -619,7 +619,7 @@ For externally owned indexes, removing an index without its documents must be do
 
 |VARBINARY, JSON, TIME(p), TIME(p) WITH TIME ZONE, and TIMESTAMP(p) with or without time zone where p differs from 3
 |TAG NOINDEX
-|Lossless text encodings; temporal precision 0 through 12 is supported. These encoded values are evaluated in Trino for predicates, grouping and ordering.
+|Lossless text encodings; temporal precision 0 through 12 is supported. Predicates and grouping on these encodings stay in Trino. The bounded HASH TopN path can compare supported orderable types using the same typed decoder.
 
 |ARRAY, MAP, ROW of supported types
 |TAG NOINDEX
@@ -754,7 +754,7 @@ If one aggregate in the same aggregation cannot be translated, or Trino must fil
 On HASH indexes, `count(column)` sums loaded-field existence indicators instead of Redis's document COUNT, so it excludes SQL NULLs, including on unindexed fields.
 `count_if(boolean_column)` counts stored true values. Indicator sums use the same exact-integer row-count and runtime growth guards as integer sums.
 FILTER clauses currently become Trino aggregation masks and remain in Trino, even when the underlying BOOLEAN field is stored directly.
-Eligible HASH `SELECT DISTINCT` and single-DISTINCT rewrites can group exact keys in Redis within the existing group budget, transferring those keys for Trino's final counting step.
+Eligible HASH `SELECT DISTINCT` groups exact keys in Redis within the existing group budget. Supported single-DISTINCT count rewrites add a second GROUPBY/REDUCE stage, returning final global or grouped counts rather than transferring every distinct key. All-NULL groups and empty global input preserve SQL zero-count semantics.
 Unsafe BIGINT/DECIMAL and encoded grouping retain Trino execution; no approximate distinct reducer replaces SQL's exact answer.
 Trino also evaluates HAVING after the groups are returned.
 
@@ -771,7 +771,8 @@ This preserves the Redis double result; it does not give arbitrary-precision dec
 With RESP2, eligible floating aggregations stay in Trino because precision can be lost between shards before the coordinator replies.
 
 NUMERIC-backed BIGINT grouping stays in Trino so adjacent large integers do not collapse into one double group.
-BOOLEAN, UUID, CHAR, REAL and TIMESTAMP(3) grouping also stay in Trino until stored spellings and narrowing can be normalized to the same SQL keys exactly.
+HASH BOOLEAN grouping normalizes case and false spellings to the decoded SQL value. HASH CHAR of length at most eight normalizes Unicode code-point truncation and trailing ASCII spaces. These paths require the probed case-expression capability.
+UUID, longer CHAR, REAL and TIMESTAMP(3) grouping stay in Trino until stored spellings and narrowing can be normalized to the same SQL keys exactly.
 DECIMAL grouping and floating grouping with unsupported field names also stay in Trino.
 Other pushed-down BIGINT computations are exact only within double's integer precision range; reading exact stored values does not recover precision already lost in an aggregate.
 Widened INTEGER/SMALLINT/TINYINT SUM inputs have conservative document-count bounds; an unknown or excessive count retains Trino computation.
@@ -797,17 +798,18 @@ A document scan returning an eligible arithmetic expression computes it in the c
 `LIMIT` can run in Redis when an exact residual filter is not required in Trino.
 Without an `ORDER BY`, SQL does not guarantee which matching rows a limit returns.
 
-For HASH indexes, `ORDER BY ... LIMIT` uses Redis `SORTBY` when all sort keys are indexed NUMERIC columns of type DOUBLE, REAL, INTEGER, SMALLINT or TINYINT, with supported field names and `NULLS LAST`.
+For HASH indexes, `ORDER BY ... LIMIT` uses Redis `SORTBY` when all sort keys are indexed NUMERIC columns of type DOUBLE, INTEGER, SMALLINT or TINYINT, with supported field names and `NULLS LAST`.
 Trino sorts the returned candidates to produce the final order.
 BIGINT and DECIMAL sort keys do not use this path because Redis double ordering can lose precision.
 JSON ordering stays in Trino.
 
-A separate HASH optimization supports one TIMESTAMP(3), BIGINT or VARCHAR sort key, `NULLS LAST`, and a limit of at most 1,000.
-It scans keys and exact order values, keeps a bounded set of candidates, and loads their projected fields with pipelined `HMGET` only after selection finishes.
-This reduces wide-row retrieval but still scans the matching keys.
-VARCHAR comparison uses UTF-8 byte order and BIGINT retains exact stored integers.
-TIMESTAMP WITH TIME ZONE, multiple keys on this path, larger limits and other null ordering remain in Trino.
-Selection checks the configured timeout over the scan and emits no candidates if it fails.
+A separate HASH optimization uses Trino typed comparators for multiple supported orderable keys, either direction and both NULL orders.
+It scans keys and exact sort values, keeps a bounded set of candidates, and loads projected fields with pipelined `HMGET` only after selection finishes.
+This includes exact BIGINT/DECIMAL, floating-point, text, binary and temporal ordering; unsupported shapes retain Trino execution.
+DOUBLE/REAL/DECIMAL sort fields use narrow exact reads rather than loading every source document's payload.
+`redisearch.local-topn.max-candidates` defaults to 1,000, accepts values up to 100,000, and can be set to zero to disable this path.
+Selection batches, typed candidate keys and hydration reserve Trino memory. Selection checks the configured timeout and emits no candidates if it fails.
+The optimization reduces wide-row retrieval but still scans matching keys. JSON ordering remains in Trino.
 
 ==== Joins and optimizer statistics
 

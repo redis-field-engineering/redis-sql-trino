@@ -608,13 +608,23 @@ public class RediSearchQueryBuilder {
 	}
 
 	public Optional<GroupBy> group(RediSearchTableHandle table, Map<String, String> normalizedKeys) {
-		List<RediSearchAggregationTerm> terms = table.getTermAggregations();
-		List<RediSearchAggregation> aggregates = table.getMetricAggregations();
+		return group(new RediSearchAggregationStage(table.getTermAggregations(), table.getMetricAggregations(), false), normalizedKeys);
+	}
+
+	public Optional<GroupBy> group(RediSearchAggregationStage stage, Map<String, String> normalizedKeys) {
+		return group(stage, normalizedKeys, List.of());
+	}
+
+	public Optional<GroupBy> group(RediSearchAggregationStage stage, Map<String, String> normalizedKeys,
+			List<String> preservedPresenceKeys) {
+		List<RediSearchAggregationTerm> terms = stage.terms();
+		List<RediSearchAggregation> aggregates = stage.metrics();
 		List<String> groupFields = new ArrayList<>();
 		if (terms != null && !terms.isEmpty()) {
 			groupFields = terms.stream().map(RediSearchAggregationTerm::getTerm)
 					.map(field -> normalizedKeys.getOrDefault(field, field)).collect(Collectors.toList());
 		}
+		groupFields.addAll(preservedPresenceKeys);
 		List<Reducer> reducers = aggregates.stream().flatMap(aggregation -> {
 			Stream<Reducer> values = reducers(aggregation);
 			return aggregation.getIntegerSumRowLimit().isPresent()

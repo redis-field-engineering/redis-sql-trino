@@ -404,7 +404,9 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		rediSearchSession.createTable(tableMetadata.getTable(), columns);
 
 		setRollback(() -> {
-			String index = rediSearchSession.getTable(tableMetadata.getTable()).getTableHandle().getIndex();
+			// CREATE uses the table name as its index. A canceled writer may have left a
+			// failed schema-cache load in flight; rollback must not depend on that load.
+			String index = tableMetadata.getTable().getTableName();
 			rediSearchSession.dropTable(tableMetadata.getTable());
 			relationMetadata.deleteComments(index);
 		});
@@ -560,47 +562,47 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	// and a DECIMAL with more digits than a double holds.
 	private static final Set<Type> SORTABLE_TYPES = Set.of(DOUBLE, REAL, INTEGER, SMALLINT, TINYINT);
 
-	/**
-	 * Pushes ORDER BY ... LIMIT down to Redis as SORTBY ... MAX for scans of hash indexes, on NUMERIC columns.
-	 * Redis sorts documents that have no value last in both directions, so only NULLS LAST is pushed down. Trino still
-	 * sorts the rows Redis returns.
-	 */
+	/** Prefer Redis numeric SORTBY, otherwise retain an exact bounded heap before fetching wide HASH projections. */
 	@Override
 	public Optional<TopNApplicationResult<ConnectorTableHandle>> applyTopN(ConnectorSession session,
 			ConnectorTableHandle table, long topNCount, List<SortItem> sortItems, Map<String, ColumnHandle> assignments) {
 		if (rediSearchSession.getConfig().isFlexEnabled()) {
 			return Optional.empty();
 		}
-
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
-		// Sorting the first rows, or the groups, would differ from sorting the documents
 		if (handle.getLimit().isPresent() || !handle.getSort().isEmpty() || !handle.getTermAggregations().isEmpty()
-				|| !handle.getMetricAggregations().isEmpty() || topNCount == 0) {
+				|| !handle.getMetricAggregations().isEmpty() || topNCount <= 0 || sortItems.isEmpty()) {
 			return Optional.empty();
 		}
-		// With DIALECT 3, a JSON index returns its values as JSON text, which Redis would sort as strings
-		if (rediSearchSession.getTable(handle.getSchemaTableName()).getIndexInfo().getKeyType()
-				.filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
+		RediSearchTable schema = rediSearchSession.getTable(handle.getSchemaTableName());
+		if (schema.getIndexInfo().getKeyType().filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
 			return Optional.empty();
 		}
-		boolean local = sortItems.size() == 1 && topNCount <= 1000
-				&& assignments.get(sortItems.get(0).getName()) instanceof RediSearchColumnHandle candidate
-				&& (candidate.getType() == io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS
-						|| candidate.getType().equals(BIGINT) || candidate.getType() instanceof io.trino.spi.type.VarcharType);
+		List<RediSearchColumnHandle> columns = new java.util.ArrayList<>();
+		boolean nativeSort = true;
+		for (SortItem item : sortItems) {
+			if (!(assignments.get(item.getName()) instanceof RediSearchColumnHandle column)
+					|| column.getExpression().isPresent()
+					|| schema.getColumns().stream().noneMatch(candidate -> candidate.getName().equals(column.getName()))) {
+				return Optional.empty();
+			}
+			columns.add(column);
+			nativeSort &= column.getFieldType() == RediSearchFieldType.NUMERIC && column.isSupportsPredicates()
+                    // Distinct external doubles can decode to the same REAL; Redis must not break SQL ties before
+                    // later sort keys. The typed local comparator groups those spellings as the same float.
+                    && !column.getType().equals(REAL)
+					&& SORTABLE_TYPES.contains(column.getType()) && RediSearchQueryBuilder.isProperty(column.getName())
+					&& !item.getSortOrder().isNullsFirst();
+		}
+		boolean local = !nativeSort;
+		if (local && (topNCount > rediSearchSession.getConfig().getLocalTopNMaxCandidates()
+				|| columns.stream().anyMatch(column -> !RediSearchLocalTopN.supports(column.getType())))) {
+			return Optional.empty();
+		}
 		ImmutableList.Builder<RediSearchSortItem> sort = ImmutableList.builder();
-		for (SortItem sortItem : sortItems) {
-			RediSearchColumnHandle column = (RediSearchColumnHandle) assignments.get(sortItem.getName());
-			if (column == null || (!local && column.getFieldType() != RediSearchFieldType.NUMERIC) || !column.isSupportsPredicates()
-					|| (!local && !SORTABLE_TYPES.contains(column.getType())) || !RediSearchQueryBuilder.isProperty(column.getName())) {
-				return Optional.empty();
-			}
-			switch (sortItem.getSortOrder()) {
-			case ASC_NULLS_LAST -> sort.add(new RediSearchSortItem(column.getName(), true, local));
-			case DESC_NULLS_LAST -> sort.add(new RediSearchSortItem(column.getName(), false, local));
-			default -> {
-				return Optional.empty();
-			}
-			}
+		for (int i = 0; i < sortItems.size(); i++) {
+			var order = sortItems.get(i).getSortOrder();
+			sort.add(new RediSearchSortItem(columns.get(i).getName(), order.isAscending(), local, order.isNullsFirst()));
 		}
 		return Optional.of(new TopNApplicationResult<>(handle.withTopN(sort.build(), topNCount), false, false));
 	}
@@ -614,7 +616,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
 		// The first rows of a sort, filtered, aren't the first of the filtered rows
-		if (!handle.getSort().isEmpty() || handle.getLimit().isPresent()) {
+		if (!handle.getSort().isEmpty() || handle.getLimit().isPresent() || !handle.getAggregationStages().isEmpty()) {
+			// The filters stored on the handle run on source documents. HAVING must not be moved before GROUPBY.
 			return Optional.empty();
 		}
 
@@ -757,13 +760,16 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		// Global aggregation is represented by [[]]
 		verify(!groupingSets.isEmpty(), "No grouping sets provided");
 		// GROUPBY would run before a LIMIT or SORTBY, over every document rather than the first ones
-		if (!table.getTermAggregations().isEmpty() || table.getLimit().isPresent() || !table.getSort().isEmpty()) {
-			log.debug("Rejecting aggregation pushdown: input already has grouping, a limit or ordering");
+		if (table.getLimit().isPresent() || !table.getSort().isEmpty()) {
+			log.debug("Rejecting aggregation pushdown: input already has a limit or ordering");
 			return Optional.empty();
 		}
 		if (groupingSets.size() != 1) {
 			log.debug("Rejecting aggregation pushdown: multiple grouping sets are not translated");
 			return Optional.empty();
+		}
+		if (!table.getAggregationStages().isEmpty()) {
+			return applyCountOverDistinct(table, aggregates, assignments, groupingSets.getFirst());
 		}
 		if (!groupingSets.get(0).isEmpty()) {
 			// No reliable distinct-cardinality statistic is available. Document count is an upper bound;
@@ -783,9 +789,13 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		ImmutableList.Builder<Assignment> resultAssignments = ImmutableList.builder();
 		ImmutableList.Builder<RediSearchAggregation> aggregations = ImmutableList.builder();
 		ImmutableList.Builder<RediSearchAggregationTerm> terms = ImmutableList.builder();
+		Set<String> aggregateNames = rediSearchSession.getTable(table.getSchemaTableName()).getColumns().stream()
+				.map(RediSearchColumnHandle::getName).collect(Collectors.toSet());
+		assignments.values().stream().map(RediSearchColumnHandle.class::cast)
+				.forEach(column -> aggregateNames.add(column.getName()));
 		for (int i = 0; i < aggregates.size(); i++) {
 			AggregateFunction function = aggregates.get(i);
-			String colName = SYNTHETIC_COLUMN_NAME_PREFIX + i;
+			String colName = aggregateAlias(SYNTHETIC_COLUMN_NAME_PREFIX + i, aggregateNames);
 			Optional<RediSearchAggregation> aggregation = RediSearchAggregation.handleAggregation(function, assignments,
 					colName, countValues);
 			if (aggregation.isEmpty()) {
@@ -816,9 +826,16 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			aggregations.add(aggregation.get());
 		}
 		for (ColumnHandle columnHandle : groupingSets.get(0)) {
-			if (((RediSearchColumnHandle) columnHandle).getType().equals(DOUBLE)
+			Type keyType = ((RediSearchColumnHandle) columnHandle).getType();
+			if (RediSearchGroupingNormalizer.requiresNormalization(keyType)
 					&& !rediSearchSession.isCaseSupported(table.getIndex())) {
-				log.debug("Rejecting DOUBLE GROUP BY pushdown: signed-zero normalization requires case()");
+				log.debug("Rejecting GROUP BY pushdown: canonical normalization requires case()");
+				return Optional.empty();
+			}
+			if ((keyType.equals(io.trino.spi.type.BooleanType.BOOLEAN) || keyType instanceof io.trino.spi.type.CharType)
+					&& rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo().getKeyType()
+							.filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
+				log.debug("Rejecting GROUP BY pushdown: canonical text decoding is implemented for HASH fields only");
 				return Optional.empty();
 			}
 			Optional<RediSearchAggregationTerm> termAggregation = RediSearchAggregationTerm
@@ -831,13 +848,14 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		}
 		ImmutableList<RediSearchAggregation> aggregationList = aggregations.build();
 		ImmutableList<RediSearchAggregationTerm> termList = terms.build();
+		boolean groupingOnly = aggregationList.isEmpty();
 		if (aggregationList.isEmpty()) {
 			if (termList.isEmpty() || rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo().getKeyType()
 					.filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
 				return Optional.empty();
 			}
 			// Redis requires a reducer, although SQL DISTINCT only needs group keys. Keep this internal;
-			// Trino receives the distinct keys (including NULL), then evaluates any outer COUNT exactly.
+			// Keys include NULL; an eligible following COUNT can append a second Redis aggregation stage.
 			Set<String> inputNames = assignments.values().stream().map(RediSearchColumnHandle.class::cast)
 					.map(RediSearchColumnHandle::getName).collect(Collectors.toSet());
 			String alias = "__trino_distinct_rows";
@@ -855,9 +873,78 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			log.debug("Rejecting aggregation pushdown: RESP2 cannot preserve floating-point results or grouping keys");
 			return Optional.empty();
 		}
-		RediSearchTableHandle tableHandle = table.withAggregations(termList, aggregationList);
+		RediSearchTableHandle tableHandle = table.withAggregationStages(List.of(
+				new RediSearchAggregationStage(termList, aggregationList, groupingOnly)));
 		return Optional.of(new AggregationApplicationResult<>(tableHandle, projections.build(),
 				resultAssignments.build(), Map.of(), false));
+	}
+
+	/** Completes Trino's single-DISTINCT rewrite without sending the distinct keys back to Trino. */
+	private Optional<AggregationApplicationResult<ConnectorTableHandle>> applyCountOverDistinct(
+			RediSearchTableHandle table, List<AggregateFunction> functions, Map<String, ColumnHandle> assignments,
+			List<ColumnHandle> groupingKeys) {
+		if (table.getAggregationStages().size() != 1 || !table.getAggregationStages().getFirst().groupingOnly()
+				|| functions.isEmpty()) {
+			return Optional.empty();
+		}
+		RediSearchAggregationStage input = table.getAggregationStages().getFirst();
+		Map<String, RediSearchAggregationTerm> keys = input.terms().stream()
+				.collect(Collectors.toMap(RediSearchAggregationTerm::getTerm, term -> term));
+		ImmutableList.Builder<RediSearchAggregationTerm> terms = ImmutableList.builder();
+		for (ColumnHandle handle : groupingKeys) {
+			if (!(handle instanceof RediSearchColumnHandle column) || column.getExpression().isPresent()
+					|| !keys.containsKey(column.getName()) || !keys.get(column.getName()).getType().equals(column.getType())) {
+				return Optional.empty();
+			}
+			terms.add(keys.get(column.getName()));
+		}
+		Set<String> reserved = assignments.values().stream().map(RediSearchColumnHandle.class::cast)
+				.map(RediSearchColumnHandle::getName).collect(Collectors.toSet());
+		input.metrics().forEach(metric -> reserved.add(metric.getAlias()));
+		ImmutableList.Builder<ConnectorExpression> projections = ImmutableList.builder();
+		ImmutableList.Builder<Assignment> results = ImmutableList.builder();
+		ImmutableList.Builder<RediSearchAggregation> metrics = ImmutableList.builder();
+		OptionalLong documents = rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo().getNumDocs();
+		for (int i = 0; i < functions.size(); i++) {
+			AggregateFunction function = functions.get(i);
+			if (!function.getFunctionName().equals(RediSearchAggregation.COUNT) || function.isDistinct()
+					|| function.getFilter().isPresent() || !function.getSortItems().isEmpty() || function.getArguments().size() > 1) {
+				return Optional.empty();
+			}
+			if (!function.getArguments().isEmpty()) {
+				if (!(function.getArguments().getFirst() instanceof Variable variable)
+						|| !(assignments.get(variable.getName()) instanceof RediSearchColumnHandle column)
+						|| column.getExpression().isPresent() || !keys.containsKey(column.getName())
+						|| !keys.get(column.getName()).getType().equals(column.getType())) {
+					return Optional.empty();
+				}
+			}
+			String alias = aggregateAlias(SYNTHETIC_COLUMN_NAME_PREFIX + "_distinct_" + i, reserved);
+			Optional<RediSearchAggregation> translated = RediSearchAggregation.handleAggregation(function, assignments, alias, false);
+			if (translated.isEmpty() || !translated.orElseThrow().isIntegerSumSafe(documents)) {
+				return Optional.empty();
+			}
+			RediSearchColumnHandle output = new RediSearchColumnHandle(alias, function.getOutputType(),
+					RediSearchFieldType.NUMERIC, false, false, Optional.empty());
+			projections.add(new Variable(alias, function.getOutputType()));
+			results.add(new Assignment(alias, output, function.getOutputType()));
+			metrics.add(translated.orElseThrow());
+		}
+		RediSearchTableHandle result = table.appendAggregation(terms.build(), metrics.build());
+		return Optional.of(new AggregationApplicationResult<>(result, projections.build(), results.build(), Map.of(), false));
+	}
+
+	private static String aggregateAlias(String base, Set<String> reserved) {
+		String alias = base;
+		while (true) {
+			List<String> names = List.of(alias, "__has_" + alias, "__value_" + alias, "__count_" + alias,
+					"__precision_count_" + alias);
+			if (names.stream().noneMatch(reserved::contains)) {
+				reserved.addAll(names);
+				return alias;
+			}
+			alias += "_";
+		}
 	}
 
 	static boolean isGroupPushdownSafe(OptionalLong documents, long limit) {

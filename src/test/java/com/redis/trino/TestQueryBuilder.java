@@ -610,6 +610,21 @@ public class TestQueryBuilder {
 	}
 
 	@Test
+	public void testCountOverDistinctPreservesSourceNullness() {
+		RediSearchColumnHandle value = filterable("v", RediSearchFieldType.TAG);
+		RediSearchAggregationStage input = new RediSearchAggregationStage(
+				List.of(new RediSearchAggregationTerm("v", value.getType())),
+				List.of(new RediSearchAggregation("count", BIGINT, Optional.empty(), "internal")), true);
+		RediSearchTableHandle table = new RediSearchTableHandle(new SchemaTableName("tpch", "beers"), "beers")
+				.withAggregationStages(List.of(input)).appendAggregation(List.of(),
+						List.of(new RediSearchAggregation("count", BIGINT, Optional.of(value), "n")));
+		RediSearchTranslator.Aggregation query = new RediSearchTranslator(new RediSearchConfig()).aggregate(table,
+				List.of(numeric("n", BIGINT)), Optional.of(hashIndex()));
+		assertThat(commandString(query)).contains("APPLY exists(@v) AS __trino_present0 GROUPBY 2 @v @__trino_present0",
+				"APPLY @__trino_present0 AS __has_n GROUPBY 0 REDUCE SUM 1 @__has_n AS n");
+	}
+
+	@Test
 	public void testNonNullCountTranslationAndPrecisionGuard() {
 		RediSearchColumnHandle source = filterable("style", RediSearchFieldType.TAG);
 		AggregateFunction function = new AggregateFunction("count", BIGINT,

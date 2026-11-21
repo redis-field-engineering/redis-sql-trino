@@ -19,10 +19,10 @@ Historical unsupported or not-planned decisions are context, not permanent restr
 |#174 |Opt-in single-document HASH atomic update visibility |Multi-document transactions and retry-safe execution
 |#175 |Native text/GEO search table function with SQL composition |Vector binding, score/distance outputs and typed wrappers
 |#176 |HASH COUNT(column) and COUNT_IF(stored BOOLEAN) |General FILTER masks and computed conditions
-|#177 |Exact bounded DISTINCT key grouping before transfer |Multi-stage distinct reduction and wider canonical keys
-|#178 |Canonical grouping guards and exact boundary coverage |Further exact numeric/decimal and arithmetic strategies
+|#177 |Exact bounded two-stage global/grouped DISTINCT counting in Redis |Wider canonical keys and additional aggregate shapes
+|#178 |Canonical DOUBLE, HASH BOOLEAN and bounded Unicode CHAR grouping |Further exact numeric/decimal and arithmetic strategies
 |#179 |HASH NULL, lexical VARCHAR and simple exact LIKE filters |General wildcards and broader JSON predicates
-|#180 |Exact BIGINT/VARCHAR late-materialized TopN |Multiple keys, other NULL ordering and JSON
+|#180 |Typed multiple-key late-materialized TopN and both NULL orders |JSON deferred projection and further measured tuning
 |#181 |Grouping-only pushdown and relational feasibility design |Join/window execution and multiple grouping sets
 |#182 |DEBUG rejection reasons and scan/TopN MemoryContext |Tighter proven bounds and EXPLAIN annotations
 |#183 |Reconciled statement/type/execution documentation |Keep references current as capabilities land
@@ -46,14 +46,16 @@ Independent Maven test JVMs own separate Redis Software clusters; `redisearch.te
 OSS compatibility tests use a disposable container per class; CI configures Redis 8.4 and 8.10.3.
 Software suites cover single-shard and OSS Cluster API databases; product tests load the packaged plugin in stock Trino.
 
-Performance assertions compare exact results, plans and source metrics: grouped DISTINCT transfers keys, conditional counts return aggregates, and local TopN loads projected fields for selected candidates.
+Performance assertions compare exact results, plans and source metrics: eligible DISTINCT counts return final aggregates, conditional counts return aggregates, and local TopN loads projected fields for selected candidates.
 No new full-data ClickBench timings or comparative speedups are claimed.
 Paid Cloud qualification and existing Flex capability issues remain separate from Docker validation.
 
-Validation recorded on November 21, 2026:
+Initial implementation validation recorded on November 21, 2026 (before the later Flex integration and extended pushdown follow-up):
 
 * Full `package` build with normal static checks and bounded JUnit parallelism: 491 tests reported, zero failures/errors, 12 expected skips.
 * Redis OSS 8.4 and 8.10.3 compatibility suites: 137 tests each, zero failures/errors/skips; the final Boolean predicate regression was also checked on each version.
 * Stock Trino 484 with the packaged plugin: 20 product cases, zero failures/errors/skips, including native Search, views/comments/TRUNCATE and native JSON/ARRAY/TIMESTAMP(12) round trips on normal and sharded databases.
 
 The tests used disposable, isolated Docker environments. Earlier overloaded parallel runs correctly rejected explicit backend timeout warnings; serialized retries passed without relaxing production timeout or incomplete-result safeguards.
+
+Follow-up focused checks cover both single-shard and sharded Software execution. Canonical CHAR grouping reduced a 1,200-document fixture to six transferred groups, compared with 1,200 source rows when aggregation pushdown was disabled. Typed TopN scanned 1,107 sort-key rows, retained five candidates and fetched 15 projected field values for those winners. These are exact-result and work-reduction assertions, not full-data throughput claims.

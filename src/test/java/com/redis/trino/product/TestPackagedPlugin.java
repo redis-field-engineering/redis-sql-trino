@@ -147,4 +147,25 @@ class TestPackagedPlugin {
 			env.executeTrinoUpdate("DROP TABLE IF EXISTS " + target);
 		}
 	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
+	void testStagedDistinctAndTypedTopN(String catalog, RediSearchEnvironment env) {
+		String target = table(catalog, "pushdown_" + Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36));
+		try {
+			env.executeTrinoUpdate("CREATE TABLE " + target + " (g varchar, v varchar, id bigint, amount decimal(20,2))");
+			env.executeTrinoUpdate("INSERT INTO " + target + " VALUES "
+					+ "('A', 'x', BIGINT '9007199254740993', DECIMAL '12.34'), "
+					+ "('A', 'x', BIGINT '9007199254740994', DECIMAL '12.34'), "
+					+ "('A', NULL, BIGINT '3', DECIMAL '99.99'), ('B', NULL, BIGINT '4', NULL)");
+			assertThat(env.executeTrino("SELECT count(DISTINCT v) FROM " + target)).containsOnly(row(1L));
+			assertThat(env.executeTrino("SELECT g, count(DISTINCT v) FROM " + target + " GROUP BY g"))
+					.containsOnly(row("A", 1L), row("B", 0L));
+			assertThat(env.executeTrino("SELECT id FROM " + target + " ORDER BY amount ASC NULLS FIRST, id DESC LIMIT 3"))
+					.containsExactlyInOrder(row(4L), row(9007199254740994L), row(9007199254740993L));
+		} finally {
+			env.executeTrinoUpdate("DROP TABLE IF EXISTS " + target);
+		}
+	}
+
 }

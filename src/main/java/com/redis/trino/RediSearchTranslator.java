@@ -43,7 +43,6 @@ import io.lettuce.core.codec.StringCodec;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.CommandKeyword;
 import io.lettuce.core.search.arguments.AggregateArgs;
-import io.lettuce.core.search.arguments.AggregateArgs.GroupBy;
 import io.lettuce.core.search.arguments.AggregateArgs.SortBy;
 import io.lettuce.core.search.arguments.AggregateArgs.SortDirection;
 import io.lettuce.core.search.arguments.AggregateArgs.SortProperty;
@@ -180,33 +179,56 @@ public class RediSearchTranslator {
 					: "(" + query + ") (" + partition.get().query() + ")";
 		}
 		Map<String, List<String>> equalities = RediSearchQueryBuilder.equalities(table.getConstraint());
-		Map<String, String> normalizedKeys = new LinkedHashMap<>();
+		List<RediSearchAggregationStage> stages = table.getAggregationStages();
 		Set<String> usedNames = new LinkedHashSet<>();
 		columns.forEach(column -> usedNames.add(column.getName()));
-		table.getTermAggregations().forEach(term -> usedNames.add(term.getTerm()));
 		indexInfo.ifPresent(info -> info.getFields().forEach(field -> {
 			usedNames.add(field.getAttribute());
 			usedNames.add(field.getIdentifier());
 		}));
-		table.getMetricAggregations().forEach(metric -> {
-			usedNames.add(metric.getAlias());
-			usedNames.addAll(metric.getInputFields());
-		});
-		for (RediSearchAggregationTerm term : table.getTermAggregations()) {
-			if (term.getType().equals(DOUBLE)) {
-				String alias = "__trino_group" + normalizedKeys.size();
-				while (usedNames.contains(alias)) { alias += "_"; }
-				usedNames.add(alias);
-				normalizedKeys.put(term.getTerm(), alias);
-			}
+		for (RediSearchAggregationStage stage : stages) {
+			stage.terms().forEach(term -> usedNames.add(term.getTerm()));
+			stage.metrics().forEach(metric -> {
+				usedNames.add(metric.getAlias());
+				usedNames.add(metric.getValueField());
+				usedNames.add(metric.getHasValueField());
+				usedNames.add(metric.getCountAlias());
+				usedNames.add(metric.integerSumCountAlias());
+				usedNames.addAll(metric.getInputFields());
+			});
 		}
-		Optional<GroupBy> groupBy = queryBuilder.group(table, normalizedKeys);
+		List<RediSearchGroupingNormalizer.Plan> normalizations = new ArrayList<>();
+		for (int i = 0; i < stages.size(); i++) {
+			// Appended COUNT stages only regroup a subset of already canonical keys. A grouped
+			// NULL slot exists, so reapplying source-field normalization could turn it into false/zero.
+			RediSearchGroupingNormalizer.Plan plan = RediSearchGroupingNormalizer.plan(i == 0 ? stages.get(i).terms() : List.of(), usedNames);
+			normalizations.add(plan);
+			usedNames.addAll(plan.beforeExpressions().keySet());
+		}
+		List<Map<String, String>> preservedPresence = new ArrayList<>();
+		for (int i = 0; i < stages.size(); i++) {
+			Map<String, String> presence = new LinkedHashMap<>();
+			if (stages.get(i).groupingOnly() && i + 1 < stages.size()) {
+				for (RediSearchAggregation metric : stages.get(i + 1).metrics()) {
+					if (metric.isCountColumn()) {
+						String field = metric.getColumnHandle().orElseThrow().getName();
+						if (!presence.containsKey(field)) {
+							String alias = "__trino_present" + presence.size();
+							while (!usedNames.add(alias)) { alias += "_"; }
+							presence.put(field, alias);
+						}
+					}
+				}
+			}
+			preservedPresence.add(presence);
+		}
+		boolean grouped = stages.stream().anyMatch(stage -> !stage.metrics().isEmpty());
 		// A scan reads the documents' values. Redis returns a NUMERIC field loaded by name formatted as a double, and
 		// rounded to 12 significant digits unless it's an integer; LOAD * on a hash and DIALECT 3 on JSON return the
 		// values as stored. GROUPBY keys and REDUCE results are formatted the same way, so APPLY also returns them as
 		// mantissas and exponents.
 		Optional<RediSearchIndexInfo.KeyType> keyType = indexInfo.flatMap(RediSearchIndexInfo::getKeyType);
-		boolean scan = groupBy.isEmpty();
+		boolean scan = !grouped;
 		boolean json = scan && keyType.filter(RediSearchIndexInfo.KeyType.JSON::equals).isPresent();
 		boolean hashScan = scan && keyType.filter(RediSearchIndexInfo.KeyType.HASH::equals).isPresent();
 		// DIALECT 3 loads JSON values as arrays, which FILTER can't compare, so the reader keeps a scan's equal rows
@@ -224,10 +246,11 @@ public class RediSearchTranslator {
 		loads.addAll(equalities.keySet());
 		loads.addAll(filters.keySet());
 		// Sums and averages counting values, whose APPLY steps refer to their columns
-		List<RediSearchAggregation> countingValues = table.getMetricAggregations().stream()
+		List<RediSearchAggregation> inputMetrics = stages.isEmpty() ? List.of() : stages.getFirst().metrics();
+		List<RediSearchAggregation> countingValues = inputMetrics.stream()
 				.filter(RediSearchAggregation::isCountingValues).toList();
 		countingValues.forEach(metric -> loads.addAll(metric.getInputFields()));
-		List<RediSearchAggregation> nonNullCounts = table.getMetricAggregations().stream()
+		List<RediSearchAggregation> nonNullCounts = inputMetrics.stream()
 				.filter(RediSearchAggregation::isConditionalCount).toList();
 		nonNullCounts.forEach(metric -> loads.addAll(metric.getInputFields()));
 		Map<String, String> sources = new HashMap<>();
@@ -251,7 +274,7 @@ public class RediSearchTranslator {
 			}
 		}
 		// A grouping key is still needed when an outer COUNT prunes it from the scan's projected output.
-		table.getTermAggregations().forEach(term -> loads.add(term.getTerm()));
+		if (!stages.isEmpty()) { stages.getFirst().terms().forEach(term -> loads.add(term.getTerm())); }
 		// Always mark LOAD operands as field references. A bare field named "params" can be parsed as the
 		// command's PARAMS clause by a distributed coordinator; @params is unambiguous.
 		loads.forEach(field -> args.load("@" + field));
@@ -266,21 +289,31 @@ public class RediSearchTranslator {
 		// HASH filters only need their own fields. Execute these before loading a wide projection.
 		boolean earlyFilters = hashScan && !filters.isEmpty();
 		if (!earlyFilters) { filters.values().forEach(args::filter); }
-		for (RediSearchAggregation metric : countingValues) {
-			args.apply(metric.valueExpression(), metric.getValueField());
-			args.apply(metric.hasValueExpression(), metric.getHasValueField());
+		for (int i = 0; i < stages.size(); i++) {
+			RediSearchAggregationStage stage = stages.get(i);
+			Map<String, String> inputPresence = i == 0 ? Map.of() : preservedPresence.get(i - 1);
+			for (RediSearchAggregation metric : stage.metrics()) {
+				if (metric.isCountingValues()) {
+					args.apply(metric.valueExpression(), metric.getValueField());
+					args.apply(metric.hasValueExpression(), metric.getHasValueField());
+				} else if (metric.isConditionalCount()) {
+					String presence = metric.getColumnHandle().map(RediSearchColumnHandle::getName)
+							.map(inputPresence::get).map(alias -> "@" + alias).orElseGet(metric::hasValueExpression);
+					args.apply(presence, metric.getHasValueField());
+				}
+			}
+			// A NULL group slot exists in Redis's intermediate row. Preserve source HASH presence
+			// before grouping instead of mistaking that slot for a non-null SQL value in a later COUNT.
+			preservedPresence.get(i).forEach((field, alias) -> args.apply(inputPresence.containsKey(field)
+					? "@" + inputPresence.get(field) : "exists(@" + field + ")", alias));
+			RediSearchGroupingNormalizer.Plan plan = normalizations.get(i);
+			plan.beforeExpressions().forEach((alias, expression) -> args.apply(expression, alias));
+			queryBuilder.group(stage, plan.aliases(), List.copyOf(preservedPresence.get(i).values())).ifPresent(args::groupBy);
+			plan.afterExpressions().forEach((field, expression) -> args.apply(expression, field));
 		}
-		for (RediSearchAggregation metric : nonNullCounts) {
-			args.apply(metric.hasValueExpression(), metric.getHasValueField());
-		}
-		// Redis hashes -0 and +0 as separate numeric keys; SQL groups them together. A synthetic
-		// key leaves the source field intact for reducers/arithmetic where the sign can matter.
-		normalizedKeys.forEach((field, alias) -> args.apply("case(exists(@" + field + "), @" + field + " + 0, NULL)", alias));
-		groupBy.ifPresent(args::groupBy);
-		normalizedKeys.forEach((field, alias) -> args.apply("case(exists(@" + alias + "), @" + alias + ", NULL)", field));
 		// The keys and results that needn't be integers, as mantissas and exponents
 		Map<String, Type> exactNumbers = new HashMap<>();
-		if (groupBy.isPresent()) {
+		if (grouped) {
 			Map<String, RediSearchAggregation> metrics = table.getMetricAggregations().stream()
 					.collect(toMap(RediSearchAggregation::getAlias, identity()));
 			for (int i = 0; i < columns.size(); i++) {
@@ -320,7 +353,7 @@ public class RediSearchTranslator {
 			args.withCursor(WithCursor.of(cursorCount > 0 ? cursorCount : null));
 		}
 		List<RediSearchAggregationTerm> terms = table.getTermAggregations();
-		boolean global = groupBy.isPresent() && (terms == null || terms.isEmpty());
+		boolean global = grouped && terms.isEmpty();
 		Set<String> jsonArrays = new LinkedHashSet<>();
 		if (json) {
 			loads.stream().filter(load -> !RediSearchBuiltinField.isKeyColumn(load)).forEach(jsonArrays::add);

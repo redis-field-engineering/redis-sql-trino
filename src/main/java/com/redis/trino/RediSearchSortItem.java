@@ -31,22 +31,26 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
- * A column a pushed-down ORDER BY sorts on, with documents that have no value last.
+ * A column a pushed-down ORDER BY sorts on, including direction and SQL null ordering.
  */
 public class RediSearchSortItem {
 
 	private final String column;
 	private final boolean ascending;
 	private final boolean local;
+	private final boolean nullsFirst;
 
-	public RediSearchSortItem(String column, boolean ascending) { this(column, ascending, false); }
+	public RediSearchSortItem(String column, boolean ascending) { this(column, ascending, false, false); }
+
+	public RediSearchSortItem(String column, boolean ascending, boolean local) { this(column, ascending, local, false); }
 
 	@JsonCreator
 	public RediSearchSortItem(@JsonProperty("column") String column, @JsonProperty("ascending") boolean ascending,
-			@JsonProperty("local") boolean local) {
+			@JsonProperty("local") boolean local, @JsonProperty("nullsFirst") boolean nullsFirst) {
 		this.column = requireNonNull(column, "column is null");
 		this.ascending = ascending;
 		this.local = local;
+		this.nullsFirst = nullsFirst;
 	}
 
 	@JsonProperty
@@ -62,6 +66,14 @@ public class RediSearchSortItem {
 	@JsonProperty
 	public boolean isLocal() { return local; }
 
+	@JsonProperty
+	public boolean isNullsFirst() { return nullsFirst; }
+
+	io.trino.spi.connector.SortOrder sortOrder() {
+		return ascending ? (nullsFirst ? io.trino.spi.connector.SortOrder.ASC_NULLS_FIRST : io.trino.spi.connector.SortOrder.ASC_NULLS_LAST)
+				: (nullsFirst ? io.trino.spi.connector.SortOrder.DESC_NULLS_FIRST : io.trino.spi.connector.SortOrder.DESC_NULLS_LAST);
+	}
+
 	@Override
 	public boolean equals(Object obj) {
 		if (this == obj) {
@@ -71,16 +83,16 @@ public class RediSearchSortItem {
 			return false;
 		}
 		RediSearchSortItem other = (RediSearchSortItem) obj;
-		return column.equals(other.column) && ascending == other.ascending && local == other.local;
+		return column.equals(other.column) && ascending == other.ascending && local == other.local && nullsFirst == other.nullsFirst;
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(column, ascending, local);
+		return Objects.hash(column, ascending, local, nullsFirst);
 	}
 
 	@Override
 	public String toString() {
-		return column + (ascending ? " ASC" : " DESC");
+		return column + (ascending ? " ASC" : " DESC") + (nullsFirst ? " NULLS FIRST" : " NULLS LAST");
 	}
 }

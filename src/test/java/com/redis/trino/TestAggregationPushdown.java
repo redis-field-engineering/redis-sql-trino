@@ -251,11 +251,13 @@ public class TestAggregationPushdown extends AbstractTestQueryFramework {
 					"c", "a", "r", "1.000000001", "day", "2024-01-02Z"));
 			redis.hset("canonical_groups:2", Map.of("id", "2", "b", "true", "u", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 					"c", "a ", "r", "1.000000002", "day", "2024-01-02+01:00"));
-			for (String column : List.of("b", "u", "c", "r", "day")) {
+			for (String column : List.of("u", "r", "day")) {
 				assertThat(query("SELECT count(DISTINCT " + column + ") FROM canonical_groups"))
 						.isNotFullyPushedDown(AggregationNode.class).matches("VALUES BIGINT '1'");
 			}
-			assertThat(query("SELECT b, count(*) FROM canonical_groups GROUP BY b")).isNotFullyPushedDown(AggregationNode.class)
+			assertThat(query("SELECT count(DISTINCT b) FROM canonical_groups")).isFullyPushedDown().matches("VALUES BIGINT '1'");
+			assertThat(query("SELECT count(DISTINCT c) FROM canonical_groups")).isFullyPushedDown().matches("VALUES BIGINT '1'");
+			assertThat(query("SELECT b, count(*) FROM canonical_groups GROUP BY b")).isFullyPushedDown()
 					.matches("VALUES (true, BIGINT '2')");
 			assertThat(query("SELECT count_if(b) FROM canonical_groups")).isFullyPushedDown().matches("VALUES BIGINT '2'");
 			assertThat(query("SELECT r, count(*) FROM canonical_groups GROUP BY r")).isNotFullyPushedDown(AggregationNode.class)
@@ -282,14 +284,14 @@ public class TestAggregationPushdown extends AbstractTestQueryFramework {
 	public void testExactDistinctKeysAreGroupedBeforeTransfer() {
 		assertThat(query("SELECT DISTINCT brewery_id FROM beers")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '812', '264', '100'");
-		// Single DISTINCT aggregate rewriting can aggregate distinct keys in Redis and count in Trino.
+		// Both grouping stages execute in one Redis request, returning only the final count.
 		QueryRunner.MaterializedResultWithPlan result = getDistributedQueryRunner().executeWithPlan(getSession(),
 				"SELECT count(DISTINCT brewery_id) FROM beers");
 		assertThat(result.result().getOnlyValue()).isEqualTo(3L);
 		Metrics metrics = getDistributedQueryRunner().getCoordinator().getQueryManager().getFullQueryInfo(result.queryId())
 				.getQueryStats().getOperatorSummaries().stream().map(OperatorStats::getConnectorMetrics)
 				.reduce(Metrics.EMPTY, Metrics::mergeWith);
-		assertThat(((LongCount) metrics.getMetrics().get("redis.rows.received")).getTotal()).isEqualTo(3);
+		assertThat(((LongCount) metrics.getMetrics().get("redis.rows.received")).getTotal()).isEqualTo(1);
 		assertThat(query("SELECT DISTINCT last_mod FROM beers")).isFullyPushedDown()
 				.matches("VALUES VARCHAR '2010-07-22', CAST(NULL AS VARCHAR)");
 		assertThat(query("SELECT count(DISTINCT last_mod) FROM beers")).matches("VALUES BIGINT '1'");
@@ -345,7 +347,30 @@ public class TestAggregationPushdown extends AbstractTestQueryFramework {
 	}
 
 	@Test
+	public void testAggregateInternalAliasesDoNotShadowSourceFields() {
+		// External indexes can retain mixed-case physical names even though Trino normalizes SQL column names.
+		redis.ftCreate("aggregate_alias_collision", CreateArgs.builder().withPrefix("aggregate_alias_collision:").skipInitialScan().build(), List.of(
+				TagFieldArgs.builder().name("syntheticColumn0").build(), NumericFieldArgs.builder().name("n").build(),
+				NumericFieldArgs.builder().name("__has_syntheticColumn0").build(), NumericFieldArgs.builder().name("__value_syntheticColumn0").build(),
+				NumericFieldArgs.builder().name("__count_syntheticColumn0").build(), NumericFieldArgs.builder().name("__precision_count_syntheticColumn0").build()));
+		try {
+			assertUpdate("INSERT INTO aggregate_alias_collision VALUES ('a', 2, 3, 5, 7, 11), ('a', 4, 13, 17, 19, 23), "
+					+ "('b', NULL, 29, 31, 37, 41)", 3);
+			assertThat(query("SELECT syntheticColumn0, sum(n), sum(__has_syntheticColumn0), sum(__value_syntheticColumn0), "
+					+ "count(n), sum(__count_syntheticColumn0), sum(__precision_count_syntheticColumn0) "
+					+ "FROM aggregate_alias_collision GROUP BY syntheticColumn0"))
+					.isFullyPushedDown().matches("VALUES (VARCHAR 'a', DOUBLE '6', DOUBLE '16', DOUBLE '22', BIGINT '2', DOUBLE '26', DOUBLE '34'), "
+							+ "(VARCHAR 'b', CAST(NULL AS DOUBLE), DOUBLE '29', DOUBLE '31', BIGINT '0', DOUBLE '37', DOUBLE '41')");
+		} finally {
+			assertUpdate("DROP TABLE aggregate_alias_collision");
+		}
+	}
+
+	@Test
 	public void testHaving() {
+		assertThat(query("SELECT brewery_id, sum(abv) FROM beers GROUP BY brewery_id HAVING sum(abv) IS NULL"))
+				.isNotFullyPushedDown(FilterNode.class)
+				.matches("VALUES (VARCHAR '100', CAST(NULL AS DOUBLE))");
 		// The aggregation is pushed down and Trino filters the groups
 		assertThat(query("SELECT brewery_id, count(*) FROM beers GROUP BY brewery_id HAVING count(*) > 1"))
 				.isNotFullyPushedDown(FilterNode.class)

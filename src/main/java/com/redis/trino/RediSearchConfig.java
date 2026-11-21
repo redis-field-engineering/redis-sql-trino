@@ -398,4 +398,17 @@ public class RediSearchConfig {
         return this;
     }
 
+    private int localTopNMaxCandidates = 1000;
+
+    @Min(0)
+    @Max(100000)
+    public int getLocalTopNMaxCandidates() { return localTopNMaxCandidates; }
+
+    @Config("redisearch.local-topn.max-candidates")
+    @ConfigDescription("Maximum exact local TopN candidates retained before fetching wide projections; 0 disables local TopN")
+    public RediSearchConfig setLocalTopNMaxCandidates(int value) {
+        localTopNMaxCandidates = value;
+        return this;
+    }
+
 }
