@@ -96,14 +96,17 @@ public class RediSearchMergeSink implements ConnectorMergeSink {
 				String key = key(rowIdBlock, position);
 				List<Integer> channels = updateCaseChannels.get(INTEGER.getInt(caseNumberBlock, position));
 				Map<String, String> values = new HashMap<>();
+				if (session.getConfig().isFlexEnabled()) { values.put(RediSearchFlexWriteBuffer.ROW_MARKER, "1"); }
 				List<String> nulls = new ArrayList<>();
 				for (int channel : channels) {
 					RediSearchColumnHandle column = columns.get(channel);
 					Block block = page.getBlock(channel);
+					String field = session.getConfig().isFlexEnabled()
+							? session.flexWriteField(schemaTableName, column.getName()) : column.getName();
 					if (block.isNull(position)) {
-						nulls.add(column.getName());
+						nulls.add(field);
 					} else {
-						values.put(column.getName(), RediSearchPageSink.value(column.getType(), block, position));
+						values.put(field, RediSearchPageSink.value(column.getType(), block, position));
 					}
 				}
 				if (!values.isEmpty()) {

@@ -85,6 +85,7 @@ public class RediSearchPageSink implements ConnectorPageSink {
 	private final SchemaTableName schemaTableName;
 	private final List<RediSearchColumnHandle> columns;
 	private final UlidFactory factory = UlidFactory.newInstance(new Random());
+	private final RediSearchFlexWriteBuffer flexBuffer;
 	// Opened by the first page
 	private RediSearchSession.Writer writer;
 
@@ -93,6 +94,7 @@ public class RediSearchPageSink implements ConnectorPageSink {
 		this.session = rediSearchSession;
 		this.schemaTableName = schemaTableName;
 		this.columns = columns;
+		this.flexBuffer = session.getConfig().isFlexEnabled() ? new RediSearchFlexWriteBuffer(session) : null;
 	}
 
 	@Override
@@ -103,9 +105,11 @@ public class RediSearchPageSink implements ConnectorPageSink {
 		}
 		RedisClusterAsyncCommands<String, String> commands = writer.commands();
 		List<RedisFuture<?>> futures = new ArrayList<>();
+		List<String> staged = new ArrayList<>();
 		for (int position = 0; position < page.getPositionCount(); position++) {
 			String key = prefix + factory.create().toString();
 			Map<String, String> map = new HashMap<>();
+			if (flexBuffer != null) { map.put(RediSearchFlexWriteBuffer.ROW_MARKER, "1"); }
 			for (int channel = 0; channel < page.getChannelCount(); channel++) {
 				RediSearchColumnHandle column = columns.get(channel);
 				Block block = page.getBlock(channel);
@@ -113,13 +117,21 @@ public class RediSearchPageSink implements ConnectorPageSink {
 					continue;
 				}
 				String value = value(column.getType(), block, position);
-				map.put(column.getName(), value);
+				String field = flexBuffer == null ? column.getName() : session.flexWriteField(schemaTableName, column.getName());
+				map.put(field, value);
 			}
-			RedisFuture<Long> future = commands.hset(key, map);
-			futures.add(future);
+			if (flexBuffer == null) {
+				futures.add(commands.hset(key, map));
+			} else {
+				List<String> row = new ArrayList<>();
+				row.add(key);
+				map.forEach((field, value) -> { row.add(field); row.add(value); });
+				staged.add(RediSearchFlexWriteBuffer.ROW_CODEC.toJson(row));
+			}
 		}
 		// One write for the page's HSETs, rather than one for each
-		writer.flush(futures);
+		if (flexBuffer == null) { writer.flush(futures); }
+		else { flexBuffer.append(writer, staged); }
 		return NOT_BLOCKED;
 	}
 
@@ -135,14 +147,16 @@ public class RediSearchPageSink implements ConnectorPageSink {
 				return Optional.empty();
 			}
 			String prefix = indexInfo.getPrefixes().get(0);
-			if (prefix.equals("*")) {
+			if (session.getConfig().isFlexEnabled()) { RediSearchCursorFreePageSource.verifyKey(prefix); }
+			if (prefix.equals("*") && !session.getConfig().isFlexEnabled()) {
 				return Optional.empty();
 			}
 			if (prefix.endsWith(KEY_SEPARATOR)) {
 				return Optional.of(prefix);
 			}
 			return Optional.of(prefix + KEY_SEPARATOR);
-		} catch (Exception e) {
+		} catch (RuntimeException e) {
+			if (session.getConfig().isFlexEnabled()) { throw e; }
 			return Optional.empty();
 		}
 	}
@@ -206,12 +220,13 @@ public class RediSearchPageSink implements ConnectorPageSink {
 	@Override
 	public CompletableFuture<Collection<Slice>> finish() {
 		closeWriter();
-		return completedFuture(List.of());
+		return completedFuture(flexBuffer == null ? List.of() : flexBuffer.finish());
 	}
 
 	@Override
 	public void abort() {
 		closeWriter();
+		if (flexBuffer != null) { flexBuffer.abort(); }
 	}
 
 	private void closeWriter() {

@@ -84,7 +84,7 @@ public class RediSearchConfig {
     public boolean isFlexEnabled() { return flexEnabled; }
 
     @Config("redisearch.flex.enabled")
-    @ConfigDescription("Read-only Software Flex mode: cursor-free scans with SQL operations evaluated by Trino")
+    @ConfigDescription("Software Flex mode: cursor-free scans and staged inserts, with SQL operations evaluated by Trino")
     public RediSearchConfig setFlexEnabled(boolean enabled) { this.flexEnabled = enabled; return this; }
 
     @Min(1)

@@ -46,7 +46,7 @@ Redis 8 includes the Query Engine; the optional Open Source example uses `redis:
 Redis Stack 7.x also includes Search and JSON, but some aggregation expressions need newer Query Engine capabilities.
 The connector probes support for `case()` before using the corresponding aggregation path; see <<aggregations,aggregation correctness>>.
 
-Software Flex on Redis Software 8.2.6+ / Redis 8.8+ has an explicit read-only mode described below.
+Software Flex on Redis Software 8.2.6+ / Redis 8.8+ has an explicit cursor-free mode described below.
 Older Flex builds and deployments without Search remain incompatible.
 See {project-url}/blob/master/README.adoc#tested-deployment-matrix[the historical deployment matrix] and https://redis.io/docs/latest/operate/rs/flex/search/[Redis's current Software Flex documentation] for product availability.
 A successful TCP connection or an advertised command alone does not establish connector compatibility.
@@ -58,7 +58,11 @@ Set `redisearch.flex.enabled=true` for an existing Software Search-on-Flex datab
 
 `redisearch.flex.batch-size` (default 1000, range 1–10000) controls each request, not the total result. HASH and scalar JSON indexes use the same decoding and stored-value precision recovery as the RAM path. Document keys must be valid UTF-8 without ASCII control characters. Redis does not provide a snapshot of concurrent writes through this reader.
 
-This stage supports reads of existing indexes only. All DDL and writes are rejected. SQL predicates, grouping, aggregation, sorting, limits and joins execute in Trino; server pushdowns, dynamic filters and scan partitioning are disabled. Existing metadata sampling limits still apply. Each page searches and sorts the remaining index, so this correctness-first path can be expensive for large full scans. `redisearch.cursor-count` and `redisearch.narrow-scan-cursor-count` do not configure this reader.
+HASH tables support CREATE, CTAS, INSERT, UPDATE, DELETE, MERGE, ADD COLUMN and DROP. JSON tables support reads, DELETE and DROP. SQL predicates, grouping, aggregation, sorting, limits and joins execute in Trino; server pushdowns, dynamic filters and scan partitioning are disabled. Existing metadata sampling limits still apply. Each page searches and sorts the remaining index, so this correctness-first path can be expensive for large full scans. `redisearch.cursor-count` and `redisearch.narrow-scan-cursor-count` do not configure this reader.
+
+Flex inserts are staged as expiring Redis LIST entries and published only after every input scan has finished, including inserts from MERGE. This prevents a write from feeding its own source scan. Staging consumes Redis RAM until publication and requires `EVAL`, `RPUSH`, `EXPIRE`, `LRANGE` and `LLEN`; abandoned lists expire after 24 hours. Updates use `HSET`/`HDEL`, and deletion uses `DEL`. These writes and publication are not multi-row atomic, and retries are not supported.
+
+ADD COLUMN saves the declared type as connector metadata and stores the new field in each hash when written; it does not use the unsupported `FT.ALTER`, so the added field is not a Search index field. SQL predicates still evaluate it in Trino. DROP enumerates the index's documents and deletes them before issuing `FT.DROPINDEX` without `DD`; unrelated keys sharing a prefix are preserved. `__trino_row_marker` is a reserved hidden field that preserves all-NULL rows.
 
 The default `redisearch.flex.enabled=false` retains the existing RAM cursor reader. Enabling Flex mode does not make an older Flex server or a database without Search compatible.
 
@@ -197,7 +201,7 @@ redisearch.uri=redis://localhost:6379
 |`1000`
 
 |`redisearch.flex.enabled`
-|Read-only Software Flex mode, using cursor-free keyset scans and evaluating SQL operations in Trino. Requires Software 8.2.6+ / Redis 8.8+ with Search on Flex.
+|Software Flex mode, using cursor-free keyset scans, staged inserts and SQL operations evaluated in Trino. Requires Software 8.2.6+ / Redis 8.8+ with Search on Flex.
 |`false`
 
 |`redisearch.flex.batch-size`

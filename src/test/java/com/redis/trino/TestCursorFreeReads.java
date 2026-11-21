@@ -123,7 +123,7 @@ public class TestCursorFreeReads extends AbstractTestQueryFramework {
     }
 
     @Test
-    public void testEmptyJsonAndReadOnlyGuards() {
+    public void testEmptyAndJson() {
         hashIndex("cf_empty");
         assertThat(query("SELECT count(*) FROM cf_empty")).matches("VALUES BIGINT '0'");
         assertThat(query("SELECT sum(id) FROM cf_empty")).matches("VALUES CAST(NULL AS BIGINT)");
@@ -138,10 +138,7 @@ public class TestCursorFreeReads extends AbstractTestQueryFramework {
         RediSearchColumnTypes.write(redis, "cf_json", Map.of("id", BIGINT, "note", VARCHAR));
         server.awaitIndexed("cf_json");
         assertThat(query("SELECT count(*) FROM cf_json WHERE id > 9007199254740993")).matches("VALUES BIGINT '82'");
-        for (String sql : List.of("CREATE TABLE cf_new (id bigint)", "DROP TABLE cf_empty", "ALTER TABLE cf_empty ADD COLUMN x varchar",
-                "INSERT INTO cf_empty VALUES (1, 2, 'x')", "DELETE FROM cf_empty", "UPDATE cf_empty SET id = 2")) {
-            assertThatThrownBy(() -> computeActual(sql)).hasMessageContaining("reads of existing indexes only");
-        }
+
     }
 
     private RediSearchConfig config() {
