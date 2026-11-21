@@ -1,8 +1,8 @@
-ARG TRINO_VERSION=483
+ARG TRINO_VERSION=484
 
 # The plugin jars are platform-independent, so build them once on the native platform rather than
 # under QEMU emulation for every target platform.
-FROM --platform=$BUILDPLATFORM docker.io/library/maven:3.9-eclipse-temurin-25 AS builder
+FROM --platform=$BUILDPLATFORM docker.io/library/maven:3.10-eclipse-temurin-25 AS builder
 WORKDIR /root/redis-sql-trino
 COPY . /root/redis-sql-trino
 ENV MAVEN_FAST_INSTALL="-DskipTests -Dair.check.skip-all=true -Dmaven.javadoc.skip=true -Dmaven.gitcommitid.skip=true -B -q -T 1C"

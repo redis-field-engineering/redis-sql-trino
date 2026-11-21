@@ -1,12 +1,15 @@
 # Loading performance experiments
 
-The original `load.py` remains unchanged. `load-optimized.py` adds Arrow column
+The reference `load.py` preserves the existing value encodings. `load-optimized.py` adds Arrow column
 encoding with native NumPy byte materialization, one Redis client and Parquet
 reader per worker process, configurable
 row/byte pipeline bounds, parallel loading of a physical prefix of the dataset,
 and separate decoding, encoding, enqueueing, write and index-wait measurements.
 Both default and OSS Cluster API use the existing credential-file client factory;
 cluster mode retains redis-py's routing rather than using a single raw RESP socket.
+Clients default to RESP3. Both loaders accept RESP3 map replies and RESP2 array
+replies for index verification; set `protocol` to `2` in the connection file to
+use RESP2 explicitly.
 
 Use the same exact source, table schema, Redis persistence, hardware and API mode
 for comparisons. Preserve all 105 fields, exact signed 64-bit IDs, millisecond
@@ -15,10 +18,10 @@ No schema changes, precision reduction or preaggregation are included.
 
 ## Local verification without cloud resources
 
-From this directory, use Python 3.13 and install the dependencies first:
+From this directory, use Python 3.15 and install the dependencies first:
 
 ```sh
-python3.13 -m venv .venv
+python3.15 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python test-load-optimized.py
 .venv/bin/python compare-load-encoding.py /path/to/hits.parquet \

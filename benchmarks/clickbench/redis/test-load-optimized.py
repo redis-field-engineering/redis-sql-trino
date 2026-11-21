@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import load
 from load import column_types, encode
 
 spec = importlib.util.spec_from_file_location('optimized', Path(__file__).with_name('load-optimized.py'))
@@ -95,6 +96,53 @@ class LoaderTests(unittest.TestCase):
                 return [b'num_docs', 1, b'indexing', 0, b'hash_indexing_failures', 1]
         with self.assertRaisesRegex(RuntimeError, 'indexing failures'):
             optimized.verify_index(Client(), 'diagnostic', 1, 1)
+
+
+    def test_resp2_and_resp3_index_verification(self):
+        replies = [
+            [b'num_docs', 2, b'indexing', 0, b'Index Errors', [b'indexing failures', 0]],
+            ['num_docs', 2, 'indexing', 0, 'Index Errors', ['indexing failures', 0]],
+            {b'num_docs': 2, b'indexing': 0, b'Index Errors': {b'indexing failures': 0}},
+            {'num_docs': 2, 'indexing': 0, 'Index Errors': {'indexing failures': 0}},
+        ]
+        for reply in replies:
+            with self.subTest(reply=reply):
+                class Client:
+                    def execute_command(self, *args):
+                        return reply
+                optimized.verify_index(Client(), 'diagnostic', 2, 1)
+
+    def test_resp3_nested_index_failure_rejected(self):
+        for reply in [
+            {b'num_docs': 1, b'indexing': 0, b'Index Errors': {b'indexing failures': 1}},
+            {'num_docs': 1, 'indexing': 0, 'Index Errors': {'indexing failures': 1}},
+        ]:
+            with self.subTest(reply=reply):
+                class Client:
+                    def execute_command(self, *args):
+                        return reply
+                with self.assertRaisesRegex(RuntimeError, 'Search indexing failures'):
+                    optimized.verify_index(Client(), 'diagnostic', 1, 1)
+
+    def test_reference_loader_with_resp3(self):
+        writes = {}
+
+        class Client:
+            def pipeline(self, transaction):
+                return self
+            def hset(self, key, mapping):
+                writes[key] = mapping
+            def execute(self):
+                pass
+            def execute_command(self, *args):
+                return {b'num_docs': 2, b'indexing': 0, b'Index Errors': {b'indexing failures': 0}}
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'sample.parquet'
+            pq.write_table(pa.table({'id': [9007199254740993, 9007199254740993]}), path)
+            with patch.object(load, 'client', return_value=Client()), patch.object(load, 'column_types', return_value=[('id', 'bigint')]):
+                load.load(path, 2)
+        self.assertEqual(writes, {'hits:0': {'id': '9007199254740993'}, 'hits:1': {'id': '9007199254740993'}})
 
 
 if __name__ == '__main__':

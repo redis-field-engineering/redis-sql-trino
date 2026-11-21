@@ -287,10 +287,10 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	}
 
 	@Override
-	public void finishMerge(ConnectorSession session, ConnectorMergeTableHandle mergeTableHandle,
+	public Optional<ConnectorOutputMetadata> finishMerge(ConnectorSession session, ConnectorMergeTableHandle mergeTableHandle,
 			List<ConnectorTableHandle> sourceTableHandles, Collection<Slice> fragments,
 			Collection<ComputedStatistics> computedStatistics) {
-		// Do nothing
+		return Optional.empty();
 	}
 
 	/**
@@ -308,9 +308,9 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		if (documents.isEmpty()) {
 			return TableStatistics.empty();
 		}
-		long rows = documents.getAsLong();
+		long rows = documents.orElseThrow();
 		if (handle.getLimit().isPresent()) {
-			rows = Math.min(rows, handle.getLimit().getAsLong());
+			rows = Math.min(rows, handle.getLimit().orElseThrow());
 		}
 		return TableStatistics.builder().setRowCount(Estimate.of(rows)).build();
 	}
@@ -334,7 +334,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			return Optional.empty();
 		}
 
-		if (handle.getLimit().isPresent() && handle.getLimit().getAsLong() <= limit) {
+		if (handle.getLimit().isPresent() && handle.getLimit().orElseThrow() <= limit) {
 			return Optional.empty();
 		}
 
@@ -600,7 +600,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	}
 
 	static boolean isGroupPushdownSafe(OptionalLong documents, long limit) {
-		return documents.isPresent() && documents.getAsLong() >= 0 && documents.getAsLong() <= limit;
+		return documents.isPresent() && documents.orElseThrow() >= 0 && documents.orElseThrow() <= limit;
 	}
 
 	private void setRollback(Runnable action) {

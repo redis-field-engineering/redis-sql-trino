@@ -11,7 +11,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-from load import client, column_types, encode, EXPECTED_ROWS
+from load import client, column_types, encode, info_fields, EXPECTED_ROWS
 
 STATE = {}
 
@@ -113,12 +113,11 @@ def verify_index(r, table, rows, timeout):
     deadline = time.monotonic() + timeout
     while True:
         raw = r.execute_command('FT.INFO', table)
-        info = dict(zip(raw[::2], raw[1::2]))
-        errors = info.get(b'Index Errors', [])
-        errors = dict(zip(errors[::2], errors[1::2]))
-        if int(info.get(b'hash_indexing_failures', 0)) or int(errors.get(b'indexing failures', 0)):
+        info = info_fields(raw)
+        errors = info_fields(info.get('Index Errors', {}))
+        if int(info.get('hash_indexing_failures', 0)) or int(errors.get('indexing failures', 0)):
             raise RuntimeError('Search indexing failures detected')
-        if int(info[b'num_docs']) == rows and not int(info[b'indexing']):
+        if int(info['num_docs']) == rows and not int(info['indexing']):
             return
         if time.monotonic() >= deadline:
             raise RuntimeError('Index did not reach the exact target row count')

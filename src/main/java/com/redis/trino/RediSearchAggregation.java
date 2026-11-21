@@ -155,8 +155,8 @@ public class RediSearchAggregation {
 
 	public boolean isIntegerSumSafe(OptionalLong documents) {
 		OptionalLong limit = getIntegerSumRowLimit();
-		return limit.isEmpty() || (documents.isPresent() && documents.getAsLong() >= 0
-				&& documents.getAsLong() <= limit.getAsLong());
+		return limit.isEmpty() || (documents.isPresent() && documents.orElseThrow() >= 0
+				&& documents.orElseThrow() <= limit.orElseThrow());
 	}
 
 	public String integerSumCountAlias() {
