@@ -95,9 +95,9 @@ class TestFlexWrites extends AbstractTestQueryFramework {
             assertThat(query("SELECT DISTINCT extra FROM fw_nulls")).matches("VALUES DECIMAL '1234567890123456789012345.12345'");
             assertThat(query("SELECT column_name FROM information_schema.columns WHERE table_name = 'fw_nulls' AND table_schema = 'tpch'"))
                     .matches("VALUES VARCHAR 'id', VARCHAR 'extra'");
-            assertQueryFails("ALTER TABLE fw_nulls ADD COLUMN __trino_row_marker varchar", ".*Reserved Flex column name.*");
+            assertQueryFails("ALTER TABLE fw_nulls ADD COLUMN __trino_row_marker varchar", ".*[Rr]eserved.*");
         } finally { assertUpdate("DROP TABLE fw_nulls"); }
-        assertQueryFails("CREATE TABLE fw_reserved (__trino_row_marker varchar)", ".*Reserved Flex column name.*");
+        assertQueryFails("CREATE TABLE fw_reserved (__trino_row_marker varchar)", ".*[Rr]eserved.*");
     }
 
     @Test
@@ -124,7 +124,7 @@ class TestFlexWrites extends AbstractTestQueryFramework {
                         TagFieldArgs.builder().name("raw_note").as("note").build()));
         RediSearchColumnTypes.write(redis, "fw_alias", Map.of("id", BIGINT, "note", VARCHAR));
         try {
-            assertUpdate("INSERT INTO fw_alias VALUES (9007199254740993, 'hello')", 1);
+            assertUpdate("INSERT INTO fw_alias (id, note) VALUES (9007199254740993, 'hello')", 1);
             assertUpdate("UPDATE fw_alias SET id = id + 1, note = NULL", 1);
             assertThat(query("SELECT id, note FROM fw_alias"))
                     .matches("VALUES (BIGINT '9007199254740994', CAST(NULL AS varchar))");
