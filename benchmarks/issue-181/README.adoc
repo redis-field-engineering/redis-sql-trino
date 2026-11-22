@@ -58,7 +58,7 @@ Those compatibility checks are correctness gates, separate from the retained Sof
 
 == Validation result
 
-The final Software package run passed 49 selected test cases (including framework naming checks), with zero failures, errors or skips.
+The final Software package run passed 112 selected test cases (including framework naming checks), with zero failures, errors or skips.
 Redis OSS 8.4 and 8.10.3 each passed 11 selected test cases.
 All 192 retained Software comparisons passed and match their typed VALUES-oracle hashes; both documentation formats and actionlint passed.
 

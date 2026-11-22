@@ -20,17 +20,17 @@ Fragment 0 [HASH]
 Fragment 1 [SOURCE]
     Output layout: [id, k]
     Output partitioning: HASH [k]
-    TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_facts, index=rel_facts, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[]}]
+    TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_facts, index=rel_facts, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[], pushdownPolicy={aggregation=enabled_subject_to_expression_safety, cached_documents=32, floating_aggregates=resp3_transport, group_bound=document_count_fits, group_budget=1000000, integer_sum_row_limit=4194303, integer_sum_rows=cached_count_fits, local_topn=typed_candidate_selection, local_topn_candidate_budget=1000, normalization_case=not_yet_probed, reader=redis_cursor, smallint_sum_row_limit=274877906943, smallint_sum_rows=cached_count_fits, snapshot=planning_policy_not_rejection_history, tinyint_sum_row_limit=70368744177663, tinyint_sum_rows=cached_count_fits}, appliedPushdowns={indexed_constraint=none, loaded_filters=0, aggregation_stages=0, ordering=trino_or_unordered, limit=none, native_selection=none}}]
         Layout: [id:integer, k:varchar]
         Estimates: {rows: 32 (1.88kB), cpu: 1.88k, memory: 0B, network: 0B}
-        id := RediSearchColumnHandle{name=id, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}
         k := RediSearchColumnHandle{name=k, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+        id := RediSearchColumnHandle{name=id, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}
 
 Fragment 2 [SOURCE]
     Output layout: [k_0, label]
     Output partitioning: HASH [k_0]
-    TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_dims, index=rel_dims, filters={label=exists(@label) && (((@label < "second") || (@label > "second")))}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[]}]
+    TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_dims, index=rel_dims, filters={label=exists(@label) && (((@label < "second") || (@label > "second")))}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[], pushdownPolicy={aggregation=enabled_subject_to_expression_safety, cached_documents=6, floating_aggregates=resp3_transport, group_bound=document_count_fits, group_budget=1000000, integer_sum_row_limit=4194303, integer_sum_rows=cached_count_fits, local_topn=typed_candidate_selection, local_topn_candidate_budget=1000, normalization_case=not_yet_probed, reader=redis_cursor, smallint_sum_row_limit=274877906943, smallint_sum_rows=cached_count_fits, snapshot=planning_policy_not_rejection_history, tinyint_sum_row_limit=70368744177663, tinyint_sum_rows=cached_count_fits}, appliedPushdowns={indexed_constraint=none, loaded_filters=1, aggregation_stages=0, ordering=trino_or_unordered, limit=none, native_selection=none}}]
         Layout: [k_0:varchar, label:varchar]
         Estimates: {rows: 6 (660B), cpu: 660, memory: 0B, network: 0B}
-        label := RediSearchColumnHandle{name=label, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
         k_0 := RediSearchColumnHandle{name=k, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+        label := RediSearchColumnHandle{name=label, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
