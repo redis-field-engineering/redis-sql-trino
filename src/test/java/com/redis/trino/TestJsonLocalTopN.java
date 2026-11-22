@@ -398,6 +398,21 @@ public class TestJsonLocalTopN extends AbstractTestQueryFramework {
     }
 
     @Test
+    public void testComputedResidualFiltersBeforeJsonTopNPruning() {
+        String sql = "SELECT id, rank, payload FROM json_topn WHERE mod(id, BIGINT '7') = BIGINT '0' "
+                + "ORDER BY rank DESC NULLS FIRST, id ASC LIMIT 5";
+        assertExactOrder(sql);
+        // The highest ranked unfiltered rows include nonmatches; pruning before this residual loses winners.
+        assertThat(computeActual(sql).getRowCount()).isEqualTo(5);
+        assertThat(computeActual(sql).getMaterializedRows().stream().map(row -> (Long) row.getField(0)))
+                .allMatch(id -> id % 7 == 0);
+        Metrics selected = metrics(sql);
+        assertThat(metric(selected, "redis.rows.received")).isEqualTo(ROWS);
+        assertThat(metric(selected, "redis.local-topn.candidates")).isZero();
+        assertThat(metric(selected, "redis.local-topn.projected-json-reads")).isZero();
+    }
+
+    @Test
     public void testWildcardSchemaUsesExactFirstMatchTopN() {
         var redis = server.getConnection().sync();
         redis.ftCreate("json_topn_wild", CreateArgs.builder().on(CreateArgs.TargetType.JSON).withPrefix("json_topn_wild:").skipInitialScan().build(), List.of(

@@ -217,7 +217,7 @@ redisearch.uri=redis://localhost:6379
 |`0`
 
 |`redisearch.aggregation-group-limit`
-|Conservative GROUP BY budget; must not exceed the server MAX_AGGREGATE_GROUPS. Unknown or over-budget document counts retain Trino aggregation. Global aggregates remain eligible.
+|Conservative GROUP BY budget; must not exceed the server MAX_AGGREGATE_GROUPS. A cached document bound or an independently proven finite type/exact source-domain bound must fit; otherwise grouping remains in Trino. Global aggregates remain eligible. See <<pushdown-diagnostics,pushdown diagnostics>>.
 |`1000000`
 
 |`redisearch.scan-connections`
@@ -842,6 +842,51 @@ Keep the configured budget within the server's `MAX_AGGREGATE_GROUPS` limit.
 Index growth after caching can still cause a server error; the query fails rather than replaying partially delivered output.
 Global aggregates have no GROUP BY cardinality budget.
 
+[[pushdown-diagnostics]]
+==== Understanding pushdown decisions
+
+To inspect aggregation, staged DISTINCT and TopN optimizer attempts, set `com.redis.trino.RediSearchMetadata=DEBUG` in Trino's `etc/log.properties` on the coordinator, then plan or run the query again.
+Their rejected attempts identify a category, a reason code, safe context and an action:
+
+* `CONFIGURATION_DISABLED`: a catalog switch prevents the optimization.
+* `CAPABILITY_UNAVAILABLE`: the backend mode, expression, source mapping or aggregate shape lacks a supported translation.
+* `CORRECTNESS_GUARD`: precision, ordering, cardinality or stored-value semantics require Trino execution.
+
+A rejected optimization keeps evaluation in Trino when the query itself is supported.
+Common reason codes include:
+
+[cols="2,3",options="header"]
+|===
+|Reason |Interpretation and next step
+|`AGGREGATION_DISABLED`, `LOCAL_TOPN_DISABLED`
+|Check the named catalog setting. Enabling it permits eligibility checks; it does not bypass them.
+|`FLEX_MODE`, `CASE_EXPRESSION_UNAVAILABLE`, `TOPN_SCHEMA_UNSUPPORTED`
+|Use a documented compatible mode/mapping or keep Trino evaluation. A schema existing in Redis does not prove every optimization is supported.
+|`GROUP_COUNT_UNKNOWN`, `GROUP_COUNT_INVALID`, `GROUP_BUDGET_EXCEEDED`
+|No available proof fits the grouping budget. Refresh statistics when appropriate; a lower estimated match count alone is insufficient.
+|`INTEGER_COUNT_UNKNOWN`, `INTEGER_PRECISION`, `RESP2_FLOATING_POINT`
+|Preserve exact SQL results through Trino computation, or use the supported protocol/precision path described by the action.
+|`TOPN_CANDIDATE_BUDGET`
+|The local winner set exceeds the configured bound. Keep Trino ordering or explicitly size a bounded candidate budget for the query's memory allowance.
+|===
+
+These are stateless DEBUG diagnostics, not a last-rejection field on a shared table handle or an annotation added to EXPLAIN.
+One query can produce multiple optimizer attempts and reasons.
+Trino can also retain a Filter or Project that prevents an optimization hook from being called at all; use EXPLAIN to inspect that plan boundary rather than inferring acceptance from the absence of a rejection log.
+The diagnostics do not log source-domain literal values.
+
+The grouping bound is evaluated from all first-stage keys, including intermediate DISTINCT keys.
+Finite type bounds and exact HASH source-domain products remain valid when additional documents arrive, because the permitted key set is unchanged.
+A selective predicate on another column, an estimated match count, or a residual expression is not a proof of the grouping key's cardinality.
+Nullable/filter-only and JSON domains remain conservative where the source predicate cannot establish the same SQL key set.
+
+An in-budget cached document count remains a planning estimate of current contents, not a snapshot or a runtime group cap.
+The connector cannot identify an arbitrary stale count simply by inspecting its numeric value.
+If growth outdates that proof, a server group-limit error or incomplete-result warning fails the query; it must not trigger replay of a partially consumed cursor or silent fallback after output.
+Keep the configured group budget within the actual server limit, and refresh metadata or compare with aggregation disabled when investigating a failure.
+Finite group proofs relax only the cardinality decision: RESP2 floating-point, normalization, residual-filter and integer arithmetic guards still run independently.
+Integer-widening SUM and conditional counts (`COUNT(column)`/`COUNT_IF`) use the whole-index precision bound, not the finite number of groups; runtime count checks reject growth beyond that precision contract before returning the affected aggregate value. Plain `COUNT(*)` does not use this conditional-count precision guard.
+
 ==== Arithmetic aggregates
 
 Eligible HASH expressions such as `sum(quantity * extendedprice)` and `avg(quantity * extendedprice)` use a Redis `APPLY` step before reducing.
@@ -856,6 +901,29 @@ A document scan returning an eligible arithmetic expression computes it in the c
 
 `LIMIT` can run in Redis when an exact residual filter is not required in Trino.
 Without an `ORDER BY`, SQL does not guarantee which matching rows a limit returns.
+
+[[topn-eligibility]]
+[cols="1,3,2,3",options="header"]
+.ORDER BY LIMIT eligibility
+|===
+|Execution path |Types and source |Ordering |Required safety conditions
+|Native Redis `SORTBY`
+|HASH indexed NUMERIC INTEGER, SMALLINT, TINYINT; DOUBLE with RESP3. Every key must qualify. REAL uses typed ordering because different stored doubles can become equal SQL floats.
+|Multiple keys, ASC/DESC per key, NULLS LAST only.
+|Supported physical fields and exact source filtering. BIGINT/DECIMAL never use lossy native double ordering. The local candidate budget does not disable this path.
+|Typed HASH candidate selection
+|Supported stored SQL types with a Trino ordering and connector decoder: exact integers/decimals, REAL/DOUBLE, text, binary and temporal values, plus encoded collections/rows when their SQL types are orderable.
+|Multiple mixed keys and directions; either NULL order. TIME/TIMESTAMP precision 0 through 12 uses the stored typed value.
+|A positive LIMIT within the local candidate budget, supported schema/keys, and no required Trino residual before selection. Narrow sort values are scanned before winner projections are loaded.
+|Typed JSON candidate selection
+|Decoded SQL column values using the ordinary scan's scalar, NULL and first-match rules. All visible paths must pass the modern JSONPath validator; path acceptance does not prove the selected node is a scalar.
+|Multiple supported orderable keys, mixed directions and either NULL order, with exact stored numeric decoding rather than JSON-text numeric ordering.
+|The same candidate/filter guards, plus JSON.GET permission and validated mappings. NUMERIC index predicates keep their exact Trino residual and therefore prevent early candidate pruning.
+|Trino ordering
+|Flex; unsupported source/path/type/expression shapes; unresolved residual predicates; an existing limit/order/aggregation; or local LIMIT above budget/disabled.
+|Full SQL ordering remains available where values themselves have valid SQL representations.
+|Read and filter the necessary source rows before ordering. Invalid ordering or required filter values still fail; candidate selection cannot skip decoding them. Projected payloads are loaded only for winners on the local path.
+|===
 
 For HASH indexes, `ORDER BY ... LIMIT` uses Redis `SORTBY` when all sort keys are indexed NUMERIC columns of type DOUBLE, INTEGER, SMALLINT or TINYINT, with supported field names and `NULLS LAST`.
 Native DOUBLE ordering requires RESP3; RESP2 uses the exact local path or retains Trino ordering.
@@ -874,6 +942,13 @@ For JSON indexes, DIALECT 3 scans only keys, ordering columns and required filte
 JSON NUMERIC index predicates can match any indexed value, while SQL evaluates the loaded JSON value. A path that selects one node can still select an array, so the path alone does not prove scalar SQL semantics. JSON NUMERIC predicates retain an exact Trino residual before LIMIT, grouping or TopN, even when a safe native superset prefilter runs first; nullable predicates retain their existing fallback.
 If a worker's cached schema lacks a required ordering or projected source column, local TopN invalidates and reloads that table once. Ordinary cache hits keep the configured refresh interval. Indexed aliases resolve through refreshed `FT.INFO`; a sampled unindexed HASH VARCHAR field can use its query handle when it remains absent from the sample. This targeted refresh does not cache results or create a snapshot.
 Mixed HASH numeric sorts combine BIGINT/timestamp recovery with existing DOUBLE/DECIMAL reads in one HMGET per source key. JSON command/path/batch/wait counters distinguish winner hydration from HASH reads.
+
+Measure source and winner work separately: `redis.rows.received` counts Redis result rows received by selection, which may already reflect exact server filters; it is not the server's number of index entries examined.
+`redis.local-topn.candidates` counts retained winners, while Trino query statistics report final output rows.
+`redis.local-topn.sort-hash-reads` and `redis.local-topn.projected-hash-reads` distinguish exact HASH sort-field recovery from winner field retrieval.
+For JSON, `redis.json.commands`, `redis.json.path-reads`, `redis.json.read-batches` and `redis.local-topn.projected-json-reads` measure hydration commands, paths and batches separately.
+Tied rows follow the SQL ORDER BY keys; add a unique final key when a deterministic tied-row selection is required.
+Reads and winner hydration retain the connector's existing non-snapshot consistency contract.
 
 ==== Joins and optimizer statistics
 

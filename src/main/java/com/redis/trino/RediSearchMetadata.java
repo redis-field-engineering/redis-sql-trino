@@ -564,18 +564,23 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	public Optional<TopNApplicationResult<ConnectorTableHandle>> applyTopN(ConnectorSession session,
 			ConnectorTableHandle table, long topNCount, List<SortItem> sortItems, Map<String, ColumnHandle> assignments) {
 		if (rediSearchSession.getConfig().isFlexEnabled()) {
-			return Optional.empty();
+			return rejectTopN((RediSearchTableHandle) table, new RediSearchPushdownDiagnostics.Rejection(
+					RediSearchPushdownDiagnostics.Reason.FLEX_MODE, "redisearch.flex.enabled=true"));
 		}
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
 		if (handle.getLimit().isPresent() || !handle.getSort().isEmpty() || !handle.getTermAggregations().isEmpty()
 				|| !handle.getMetricAggregations().isEmpty() || topNCount <= 0 || sortItems.isEmpty()) {
-			return Optional.empty();
+			return rejectTopN(handle, new RediSearchPushdownDiagnostics.Rejection(
+					RediSearchPushdownDiagnostics.Reason.TOPN_INPUT_SHAPE,
+					"existingLimit=" + handle.getLimit().isPresent() + " sortKeyCount=" + sortItems.size()
+							+ " requestedCandidates=" + topNCount));
 		}
 		RediSearchTable schema = rediSearchSession.getTable(handle.getSchemaTableName());
 		boolean json = schema.getIndexInfo().getKeyType().filter(RediSearchIndexInfo.KeyType.JSON::equals).isPresent();
 		if (json ? !RediSearchJsonValues.supportsSchema(schema)
                 : schema.getIndexInfo().getKeyType().filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
-			return Optional.empty();
+			return rejectTopN(handle, new RediSearchPushdownDiagnostics.Rejection(
+					RediSearchPushdownDiagnostics.Reason.TOPN_SCHEMA_UNSUPPORTED, "supportedOrderingSchemaAvailable=false"));
 		}
 		List<RediSearchColumnHandle> columns = new java.util.ArrayList<>();
 		boolean nativeSort = !json;
@@ -583,7 +588,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			if (!(assignments.get(item.getName()) instanceof RediSearchColumnHandle column)
 					|| column.getExpression().isPresent()
 					|| schema.getColumns().stream().noneMatch(candidate -> candidate.getName().equals(column.getName()))) {
-				return Optional.empty();
+				return rejectTopN(handle, new RediSearchPushdownDiagnostics.Rejection(
+						RediSearchPushdownDiagnostics.Reason.TOPN_SORT_KEY_UNSUPPORTED, "storedSortKeyAvailable=false"));
 			}
 			columns.add(column);
 			nativeSort &= column.getFieldType() == RediSearchFieldType.NUMERIC && column.isSupportsPredicates()
@@ -596,9 +602,16 @@ public class RediSearchMetadata implements ConnectorMetadata {
 					&& !item.getSortOrder().isNullsFirst();
 		}
 		boolean local = !nativeSort;
-		if (local && (topNCount > rediSearchSession.getConfig().getLocalTopNMaxCandidates()
-				|| columns.stream().anyMatch(column -> !RediSearchLocalTopN.supports(column.getType())))) {
-			return Optional.empty();
+		if (local) {
+			Optional<RediSearchPushdownDiagnostics.Rejection> budget = RediSearchPushdownDiagnostics.localTopNBudget(
+					topNCount, rediSearchSession.getConfig().getLocalTopNMaxCandidates());
+			if (budget.isPresent()) {
+				return rejectTopN(handle, budget.orElseThrow());
+			}
+			if (columns.stream().anyMatch(column -> !RediSearchLocalTopN.supports(column.getType()))) {
+				return rejectTopN(handle, new RediSearchPushdownDiagnostics.Rejection(
+						RediSearchPushdownDiagnostics.Reason.TOPN_TYPE_UNSUPPORTED, "exactSortComparatorAvailable=false"));
+			}
 		}
 		ImmutableList.Builder<RediSearchSortItem> sort = ImmutableList.builder();
 		for (int i = 0; i < sortItems.size(); i++) {
@@ -651,7 +664,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
 				if (presence.isPresent()) {
 					mergeFilter(filters, column.getName(), presence.orElseThrow());
 				} else {
-					log.debug("Retaining predicate in Trino: index %s column %s domain %s", handle.getIndex(), column.getName(), domain);
+					log.debug("Retaining predicate in Trino: index %s column %s type %s nullAllowed %s discreteDomain %s",
+							handle.getIndex(), column.getName(), domain.getType(), domain.isNullAllowed(), domain.getValues().isDiscreteSet());
 					unsupported.put(column, domain);
 				}
 			}
@@ -764,22 +778,22 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	public Optional<AggregationApplicationResult<ConnectorTableHandle>> applyAggregation(ConnectorSession session,
 			ConnectorTableHandle handle, List<AggregateFunction> aggregates, Map<String, ColumnHandle> assignments,
 			List<List<ColumnHandle>> groupingSets) {
-		log.debug("applyAggregation aggregates=%s groupingSets=%s", aggregates, groupingSets);
-		if (rediSearchSession.getConfig().isFlexEnabled() || !rediSearchSession.getConfig().isAggregationPushdownEnabled()) {
-			log.debug("Rejecting aggregation pushdown: Flex mode or disabled by redisearch.aggregation-pushdown.enabled");
-			return Optional.empty();
+		log.debug("applyAggregation aggregateCount=%s groupingSetCount=%s", aggregates.size(), groupingSets.size());
+		Optional<RediSearchPushdownDiagnostics.Rejection> configuration = RediSearchPushdownDiagnostics.configuration(
+				rediSearchSession.getConfig().isAggregationPushdownEnabled(), rediSearchSession.getConfig().isFlexEnabled());
+		if (configuration.isPresent()) {
+			return rejectAggregation((RediSearchTableHandle) handle, configuration.orElseThrow());
 		}
 		RediSearchTableHandle table = (RediSearchTableHandle) handle;
 		// Global aggregation is represented by [[]]
 		verify(!groupingSets.isEmpty(), "No grouping sets provided");
 		// GROUPBY would run before a LIMIT or SORTBY, over every document rather than the first ones
 		if (table.getLimit().isPresent() || !table.getSort().isEmpty()) {
-			log.debug("Rejecting aggregation pushdown: input already has a limit or ordering");
-			return Optional.empty();
+			return rejectAggregation(table, RediSearchPushdownDiagnostics.Reason.INPUT_ORDERING, "inputAlreadyLimitedOrOrdered=true");
 		}
 		if (groupingSets.size() != 1) {
-			log.debug("Rejecting aggregation pushdown: multiple grouping sets are not translated");
-			return Optional.empty();
+			return rejectAggregation(table, RediSearchPushdownDiagnostics.Reason.MULTIPLE_GROUPING_SETS,
+					"groupingSetCount=" + groupingSets.size());
 		}
 		if (!table.getAggregationStages().isEmpty()) {
 			return applyCountOverDistinct(table, aggregates, assignments, groupingSets.getFirst());
@@ -795,10 +809,10 @@ public class RediSearchMetadata implements ConnectorMetadata {
 					? table.getConstraint().filter((column, domain) -> RediSearchQueryBuilder.isExact((RediSearchColumnHandle) column, domain))
 					: TupleDomain.all();
 			OptionalLong provenGroups = RediSearchGroupingBounds.upperBoundWithin(documents, groupingSets.getFirst(), exactSourceDomains, groupBudget);
-			if (provenGroups.isEmpty()) {
-				log.debug("Rejecting GROUP BY pushdown: index %s document count %s and finite key bounds do not fit group budget %s",
-						table.getIndex(), documents, groupBudget);
-				return Optional.empty();
+			Optional<RediSearchPushdownDiagnostics.Rejection> groupRejection = RediSearchPushdownDiagnostics.groupBudget(
+					documents, groupingSets.getFirst(), exactSourceDomains, groupBudget);
+			if (groupRejection.isPresent()) {
+				return rejectAggregation(table, groupRejection.orElseThrow());
 			}
 			if (!isGroupPushdownSafe(documents, groupBudget)) {
 				log.debug("GROUP BY finite key bound %s fits group budget %s for index %s with cached document count %s",
@@ -823,22 +837,20 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			Optional<RediSearchAggregation> aggregation = RediSearchAggregation.handleAggregation(function, assignments,
 					colName, countValues);
 			if (aggregation.isEmpty()) {
-				log.debug("Rejecting aggregation pushdown: unsupported aggregate %s", function);
-				return Optional.empty();
+				return rejectAggregation(table, RediSearchPushdownDiagnostics.Reason.UNSUPPORTED_AGGREGATE,
+						"function=" + function.getFunctionName() + " outputType=" + function.getOutputType());
 			}
 			if ((aggregation.get().isConditionalCount() || aggregation.get().getFilterColumn().isPresent())
 					&& rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo().getKeyType()
 							.filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
 				// JSON arrays/nulls have different existence and scalar extraction semantics.
-				log.debug("Rejecting conditional aggregate pushdown: only scalar HASH fields are supported");
-				return Optional.empty();
+				return rejectAggregation(table, RediSearchPushdownDiagnostics.Reason.CONDITIONAL_JSON, "sourceRequiresHashScalarSemantics=true");
 			}
 			if (aggregation.get().getIntegerSumRowLimit().isPresent()) {
 				OptionalLong documents = rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo().getNumDocs();
-				if (!aggregation.get().isIntegerSumSafe(documents)) {
-					log.debug("Rejecting integer aggregate pushdown: index %s has document count %s, safe row limit %s",
-							table.getIndex(), documents, aggregation.get().getIntegerSumRowLimit());
-					return Optional.empty();
+				Optional<RediSearchPushdownDiagnostics.Rejection> precision = RediSearchPushdownDiagnostics.integerPrecision(aggregation.get(), documents);
+				if (precision.isPresent()) {
+					return rejectAggregation(table, precision.orElseThrow());
 				}
 			}
 			io.trino.spi.type.Type outputType = function.getOutputType();
@@ -853,20 +865,18 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			Type keyType = ((RediSearchColumnHandle) columnHandle).getType();
 			if (RediSearchGroupingNormalizer.requiresNormalization(keyType)
 					&& !rediSearchSession.isCaseSupported(table.getIndex())) {
-				log.debug("Rejecting GROUP BY pushdown: canonical normalization requires case()");
-				return Optional.empty();
+				return rejectAggregation(table, RediSearchPushdownDiagnostics.Reason.CASE_EXPRESSION_UNAVAILABLE,
+						"keyType=" + keyType);
 			}
 			if ((keyType.equals(io.trino.spi.type.BooleanType.BOOLEAN) || keyType instanceof io.trino.spi.type.CharType)
 					&& rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo().getKeyType()
 							.filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
-				log.debug("Rejecting GROUP BY pushdown: canonical text decoding is implemented for HASH fields only");
-				return Optional.empty();
+				return rejectAggregation(table, RediSearchPushdownDiagnostics.Reason.JSON_GROUP_KEY, "keyType=" + keyType);
 			}
 			Optional<RediSearchAggregationTerm> termAggregation = RediSearchAggregationTerm
 					.fromColumnHandle(columnHandle);
 			if (termAggregation.isEmpty()) {
-				log.debug("Rejecting GROUP BY pushdown: key %s cannot preserve its SQL representation", columnHandle);
-				return Optional.empty();
+				return rejectAggregation(table, RediSearchPushdownDiagnostics.Reason.UNSAFE_GROUP_KEY, "keyType=" + keyType);
 			}
 			terms.add(termAggregation.get());
 		}
@@ -876,7 +886,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		if (aggregationList.isEmpty()) {
 			if (termList.isEmpty() || rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo().getKeyType()
 					.filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
-				return Optional.empty();
+				return rejectAggregation(table, RediSearchPushdownDiagnostics.Reason.GROUPING_ONLY_UNSUPPORTED,
+						"groupingKeyCount=" + termList.size());
 			}
 			// Redis requires a reducer, although SQL DISTINCT only needs group keys. Keep this internal;
 			// Keys include NULL; an eligible following COUNT can append a second Redis aggregation stage.
@@ -889,18 +900,34 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		}
 		// Over RESP2, the shards of a sharded database send its coordinator the doubles they compute rounded to 12
 		// significant digits, which no mantissa and exponent computed after it merges them could restore
-		if (!rediSearchSession.isResp3()
-				&& (aggregationList.stream().map(RediSearchAggregation::getOutputType)
-						.anyMatch(RediSearchExactNumbers::isFloatingPoint)
-						|| termList.stream().map(RediSearchAggregationTerm::getType)
-								.anyMatch(RediSearchExactNumbers::isFloatingPoint))) {
-			log.debug("Rejecting aggregation pushdown: RESP2 cannot preserve floating-point results or grouping keys");
-			return Optional.empty();
+		Optional<RediSearchPushdownDiagnostics.Rejection> transport = RediSearchPushdownDiagnostics.floatingTransport(
+				rediSearchSession.isResp3(), aggregationList.stream().map(RediSearchAggregation::getOutputType)
+						.anyMatch(RediSearchExactNumbers::isFloatingPoint),
+				termList.stream().map(RediSearchAggregationTerm::getType).anyMatch(RediSearchExactNumbers::isFloatingPoint));
+		if (transport.isPresent()) {
+			return rejectAggregation(table, transport.orElseThrow());
 		}
 		RediSearchTableHandle tableHandle = table.withAggregationStages(List.of(
 				new RediSearchAggregationStage(termList, aggregationList, groupingOnly)));
 		return Optional.of(new AggregationApplicationResult<>(tableHandle, projections.build(),
 				resultAssignments.build(), Map.of(), false));
+	}
+
+	private Optional<TopNApplicationResult<ConnectorTableHandle>> rejectTopN(RediSearchTableHandle table,
+			RediSearchPushdownDiagnostics.Rejection rejection) {
+		log.debug("%s", rejection.message("TopN", table.getIndex()));
+		return Optional.empty();
+	}
+
+	private Optional<AggregationApplicationResult<ConnectorTableHandle>> rejectAggregation(RediSearchTableHandle table,
+			RediSearchPushdownDiagnostics.Reason reason, String detail) {
+		return rejectAggregation(table, new RediSearchPushdownDiagnostics.Rejection(reason, detail));
+	}
+
+	private Optional<AggregationApplicationResult<ConnectorTableHandle>> rejectAggregation(RediSearchTableHandle table,
+			RediSearchPushdownDiagnostics.Rejection rejection) {
+		log.debug("%s", rejection.message("aggregation", table.getIndex()));
+		return Optional.empty();
 	}
 
 	/** Completes Trino's single-DISTINCT rewrite without sending the distinct keys back to Trino. */
@@ -909,7 +936,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			List<ColumnHandle> groupingKeys) {
 		if (table.getAggregationStages().size() != 1 || !table.getAggregationStages().getFirst().groupingOnly()
 				|| functions.isEmpty()) {
-			return Optional.empty();
+			return rejectAggregation(table, RediSearchPushdownDiagnostics.Reason.DISTINCT_REWRITE_SHAPE,
+					"inputStageCount=" + table.getAggregationStages().size() + " aggregateCount=" + functions.size());
 		}
 		RediSearchAggregationStage input = table.getAggregationStages().getFirst();
 		Map<String, RediSearchAggregationTerm> keys = input.terms().stream()
@@ -918,7 +946,8 @@ public class RediSearchMetadata implements ConnectorMetadata {
 		for (ColumnHandle handle : groupingKeys) {
 			if (!(handle instanceof RediSearchColumnHandle column) || column.getExpression().isPresent()
 					|| !keys.containsKey(column.getName()) || !keys.get(column.getName()).getType().equals(column.getType())) {
-				return Optional.empty();
+				return rejectAggregation(table, RediSearchPushdownDiagnostics.Reason.DISTINCT_KEY_MISMATCH,
+						"secondStageGroupingKeyNotPreserved=true");
 			}
 			terms.add(keys.get(column.getName()));
 		}
@@ -933,20 +962,27 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			AggregateFunction function = functions.get(i);
 			if (!function.getFunctionName().equals(RediSearchAggregation.COUNT) || function.isDistinct()
 					|| function.getFilter().isPresent() || !function.getSortItems().isEmpty() || function.getArguments().size() > 1) {
-				return Optional.empty();
+				return rejectAggregation(table, RediSearchPushdownDiagnostics.Reason.DISTINCT_REWRITE_SHAPE,
+						"secondStageFunction=" + function.getFunctionName());
 			}
 			if (!function.getArguments().isEmpty()) {
 				if (!(function.getArguments().getFirst() instanceof Variable variable)
 						|| !(assignments.get(variable.getName()) instanceof RediSearchColumnHandle column)
 						|| column.getExpression().isPresent() || !keys.containsKey(column.getName())
 						|| !keys.get(column.getName()).getType().equals(column.getType())) {
-					return Optional.empty();
+					return rejectAggregation(table, RediSearchPushdownDiagnostics.Reason.DISTINCT_KEY_MISMATCH,
+							"secondStageCountArgumentNotPreserved=true");
 				}
 			}
 			String alias = aggregateAlias(SYNTHETIC_COLUMN_NAME_PREFIX + "_distinct_" + i, reserved);
 			Optional<RediSearchAggregation> translated = RediSearchAggregation.handleAggregation(function, assignments, alias, false);
-			if (translated.isEmpty() || !translated.orElseThrow().isIntegerSumSafe(documents)) {
-				return Optional.empty();
+			if (translated.isEmpty()) {
+				return rejectAggregation(table, RediSearchPushdownDiagnostics.Reason.UNSUPPORTED_AGGREGATE,
+						"secondStageCountTranslationUnavailable=true");
+			}
+			Optional<RediSearchPushdownDiagnostics.Rejection> precision = RediSearchPushdownDiagnostics.integerPrecision(translated.orElseThrow(), documents);
+			if (precision.isPresent()) {
+				return rejectAggregation(table, precision.orElseThrow());
 			}
 			RediSearchColumnHandle output = new RediSearchColumnHandle(alias, function.getOutputType(),
 					RediSearchFieldType.NUMERIC, false, false, Optional.empty());

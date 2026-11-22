@@ -31,7 +31,7 @@ The acceptance tests accompanying code are the executable contract; the proposal
 |Grouping-only aggregation, formerly rejected because no SQL reducer was present, is now accepted within the existing exact grouping contract.
 |Joins, windows, multiple grouping sets and grouped-handle aggregates beyond the supported DISTINCT count stage still execute in Trino. Dynamic join filtering remains available.
 |#182
-|DEBUG diagnostics identify aggregation disabled by configuration, preexisting limit/order/grouping, multiple grouping sets, unsafe grouping keys, conditional JSON aggregates, row-count precision limits, RESP2 floating results and retained predicates.
+|Stateless DEBUG diagnostics identify operation, configuration/capability/correctness category, reason, safe context and action for aggregation, staged DISTINCT and TopN declines. Predicate-retention logs report type/nullability rather than domain literals. The canonical guide documents configuration, interpretation and eligibility.
 |No precision, residual-filter, cardinality, retry or RESP2 safeguard is removed. Finite BOOLEAN/CHAR(0) bounds and exact indexed HASH source singleton-set domains avoid unnecessary grouping fallback on large inputs. Eligible VARCHAR and normalized keys use the minimum type/domain/document bound; products are overflow-safe and include every intermediate DISTINCT key. Nullable/filter-only predicates, padded TAG values, JSON, ranges/complements and unnormalized numeric keys retain conservative bounds. Every independent precision/capability guard remains. Exposing rejection reasons directly in EXPLAIN still needs a stable plan annotation rather than mutable coordinator state.
 |===
 

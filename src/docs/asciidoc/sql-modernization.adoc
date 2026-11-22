@@ -22,9 +22,9 @@ Historical unsupported or not-planned decisions are context, not permanent restr
 |#177 |Exact bounded two-stage global/grouped DISTINCT counting in Redis |Wider canonical keys and additional aggregate shapes
 |#178 |Canonical DOUBLE, HASH BOOLEAN and bounded Unicode CHAR grouping |Further exact numeric/decimal and arithmetic strategies
 |#179 |HASH NULL, lexical VARCHAR and exact anchored LIKE/ESCAPE filters |Unanchored contains/middle residuals, general wildcards and broader JSON predicates
-|#180 |HASH/JSON typed late-materialized TopN, validated modern JSONPath selectors, targeted worker-schema refresh and coalesced numeric reads |Unsupported JSONPath forms, scalar-shape guarantees and further measured tuning
+|#180 |HASH/JSON typed late-materialized TopN, explicit native/local/fallback eligibility and residual-before-selection acceptance coverage |Unsupported mappings and nonorderable values keep the documented Trino fallback
 |#181 |Grouping-only pushdown and relational feasibility design |Join/window execution and multiple grouping sets
-|#182 |DEBUG rejection reasons, finite type/exact indexed HASH source-domain group bounds and scan/TopN MemoryContext |Nullable/filter-only domain tracking, further proven bounds and EXPLAIN annotations
+|#182 |Categorized actionable aggregation/TopN/DISTINCT DEBUG diagnostics, proven grouping bounds and cached-count/runtime-precision coverage |Additional finite proofs and EXPLAIN annotations remain optional extensions
 |#183 |Reconciled statement/type/execution documentation |Keep references current as capabilities land
 |#184 |Explicit capability/skip inventory, restricted TopN/fallback tests and negative-date round trips |Keep the test contract current as capabilities change
 |===
@@ -68,3 +68,22 @@ Work-reduction fixtures:
 * Exact indexed HASH IN constraints on a 1,050-document table permit two or three VARCHAR groups within matching budgets, instead of transferring the filtered documents to Trino for grouping. Products and DISTINCT first-stage keys use the same capped bound; nullable/filter-only, JSON and non-discrete domains remain conservative.
 
 These are exact-result and work-reduction assertions, not full-data throughput claims.
+
+
+== Ordering and diagnostic acceptance: #180 and #182
+
+The acceptance follow-up adds adversarial HASH and JSON residual predicates that must run before TopN candidate pruning, plus an exact HASH string-filter work assertion.
+The canonical guide now separates native numeric ordering, typed HASH/JSON candidate selection and Trino fallback, including supported types, NULL orders, temporal precision and source-versus-winner metrics.
+
+Aggregation, staged DISTINCT and TopN declines emit stateless DEBUG category/reason/action diagnostics.
+Configuration-disabled, unavailable-capability and correctness-guard paths remain separate, and literal expression/domain values are omitted from the diagnostic context.
+Existing finite grouping bounds and independent precision/protocol checks are preserved.
+A cached-count test connects accepted planning statistics to the actual reader's rejection of unsafe growth; cached statistics are not claimed to be snapshots or a hard runtime grouping cap.
+
+Validation on November 21, 2026:
+
+* Normal package checks and 209 selected unit/Software cases passed with no failures, errors or skips. This cohort covers HASH/JSON, single and multiple shards, RESP2/RESP3, aggregation, DISTINCT and finite/domain grouping bounds.
+* Four targeted filter-before-ordering cases passed on each of Redis OSS 8.4 and 8.10.3, including JSON under both protocols: eight additional cases with no failures, errors or skips.
+* The HTML/PDF guide rebuilt successfully, and git diff --check passed. An independent subagent reviewed eligibility preservation, runtime guard behavior and diagnostic privacy.
+
+These selected acceptance results are a separate cohort from the earlier modernization counts above. They establish correctness and work accounting, without a new full-data performance claim.
