@@ -525,6 +525,43 @@ public class TestJsonLocalTopN extends AbstractTestQueryFramework {
                 .setResp2(resp2()).setCursorCount(3).setQueryTimeoutMillis(30000);
     }
 
+    @Test
+    public void testTablePropertiesDoNotPromiseJsonNumericPrefilters() {
+        var types = getDistributedQueryRunner().getCoordinator().getPlannerContext().getTypeManager();
+        var session = new RediSearchSession(types, directConfig());
+        try {
+            var metadata = new RediSearchMetadata(session);
+            var schema = session.getTable(new SchemaTableName("tpch", "json_topn"));
+            var rank = schema.getColumns().stream().filter(column -> column.getName().equals("rank")).findFirst().orElseThrow();
+            var domain = io.trino.spi.predicate.Domain.singleValue(io.trino.spi.type.DoubleType.DOUBLE, 1.0);
+            io.trino.spi.predicate.TupleDomain<io.trino.spi.connector.ColumnHandle> constraint =
+                    io.trino.spi.predicate.TupleDomain.withColumnDomains(Map.of(rank, domain));
+            var table = schema.getTableHandle().withConstraint(constraint);
+            // Redis's ANY-member predicate is a source prefilter, not a guarantee about the decoded SQL value.
+            assertThat(metadata.getTableProperties(null, table).getPredicate().isAll()).isTrue();
+            var filter = metadata.applyFilter(null, schema.getTableHandle(), new io.trino.spi.connector.Constraint(constraint))
+                    .orElseThrow();
+            assertThat(filter.getRemainingFilter()).isEqualTo(constraint);
+            assertThat(metadata.getTableProperties(null, filter.getHandle()).getPredicate().isAll()).isTrue();
+            assertThat(metadata.getTableProperties(null, table.withConstraint(io.trino.spi.predicate.TupleDomain.none()))
+                    .getPredicate().isNone()).isTrue();
+
+            String hash = "table_properties_hash";
+            var redis = server.getConnection().sync();
+            redis.ftCreate(hash, CreateArgs.builder().withPrefix(hash + ":").skipInitialScan().build(),
+                    List.of(NumericFieldArgs.builder().name("rank").build()));
+            try {
+                redis.hset(hash + ":1", "rank", "1");
+                var hashSchema = session.getTable(new SchemaTableName("tpch", hash));
+                var hashRank = hashSchema.getColumns().stream().filter(column -> column.getName().equals("rank")).findFirst().orElseThrow();
+                io.trino.spi.predicate.TupleDomain<io.trino.spi.connector.ColumnHandle> hashConstraint =
+                        io.trino.spi.predicate.TupleDomain.withColumnDomains(Map.of(hashRank, domain));
+                assertThat(metadata.getTableProperties(null, hashSchema.getTableHandle().withConstraint(hashConstraint)).getPredicate())
+                        .isEqualTo(hashConstraint);
+            } finally { redis.ftDropindex(hash, true); }
+        } finally { session.shutdown(); }
+    }
+
     private void assertExactOrder(String sql) {
         var actual = computeActual(sql);
         var expected = computeActual(sql.replace("FROM json_topn", "FROM without_json_topn.tpch.json_topn"));

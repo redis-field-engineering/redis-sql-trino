@@ -702,6 +702,20 @@ public class TestQueryBuilder {
 	}
 
 	@Test
+	public void testBoundedComplexPercentLikePrefilter() {
+		var field = filterable("v", RediSearchFieldType.TEXT);
+		var predicate = RediSearchQueryBuilder.likeFilter(field, "pre%middle%tail%end", Optional.empty()).orElseThrow();
+		assertThat(predicate.exact()).isFalse();
+		assertThat(predicate.expression()).contains("exists(@v)", "startswith(@v, \"pre\") > 0",
+				"strlen(@v) >= strlen(\"pre\") + strlen(\"middle\") + strlen(\"tail\") + strlen(\"end\")",
+				"substr(@v, strlen(@v) - strlen(\"end\"), strlen(\"end\")) == \"end\"").doesNotContain("contains(");
+		assertThat(RediSearchQueryBuilder.likeFilter(field, String.join("%", java.util.Collections.nCopies(32, "x")), Optional.empty())).isPresent();
+		assertThat(RediSearchQueryBuilder.likeFilter(field, String.join("%", java.util.Collections.nCopies(33, "x")), Optional.empty())).isEmpty();
+		assertThat(RediSearchQueryBuilder.likeFilter(field, "%pre%middle%tail%", Optional.empty()).orElseThrow().exact()).isFalse();
+		assertThat(RediSearchQueryBuilder.likeFilter(field, "pre%mid_dle%tail%end", Optional.empty())).isEmpty();
+	}
+
+	@Test
 	public void testIntegerSumChecksActualRowsAfterPlanning() {
 		RediSearchColumnHandle widened = RediSearchColumnHandle.integerWidening(numeric("s", SMALLINT), BIGINT);
 		RediSearchAggregation sum = new RediSearchAggregation(RediSearchAggregation.SUM, BIGINT,

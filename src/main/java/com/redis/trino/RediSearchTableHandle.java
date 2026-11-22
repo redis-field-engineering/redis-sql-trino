@@ -55,6 +55,7 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	private final Map<String, String> filters;
 	private final Optional<String> nativeQuery;
 	private final Map<String, String> nativeParameters;
+	private final Map<String, String> pushdownPolicy;
 	private final List<RediSearchAggregationStage> aggregationStages;
 
 	public RediSearchTableHandle(SchemaTableName schemaTableName, String index) {
@@ -101,17 +102,26 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 		this(schemaTableName, index, constraint, limit, termAggregations, metricAggregations, sort, filters, nativeQuery, aggregationStages, Map.of());
 	}
 
-	@JsonCreator
-	public RediSearchTableHandle(@JsonProperty("schemaTableName") SchemaTableName schemaTableName,
-			@JsonProperty("index") String index, @JsonProperty("constraint") TupleDomain<ColumnHandle> constraint,
-			@JsonProperty("limit") OptionalLong limit,
-			@JsonProperty("aggTerms") List<RediSearchAggregationTerm> termAggregations,
-			@JsonProperty("aggregates") List<RediSearchAggregation> metricAggregations,
-			@JsonProperty("sort") List<RediSearchSortItem> sort,
-			@JsonProperty("filters") Map<String, String> filters,
-			@JsonProperty("nativeQuery") Optional<String> nativeQuery,
-			@JsonProperty("aggregationStages") List<RediSearchAggregationStage> aggregationStages,
-			@JsonProperty("nativeParameters") Map<String, String> nativeParameters) {
+	public RediSearchTableHandle(SchemaTableName schemaTableName, String index, TupleDomain<ColumnHandle> constraint,
+            OptionalLong limit, List<RediSearchAggregationTerm> termAggregations, List<RediSearchAggregation> metricAggregations,
+            List<RediSearchSortItem> sort, Map<String, String> filters, Optional<String> nativeQuery,
+            List<RediSearchAggregationStage> aggregationStages, Map<String, String> nativeParameters) {
+        this(schemaTableName, index, constraint, limit, termAggregations, metricAggregations, sort, filters,
+                nativeQuery, aggregationStages, nativeParameters, Map.of());
+    }
+
+    @JsonCreator
+    public RediSearchTableHandle(@JsonProperty("schemaTableName") SchemaTableName schemaTableName,
+            @JsonProperty("index") String index, @JsonProperty("constraint") TupleDomain<ColumnHandle> constraint,
+            @JsonProperty("limit") OptionalLong limit,
+            @JsonProperty("aggTerms") List<RediSearchAggregationTerm> termAggregations,
+            @JsonProperty("aggregates") List<RediSearchAggregation> metricAggregations,
+            @JsonProperty("sort") List<RediSearchSortItem> sort,
+            @JsonProperty("filters") Map<String, String> filters,
+            @JsonProperty("nativeQuery") Optional<String> nativeQuery,
+            @JsonProperty("aggregationStages") List<RediSearchAggregationStage> aggregationStages,
+            @JsonProperty("nativeParameters") Map<String, String> nativeParameters,
+            @JsonProperty("pushdownPolicy") Map<String, String> pushdownPolicy) {
 		this.schemaTableName = requireNonNull(schemaTableName, "schemaTableName is null");
 		this.index = requireNonNull(index, "index is null");
 		this.constraint = requireNonNull(constraint, "constraint is null");
@@ -122,6 +132,7 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 		this.filters = Map.copyOf(requireNonNull(filters, "filters is null"));
 		this.nativeQuery = requireNonNull(nativeQuery, "nativeQuery is null");
 		this.nativeParameters = nativeParameters == null ? Map.of() : Map.copyOf(nativeParameters);
+        this.pushdownPolicy = pushdownPolicy == null ? Map.of() : Map.copyOf(pushdownPolicy);
 		if (!this.nativeParameters.isEmpty() && nativeQuery.isEmpty()) {
 			throw new IllegalArgumentException("Native parameters require a native query");
 		}
@@ -141,24 +152,24 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 	}
 
 	public RediSearchTableHandle withConstraint(TupleDomain<ColumnHandle> constraint) {
-		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort, filters, nativeQuery, aggregationStages, nativeParameters);
+		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort, filters, nativeQuery, aggregationStages, nativeParameters, pushdownPolicy);
 	}
 
 	public RediSearchTableHandle withLimit(long limit) {
 		return new RediSearchTableHandle(schemaTableName, index, constraint, OptionalLong.of(limit), aggregationTerms,
-				aggregations, sort, filters, nativeQuery, aggregationStages, nativeParameters);
+				aggregations, sort, filters, nativeQuery, aggregationStages, nativeParameters, pushdownPolicy);
 	}
 
 	public RediSearchTableHandle withAggregations(List<RediSearchAggregationTerm> terms,
 			List<RediSearchAggregation> metrics) {
-		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, terms, metrics, sort, filters, nativeQuery, List.of(), nativeParameters);
+		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, terms, metrics, sort, filters, nativeQuery, List.of(), nativeParameters, pushdownPolicy);
 	}
 
 	public RediSearchTableHandle withAggregationStages(List<RediSearchAggregationStage> stages) {
 		if (stages.isEmpty()) { return withAggregations(List.of(), List.of()); }
 		RediSearchAggregationStage last = stages.getLast();
 		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, last.terms(), last.metrics(), sort, filters,
-				nativeQuery, stages, nativeParameters);
+				nativeQuery, stages, nativeParameters, pushdownPolicy);
 	}
 
 	public RediSearchTableHandle appendAggregation(List<RediSearchAggregationTerm> terms, List<RediSearchAggregation> metrics) {
@@ -169,27 +180,35 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 
 	public RediSearchTableHandle withTopN(List<RediSearchSortItem> sort, long limit) {
 		return new RediSearchTableHandle(schemaTableName, index, constraint, OptionalLong.of(limit), aggregationTerms,
-				aggregations, sort, filters, nativeQuery, aggregationStages, nativeParameters);
+				aggregations, sort, filters, nativeQuery, aggregationStages, nativeParameters, pushdownPolicy);
 	}
 
 	public RediSearchTableHandle withoutTopN() {
 		return new RediSearchTableHandle(schemaTableName, index, constraint, OptionalLong.empty(), aggregationTerms,
-				aggregations, List.of(), filters, nativeQuery, aggregationStages, nativeParameters);
+				aggregations, List.of(), filters, nativeQuery, aggregationStages, nativeParameters, pushdownPolicy);
 	}
 
 	public RediSearchTableHandle withFilters(Map<String, String> filters) {
-		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort, filters, nativeQuery, aggregationStages, nativeParameters);
+		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort, filters, nativeQuery, aggregationStages, nativeParameters, pushdownPolicy);
 	}
 
 	public RediSearchTableHandle withNativeQuery(String query) {
 		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort, filters,
-				Optional.of(requireNonNull(query, "query is null")), aggregationStages, nativeParameters);
+				Optional.of(requireNonNull(query, "query is null")), aggregationStages, nativeParameters, pushdownPolicy);
 	}
 
 	public RediSearchTableHandle withNativeQuery(String query, Map<String, String> parameters) {
 		return new RediSearchTableHandle(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort, filters,
-				Optional.of(requireNonNull(query, "query is null")), aggregationStages, parameters);
+				Optional.of(requireNonNull(query, "query is null")), aggregationStages, parameters, pushdownPolicy);
 	}
+
+    public RediSearchTableHandle withPushdownPolicy(Map<String, String> policy) {
+        return new RediSearchTableHandle(schemaTableName, index, constraint, limit, aggregationTerms, aggregations,
+                sort, filters, nativeQuery, aggregationStages, nativeParameters, policy);
+    }
+
+    @JsonProperty
+    public Map<String, String> getPushdownPolicy() { return pushdownPolicy; }
 
 	@JsonProperty
 	public Map<String, String> getNativeParameters() { return nativeParameters; }
@@ -243,7 +262,7 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort, filters, nativeQuery, aggregationStages, nativeParameters);
+		return Objects.hash(schemaTableName, index, constraint, limit, aggregationTerms, aggregations, sort, filters, nativeQuery, aggregationStages, nativeParameters, pushdownPolicy);
 	}
 
 	@Override
@@ -259,13 +278,15 @@ public class RediSearchTableHandle implements ConnectorTableHandle {
 				&& Objects.equals(this.constraint, other.constraint) && Objects.equals(this.limit, other.limit)
 				&& Objects.equals(this.aggregationTerms, other.aggregationTerms)
 				&& Objects.equals(this.aggregations, other.aggregations) && Objects.equals(this.sort, other.sort) && filters.equals(other.filters)
-				&& nativeQuery.equals(other.nativeQuery) && nativeParameters.equals(other.nativeParameters) && aggregationStages.equals(other.aggregationStages);
+				&& nativeQuery.equals(other.nativeQuery) && nativeParameters.equals(other.nativeParameters) && pushdownPolicy.equals(other.pushdownPolicy) && aggregationStages.equals(other.aggregationStages);
 	}
 
 	@Override
 	public String toString() {
 		return MoreObjects.toStringHelper(this).add("schemaTableName", schemaTableName).add("index", index)
 				.add("filters", filters).add("limit", limit).add("sort", sort).add("constraint", constraint).add("nativeQuery", nativeQuery)
-				.add("nativeParameterNames", nativeParameters.keySet()).add("aggregationStages", aggregationStages).toString();
+				.add("nativeParameterNames", nativeParameters.keySet()).add("aggregationStages", aggregationStages)
+                .add("pushdownPolicy", new java.util.TreeMap<>(pushdownPolicy))
+                .add("appliedPushdowns", RediSearchPlanDiagnostics.applied(this)).toString();
 	}
 }

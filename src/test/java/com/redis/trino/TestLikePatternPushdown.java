@@ -24,12 +24,13 @@ public class TestLikePatternPushdown extends AbstractTestQueryFramework {
             "foo", "foobar", "fooXbar", "fooXbarYbaz", "fooXbarbaz", "foobarbaz", "foofoo", "fooXfoo",
             "FOOXbar", "éfoo😀baré", "a!_b", "a\nb", "😀%😀", "_", "%", "a!", "a\\_b", "foo\0bar", "foo\0barX", "a\0b", "a\\ b", "a\\\\b");
     private static final int REPEATS = 10;
+    private RediSearchServer server;
 
     protected RedisEnterprise.Deployment deployment() { return RedisEnterprise.Deployment.NON_SHARDED; }
 
     @Override
     protected QueryRunner createQueryRunner() throws Exception {
-        RediSearchServer server = closeAfterClass(new RediSearchServer(deployment()));
+        server = closeAfterClass(new RediSearchServer(deployment()));
         var redis = server.getConnection().sync();
         redis.ftCreate("like_values", CreateArgs.builder().withPrefix("like_value:").build(),
                 List.of(TagFieldArgs.builder().name("id").build(), TagFieldArgs.builder().name("v").build()));
@@ -129,6 +130,64 @@ public class TestLikePatternPushdown extends AbstractTestQueryFramework {
         assertThat(metric(referenceScanMetrics, "redis.rows.received")).isEqualTo((VALUES.size() + 1L) * REPEATS);
         assertThat(metric(scanMetrics, "redis.cursor.requests"))
                 .isLessThan(metric(referenceScanMetrics, "redis.cursor.requests"));
+    }
+
+    @Test
+    void testComplexPercentPrefilterPreservesNullUnicodeAndOrderWhileReducingRows() {
+        var redis = server.getConnection().sync();
+        redis.ftCreate("complex_like", CreateArgs.builder().withPrefix("complex_like:").skipInitialScan().build(), List.of(
+                TagFieldArgs.builder().name("id").build(),
+                io.lettuce.core.search.arguments.TextFieldArgs.builder().name("raw_value").as("v").build(),
+                TagFieldArgs.builder().name("payload").build()));
+        try {
+            for (int i = 0; i < 1000; i++) {
+                String value = switch (i) {
+                    case 0 -> "literal%XmiddleYtailZend";
+                    case 1 -> "literal_XmiddleYtailZend";
+                    case 2 -> "literal!XmiddleYtailZend";
+                    case 3 -> "quote\"XmiddleYtailZend";
+                    case 4 -> "slash\\XmiddleYtailZend";
+                    case 5 -> "";
+                    default -> i < 800 ? "other" + i : i < 900 ? "pre" + "x".repeat(20) + "wrong" : "preend";
+                };
+                redis.hset("complex_like:" + i, Map.of("id", Integer.toString(i), "raw_value", value, "payload", "p".repeat(2048) + i));
+            }
+            List<String> values = List.of("preXmiddleYtailZend", "pre\0middle\0tail\0end", "pre😀middle雪tailéend", "preXtailYmiddleZend");
+            int id = 1000;
+            for (String value : values) {
+                for (int repeat = 0; repeat < 10; repeat++) {
+                    String key = Integer.toString(id++);
+                    redis.hset("complex_like:" + key, Map.of("id", key, "raw_value", value, "payload", "p".repeat(2048) + key));
+                }
+            }
+            for (int repeat = 0; repeat < 10; repeat++) {
+                String key = Integer.toString(id++);
+                redis.hset("complex_like:" + key, Map.of("id", key, "payload", "p".repeat(2048) + key));
+            }
+            server.awaitIndexed("complex_like");
+            Session reference = Session.builder(getSession()).setSystemProperty("allow_pushdown_into_connectors", "false").build();
+            for (String pattern : List.of("pre%middle%tail%end", "pre%middle%tail%", "%middle%tail%end", "%pre%middle%tail%end%",
+                    "pre%tail%middle%end", "pre%%middle%%%tail%%end", "%middle%tail%", "pre%😀%middle%雪%tail%é%end", "quote\"%middle%tail%end", "slash\\%middle%tail%end",
+                    "literal!%%middle%tail%end", "literal!_%middle%tail%end", "literal!!%middle%tail%end", "literalé%%middle%tail%end")) {
+                String projection = pattern.equals("pre%middle%tail%end") ? "id, payload" : "id, v";
+                String sql = "SELECT " + projection + " FROM complex_like WHERE v LIKE " + literal(pattern);
+                if (pattern.contains("!")) { sql += " ESCAPE '!'"; }
+                if (pattern.startsWith("literalé")) { sql += " ESCAPE 'é'"; }
+                var pushed = getDistributedQueryRunner().executeWithPlan(getSession(), sql);
+                var baseline = getDistributedQueryRunner().executeWithPlan(reference, sql);
+                assertThat(pushed.result().getMaterializedRows()).as(pattern)
+                        .containsExactlyInAnyOrderElementsOf(baseline.result().getMaterializedRows());
+                assertThat(query(sql)).isNotFullyPushedDown(FilterNode.class);
+                if (pattern.equals("pre%middle%tail%end")) {
+                    assertThat(pushed.result().getMaterializedRows()).hasSize(30);
+                    assertThat(metric(metrics(pushed), "redis.rows.received")).isEqualTo(40);
+                    assertThat(metric(metrics(baseline), "redis.rows.received")).isEqualTo(1050);
+                    assertThat(metric(metrics(pushed), "redis.cursor.requests"))
+                            .isLessThan(metric(metrics(baseline), "redis.cursor.requests"));
+                    System.out.println("COMPLEX_LIKE_PREFILTER deployment=" + deployment() + " source=1050 candidates=40 matches=30");
+                }
+            }
+        } finally { assertUpdate("DROP TABLE complex_like"); }
     }
 
     private Metrics metrics(QueryRunner.MaterializedResultWithPlan result) {
