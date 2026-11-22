@@ -709,12 +709,25 @@ WHERE abv > 5;
 ----
 
 `TABLE_NAME` and `QUERY` are required nonempty strings; `SCHEMA_NAME` defaults to the catalog's configured schema.
+The optional fourth argument, `PARAMETERS`, is a `MAP(VARCHAR, VARBINARY)` with an empty-map default. Existing two- and three-argument calls retain their argument order. Named parameters can omit `SCHEMA_NAME`:
+
+[source,sql]
+----
+SELECT id, name
+FROM TABLE(redisearch.system.search(
+    TABLE_NAME => 'beers',
+    QUERY => '@name:$term',
+    PARAMETERS => MAP(ARRAY['term'], ARRAY[to_utf8('redis')])));
+----
+
+Text, numeric and GEO parameter values use their native query text encoded as bytes, for example `to_utf8('9')`. Vector parameters carry the index's raw binary representation; a two-dimensional FLOAT32 vector can use `MAP(ARRAY['blob'], ARRAY[X'0000903F00000000'])` with `QUERY => '*=>[KNN 2 @vec $blob]'`. The connector does not infer dimensions or convert vector encodings. Parameter maps and values must be non-null, and names must be unique, nonempty UTF-8 strings without NUL.
 The function resolves that table's typed columns and exposes `__key`; it checks underlying table-column SELECT privileges.
-Native full-text and GEO radius predicates are passed as one Query Engine query argument, combined with SQL filters using explicit parentheses.
+Native full-text, GEO and parameterized vector predicates are passed as one Query Engine query argument with separately bound parameter bytes.
+A nonempty parameter map uses one global native selection: SQL WHERE predicates, join dynamic filters and scan partitioning do not alter its ranked membership. SQL grouping, ordering and limits operate after that selection; cursor batches can retrieve its results. A hybrid condition written inside `QUERY` intentionally applies before KNN ranking. Flex rejects nonempty parameter maps because keyset paging cannot preserve ranked membership.
 The normal cursor, timeout, incomplete-result, projection and aggregation paths still apply.
 This function deliberately accepts native query syntax; ordinary SQL equality retains its SQL semantics.
 Tables protected by row filters or column masks are currently rejected by this function.
-Vector parameter binding, vector distances, full-text scores and dedicated geospatial SQL functions are not yet exposed.
+Vector distance columns, full-text scores and dedicated geospatial SQL functions are not yet exposed.
 
 [[execution]]
 == Execution and correctness
@@ -746,6 +759,7 @@ Limits and aggregates that would discard rows before that residual filter remain
 
 NUMERIC fields::
 `=`, `IN`, `<`, `+<=+`, `>`, `>=` and `BETWEEN` are eligible on numeric columns and millisecond timestamp columns.
+On JSON NUMERIC fields, a safe native superset prefilter can run, but an exact Trino residual remains for every path shape: index matching can inspect any array value while SQL reads the loaded value. LIMIT, TopN and grouping cannot move before this residual.
 Redis indexes numbers as doubles.
 For large BIGINT equality and IN values, including short inclusive ranges produced by Trino's optimizer, the connector queries widened numeric ranges that include the exact IDs and can also include neighboring IDs.
 Trino then verifies the stored integers exactly.
@@ -821,7 +835,9 @@ Widened INTEGER/SMALLINT/TINYINT SUM inputs have conservative document-count bou
 
 GROUP BY pushdown accepts a cached document count within `redisearch.aggregation-group-limit`, or a proven finite bound for all grouping keys.
 Canonical BOOLEAN contributes at most three groups including NULL; CHAR(0) contributes at most two. Products of these domains are capped before multiplication to avoid overflow. The bound applies to intermediate DISTINCT groups as well as final groups.
-These finite bounds remain valid as rows are added. Other grouping keys still require the unfiltered document-count bound; integer SUM, RESP2, capability and residual-filter guards remain independent.
+Exact indexed HASH source predicates can also prove a finite group bound: `WHERE label IN ('Wheat', 'wheat') GROUP BY label` has at most two keys, even on a much larger table. Inclusive singleton sets on eligible VARCHAR and already normalized keys contribute their value count, including NULL when the domain permits it; the planner takes the tighter type/domain/document bound and caps products before multiplication. The first DISTINCT stage must fit all its grouping keys, not only the final result keys.
+Only exact source domains retained in the indexed table constraint contribute this proof. Nullable/filter-only predicates, padded TAG values, non-discrete ranges/complements, JSON mappings and unnormalized numeric types retain the prior conservative bound. Predicates on other columns do not bound an unconstrained grouping key.
+These finite proofs remain valid as rows are added. Integer SUM row-count limits, RESP2, normalization/capability and residual-filter guards remain independent.
 Keep the configured budget within the server's `MAX_AGGREGATE_GROUPS` limit.
 Index growth after caching can still cause a server error; the query fails rather than replaying partially delivered output.
 Global aggregates have no GROUP BY cardinality budget.
@@ -854,7 +870,9 @@ DOUBLE/REAL/DECIMAL sort fields use narrow exact reads rather than loading every
 `redisearch.local-topn.max-candidates` defaults to 1,000, accepts values up to 100,000, and can be set to zero to disable this path.
 Selection batches, typed candidate keys and hydration reserve Trino memory. Selection checks the configured timeout and emits no candidates if it fails.
 The optimization reduces wide-row retrieval but still scans matching keys.
-For JSON indexes, DIALECT 3 scans only keys, ordering columns and required filter fields, then single-key pipelined `JSON.GET` retrieves winner projections. This requires JSON.GET permission, simple dotted object paths or `$` for the whole visible schema, and no unsupported schema mappings. Flex retains Trino ordering.
+For JSON indexes, DIALECT 3 scans only keys, ordering columns and required filter fields, then single-key pipelined `JSON.GET` retrieves winner projections. This requires JSON.GET permission and validated modern JSONPath mappings throughout the visible schema. Supported selectors include `$`, ASCII dotted or recursive members, wildcards, quoted bracket members (including Unicode, spaces and dots), array indices/unions, member unions, and slices with optional negative bounds and positive steps. Indices, bounds and steps must fit signed 32-bit integers; noncanonical numeric spellings, zero/negative steps, filter expressions, legacy paths and unquoted Unicode members retain whole-schema fallback. Bracket quotes can escape their matching quote and backslash. Wildcard and other multi-match paths use the same first-match decoding as ordinary scans; matches do not become separate SQL rows. Flex retains Trino ordering.
+JSON NUMERIC index predicates can match any indexed value, while SQL evaluates the loaded JSON value. A path that selects one node can still select an array, so the path alone does not prove scalar SQL semantics. JSON NUMERIC predicates retain an exact Trino residual before LIMIT, grouping or TopN, even when a safe native superset prefilter runs first; nullable predicates retain their existing fallback.
+If a worker's cached schema lacks a required ordering or projected source column, local TopN invalidates and reloads that table once. Ordinary cache hits keep the configured refresh interval. Indexed aliases resolve through refreshed `FT.INFO`; a sampled unindexed HASH VARCHAR field can use its query handle when it remains absent from the sample. This targeted refresh does not cache results or create a snapshot.
 Mixed HASH numeric sorts combine BIGINT/timestamp recovery with existing DOUBLE/DECIMAL reads in one HMGET per source key. JSON command/path/batch/wait counters distinguish winner hydration from HASH reads.
 
 ==== Joins and optimizer statistics

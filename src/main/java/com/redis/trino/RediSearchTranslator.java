@@ -97,7 +97,7 @@ public class RediSearchTranslator {
 		}
 
 		/**
-		 * The ordered command tokens for diagnostics and direct reproduction. No connection URI or authentication
+		 * The ordered command tokens for diagnostics and direct reproduction. Binary parameter values are redacted. No connection URI or authentication
 		 * is included; query literals are included, so only capture these at explicitly enabled DEBUG level.
 		 */
 		public List<String> getCommandArguments() {
@@ -166,6 +166,9 @@ public class RediSearchTranslator {
 					RediSearchScanPartition.supported(info, value.field())).isPresent(),
 					"Partition field is no longer indexed NUMERIC: %s", value.field());
 		});
+		com.google.common.base.Preconditions.checkArgument(!table.hasNativeParameters()
+				|| (table.getConstraint().isAll() && partition.isEmpty() && afterKey.isEmpty()),
+				"Parameterized native queries cannot be constrained, partitioned, or keyset paged before ranking");
 		// Arithmetic the scan returns is computed by the reader, from the columns it refers to
 		List<RediSearchColumnHandle> columns = readColumns(outputs);
 		boolean computes = columns.size() != outputs.size() || !columns.equals(outputs);
@@ -237,6 +240,8 @@ public class RediSearchTranslator {
 		// LOAD * returns every field of each hash, so only scans that can't tell a rounded value from an exact one use it
 		boolean loadAll = hashScan && columns.stream().anyMatch(RediSearchTranslator::isRoundedUndetectably);
 		AggregateArgs.Builder args = AggregateArgs.builder().dialect(json ? JSON_DIALECT : DIALECT);
+		table.getNativeParameters().entrySet().stream().sorted(Map.Entry.comparingByKey())
+				.forEach(parameter -> args.param(parameter.getKey(), java.util.Base64.getDecoder().decode(parameter.getValue())));
 		if (config.getQueryTimeoutMillis() > 0) {
 			args.timeout(java.time.Duration.ofMillis(config.getQueryTimeoutMillis()));
 		}
@@ -421,6 +426,12 @@ public class RediSearchTranslator {
 		@Override
 		public CommandArgs<String, String> add(long value) {
 			arguments.add(Long.toString(value));
+			return super.add(value);
+		}
+
+		@Override
+		public CommandArgs<String, String> add(byte[] value) {
+			arguments.add("<redacted binary parameter: " + value.length + " bytes>");
 			return super.add(value);
 		}
 

@@ -33,14 +33,33 @@ class TestJsonValues {
     }
 
     @Test
-    void testPathEligibilityPreservesAliasesAndRejectsMultivaluedPaths() {
+    void testPathEligibilityPreservesAliasesAndSupportsModernSelectors() {
         var info = new RediSearchIndexInfo(Optional.of(RediSearchIndexInfo.KeyType.JSON), List.of("doc:"), List.of(
                 new RediSearchIndexInfo.Field("rank", "$.nested.rank", RediSearchFieldType.NUMERIC, Optional.empty()),
                 new RediSearchIndexInfo.Field("wild", "$.tags[*]", RediSearchFieldType.TAG, Optional.empty())), false, 1, false);
         assertThat(RediSearchJsonValues.path(info, "rank")).contains("$.nested.rank");
         assertThat(RediSearchJsonValues.path(info, "$")).contains("$");
-        assertThat(RediSearchJsonValues.path(info, "wild")).isEmpty();
+        assertThat(RediSearchJsonValues.path(info, "wild")).contains("$.tags[*]");
         assertThat(RediSearchJsonValues.path(info, "unmapped")).isEmpty();
+    }
+
+    @Test
+    void testModernPathGrammarKeepsUnsupportedPathsOnFallback() {
+        for (String path : List.of("$", "$.plain", "$['雪']", "$[\"dot.key\"]", "$['space key']", "$.a[1]", "$.a[-1]",
+                "$.a[*]", "$.a[0,2]", "$.a[0:2]", "$.a[0:3:2]", "$..leaf", "$.a[*].leaf", "$.*",
+                "$['one','two']", "$[\"quote\\\"key\"]", "$[\"slash\\\\key\"]", "$['a[999999999999999]']")) {
+            assertThat(path(path)).as(path).contains(path);
+        }
+        for (String path : List.of("plain", ".plain", "$.café", "$['unterminated]", "$[bad]", "$[-]", "$[1:]trailing",
+                "$.a[?(@ > 1)]", "$['line\nkey']", "$...a", "$.a[0::]", "$.a[::-1]", "$.a[0:2:0]", "$.a[2147483648]", "$.a[0:99999999999999999999999]", "$.a[01]", "$.a[-0]")) {
+            assertThat(path(path)).as(path).isEmpty();
+        }
+    }
+
+    private static Optional<String> path(String path) {
+        var info = new RediSearchIndexInfo(Optional.of(RediSearchIndexInfo.KeyType.JSON), List.of("doc:"),
+                List.of(new RediSearchIndexInfo.Field("alias", path, RediSearchFieldType.TAG, Optional.empty())), false, 1, false);
+        return RediSearchJsonValues.path(info, "alias");
     }
 
     @Test

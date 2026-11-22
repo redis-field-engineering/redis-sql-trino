@@ -17,14 +17,14 @@ Historical unsupported or not-planned decisions are context, not permanent restr
 |#172 |Scalar object-path JSON INSERT/UPDATE/MERGE and nested aliases |Arrays, wildcards and whole-document replacement
 |#173 |ARRAY/MAP/ROW, VARBINARY, JSON and full temporal precision on HASH |Native nested indexing and encoded-type predicates
 |#174 |Opt-in single-document HASH atomic update visibility |Multi-document transactions and retry-safe execution
-|#175 |Native text/GEO search table function with SQL composition |Vector binding, score/distance outputs and typed wrappers
+|#175 |Native text/GEO/vector parameter binding through optional MAP(VARCHAR, VARBINARY), with global ranked-selection guards |Score/distance outputs, typed wrappers and ranked Flex paging
 |#176 |HASH COUNT(column) and COUNT_IF(stored BOOLEAN) |General FILTER masks and computed conditions
 |#177 |Exact bounded two-stage global/grouped DISTINCT counting in Redis |Wider canonical keys and additional aggregate shapes
 |#178 |Canonical DOUBLE, HASH BOOLEAN and bounded Unicode CHAR grouping |Further exact numeric/decimal and arithmetic strategies
 |#179 |HASH NULL, lexical VARCHAR and exact anchored LIKE/ESCAPE filters |Unanchored contains/middle residuals, general wildcards and broader JSON predicates
-|#180 |HASH/JSON typed late-materialized TopN, both NULL orders and coalesced numeric reads |Additional JSON paths and further measured tuning
+|#180 |HASH/JSON typed late-materialized TopN, validated modern JSONPath selectors, targeted worker-schema refresh and coalesced numeric reads |Unsupported JSONPath forms, scalar-shape guarantees and further measured tuning
 |#181 |Grouping-only pushdown and relational feasibility design |Join/window execution and multiple grouping sets
-|#182 |DEBUG rejection reasons, finite BOOLEAN/CHAR(0) group bounds and scan/TopN MemoryContext |Further proven bounds and EXPLAIN annotations
+|#182 |DEBUG rejection reasons, finite type/exact indexed HASH source-domain group bounds and scan/TopN MemoryContext |Nullable/filter-only domain tracking, further proven bounds and EXPLAIN annotations
 |#183 |Reconciled statement/type/execution documentation |Keep references current as capabilities land
 |#184 |Explicit capability/skip inventory, restricted TopN/fallback tests and negative-date round trips |Keep the test contract current as capabilities change
 |===
@@ -64,6 +64,7 @@ Work-reduction fixtures:
 * Canonical CHAR grouping transfers six groups from 1,200 documents. With an input-count budget too small for 1,050 documents, finite BOOLEAN/CHAR(0) bounds permit two, three, six or nine groups instead of a Trino aggregation scan.
 * Anchored LIKE scans transfer 30 matching rows instead of 390; a pushed COUNT transfers one row with no cursor reads. Contains-style patterns retain Trino residuals because Redis contains() truncates at embedded NUL bytes.
 * Mixed numeric HASH TopN keeps the same 1,107 source rows, five winners and 15 projected-field reads while coalescing Redis commands from 2,219 to 1,112 and read batches from 61 to 31.
-* JSON TopN scans 137 narrow source rows and retrieves five winners through five JSON.GET commands, 15 projected paths and one read batch, with no HASH commands.
+* JSON TopN scans 137 narrow source rows and retrieves five winners through five JSON.GET commands, 15 projected paths and one read batch, with no HASH commands. Modern-path fixtures scan 17 rows and hydrate five winners with 80 projected paths.
+* Exact indexed HASH IN constraints on a 1,050-document table permit two or three VARCHAR groups within matching budgets, instead of transferring the filtered documents to Trino for grouping. Products and DISTINCT first-stage keys use the same capped bound; nullable/filter-only, JSON and non-discrete domains remain conservative.
 
 These are exact-result and work-reduction assertions, not full-data throughput claims.

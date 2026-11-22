@@ -617,7 +617,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
 		// The first rows of a sort, filtered, aren't the first of the filtered rows
-		if (!handle.getSort().isEmpty() || handle.getLimit().isPresent() || !handle.getAggregationStages().isEmpty()) {
+		if (handle.hasNativeParameters() || !handle.getSort().isEmpty() || handle.getLimit().isPresent() || !handle.getAggregationStages().isEmpty()) {
 			// The filters stored on the handle run on source documents. HAVING must not be moved before GROUPBY.
 			return Optional.empty();
 		}
@@ -641,7 +641,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 			if (rediSearchSession.canQuery(handle, column, domain)) {
 				supported.put(column, domain);
-				if (!RediSearchQueryBuilder.isExact(column, domain)) {
+				if (!rediSearchSession.isQueryExact(handle, column, domain)) {
 					// Redis returns a superset of the matching rows, which Trino filters
 					unsupported.put(column, domain);
 				}
@@ -789,7 +789,12 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			long groupBudget = rediSearchSession.getConfig().getAggregationGroupLimit();
 			// A normalized finite key domain can bound groups independently of the number of input rows.
 			// This relaxes only the group-memory budget; all type, precision and capability guards below remain.
-			OptionalLong provenGroups = RediSearchGroupingBounds.upperBoundWithin(documents, groupingSets.getFirst(), groupBudget);
+			// JSON index predicates can match a different array element from the first scalar loaded as a key.
+			TupleDomain<ColumnHandle> exactSourceDomains = rediSearchSession.getTable(table.getSchemaTableName()).getIndexInfo()
+					.getKeyType().filter(RediSearchIndexInfo.KeyType.HASH::equals).isPresent()
+					? table.getConstraint().filter((column, domain) -> RediSearchQueryBuilder.isExact((RediSearchColumnHandle) column, domain))
+					: TupleDomain.all();
+			OptionalLong provenGroups = RediSearchGroupingBounds.upperBoundWithin(documents, groupingSets.getFirst(), exactSourceDomains, groupBudget);
 			if (provenGroups.isEmpty()) {
 				log.debug("Rejecting GROUP BY pushdown: index %s document count %s and finite key bounds do not fit group budget %s",
 						table.getIndex(), documents, groupBudget);

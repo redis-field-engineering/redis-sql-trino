@@ -422,6 +422,12 @@ public class RediSearchSession {
         return tableCache.get(tableName);
     }
 
+    /** Reload only when a query requires columns absent from this worker's cached schema. */
+    RediSearchTable refreshTable(SchemaTableName tableName) {
+        tableCache.invalidate(tableName);
+        return tableCache.get(tableName);
+    }
+
     public Set<String> getAllTables() {
         return listIndexNames().stream().collect(toSet());
     }
@@ -456,6 +462,14 @@ public class RediSearchSession {
     public boolean canQuery(RediSearchTableHandle table, RediSearchColumnHandle column, Domain domain) {
         return column.isSupportsPredicates() && RediSearchQueryBuilder.isSupported(column, domain)
                 && !hasCustomStopwords(table, column) && !hasJsonBooleanValue(table, column, domain);
+    }
+
+    /** JSON NUMERIC indexes test ANY array member; SQL decodes the first matched node, including arrays. */
+    public boolean isQueryExact(RediSearchTableHandle table, RediSearchColumnHandle column, Domain domain) {
+        if (!RediSearchQueryBuilder.isExact(column, domain)) { return false; }
+        if (column.getFieldType() != RediSearchFieldType.NUMERIC) { return true; }
+        return getTable(table.getSchemaTableName()).getIndexInfo().getKeyType()
+                .filter(RediSearchIndexInfo.KeyType.JSON::equals).isEmpty();
     }
 
     // A TAG field indexes a JSON boolean as the tag true or false, but the connector reads it as 1 or 0, as DIALECT 2

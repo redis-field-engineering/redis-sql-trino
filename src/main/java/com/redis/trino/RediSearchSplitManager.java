@@ -88,7 +88,7 @@ public class RediSearchSplitManager implements ConnectorSplitManager {
 	 * documents, rather than groups or a limited number of them, and a column Redis can query.
 	 */
 	static boolean acceptsDynamicFilter(RediSearchTableHandle table, Collection<ColumnHandle> columns) {
-		return table.getLimit().isEmpty() && table.getTermAggregations().isEmpty()
+		return !table.hasNativeParameters() && table.getLimit().isEmpty() && table.getTermAggregations().isEmpty()
 				&& table.getMetricAggregations().isEmpty() && columns.stream().map(RediSearchColumnHandle.class::cast)
 						.anyMatch(RediSearchColumnHandle::isSupportsPredicates);
 	}

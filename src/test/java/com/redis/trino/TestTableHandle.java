@@ -60,4 +60,28 @@ public class TestTableHandle {
 				.isEqualTo(expected.getAggregationStages());
 		assertThat(restored.withConstraint(io.trino.spi.predicate.TupleDomain.all()).getAggregationStages()).isEqualTo(expected.getAggregationStages());
 	}
+	@Test
+	public void testNativeParameterWireAndAllCopies() {
+		Map<String, String> input = new java.util.HashMap<>(Map.of("blob", "AP8BAA=="));
+		RediSearchTableHandle handle = new RediSearchTableHandle(new SchemaTableName("schema", "vectors"), "vectors")
+				.withNativeQuery("*=>[KNN 2 @vec $blob]", input);
+		input.put("blob", "changed");
+		RediSearchTableHandle restored = codec.fromJson(codec.toJson(handle));
+		assertThat(restored).isEqualTo(handle);
+		assertThat(restored.hashCode()).isEqualTo(handle.hashCode());
+		assertThat(restored.getNativeParameters()).containsExactlyEntriesOf(Map.of("blob", "AP8BAA=="));
+		for (RediSearchTableHandle copy : List.of(restored.withConstraint(io.trino.spi.predicate.TupleDomain.all()),
+				restored.withLimit(1), restored.withAggregations(List.of(), List.of()), restored.withAggregationStages(List.of()),
+				restored.appendAggregation(List.of(), List.of()), restored.withTopN(List.of(), 1).withoutTopN(),
+				restored.withFilters(Map.of()), restored.withNativeQuery("@name:$blob"))) {
+			assertThat(copy.getNativeParameters()).isEqualTo(handle.getNativeParameters());
+		}
+		assertThat(restored.withNativeQuery("*=>[KNN 2 @vec $blob]", Map.of("blob", "AA=="))).isNotEqualTo(handle);
+		String legacyJson = codec.toJson(new RediSearchTableHandle(new SchemaTableName("schema", "plain"), "plain"))
+				.replace(",\"nativeParameters\":{}", "").replace("\"nativeParameters\":{},", "");
+		assertThat(codec.fromJson(legacyJson).getNativeParameters()).isEmpty();
+		assertThat(codec.fromJson(codec.toJson(new RediSearchTableHandle(new SchemaTableName("schema", "plain"), "plain"))))
+				.satisfies(plain -> assertThat(plain.getNativeParameters()).isEmpty());
+	}
+
 }
