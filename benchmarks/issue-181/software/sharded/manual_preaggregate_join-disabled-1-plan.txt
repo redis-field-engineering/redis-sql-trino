@@ -1,0 +1,47 @@
+Trino version: testversion
+Fragment 0 [HASH]
+    Output layout: [k, count, label]
+    Output partitioning: SINGLE []
+    Output[columnNames = [k, c, label]]
+    │   Layout: [k:varchar, count:bigint, label:varchar]
+    │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+    │   c := count
+    └─ LeftJoin[criteria = (k = k_0), distribution = PARTITIONED]
+       │   Layout: [k:varchar, count:bigint, label:varchar]
+       │   Estimates: {rows: ? (?), cpu: ?, memory: 660B, network: 0B}
+       │   Distribution: PARTITIONED
+       ├─ Aggregate[type = FINAL, keys = [k]]
+       │  │   Layout: [k:varchar, count:bigint]
+       │  │   Estimates: {rows: ? (?), cpu: 2k, memory: ?, network: 0B}
+       │  │   count := count(count_2)
+       │  └─ LocalExchange[partitioning = HASH, arguments = [k::varchar]]
+       │     │   Layout: [k:varchar, count_2:bigint]
+       │     │   Estimates: {rows: 32 (2kB), cpu: 2k, memory: 0B, network: 0B}
+       │     └─ RemoteSource[sourceFragmentIds = [1]]
+       │            Layout: [k:varchar, count_2:bigint]
+       └─ LocalExchange[partitioning = SINGLE]
+          │   Layout: [k_0:varchar, label:varchar]
+          │   Estimates: {rows: 6 (660B), cpu: 0, memory: 0B, network: 0B}
+          └─ RemoteSource[sourceFragmentIds = [2]]
+                 Layout: [k_0:varchar, label:varchar]
+
+Fragment 1 [SOURCE]
+    Output layout: [k, count_2]
+    Output partitioning: HASH [k]
+    Aggregate[type = PARTIAL, keys = [k]]
+    │   Layout: [k:varchar, count_2:bigint]
+    │   Estimates: {rows: 32 (2kB), cpu: ?, memory: ?, network: ?}
+    │   count_2 := count(*)
+    └─ TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_facts, index=rel_facts, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[]}]
+           Layout: [k:varchar]
+           Estimates: {rows: 32 (1.72kB), cpu: 1.72k, memory: 0B, network: 0B}
+           k := RediSearchColumnHandle{name=k, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+
+Fragment 2 [SOURCE]
+    Output layout: [k_0, label]
+    Output partitioning: HASH [k_0]
+    TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_dims, index=rel_dims, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[]}]
+        Layout: [k_0:varchar, label:varchar]
+        Estimates: {rows: 6 (660B), cpu: 660, memory: 0B, network: 0B}
+        label := RediSearchColumnHandle{name=label, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+        k_0 := RediSearchColumnHandle{name=k, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}

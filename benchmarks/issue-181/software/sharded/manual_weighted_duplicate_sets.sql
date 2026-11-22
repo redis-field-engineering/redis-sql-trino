@@ -1,0 +1,1 @@
+SELECT g, h, grouping(g,h) AS identity, coalesce(sum(n), BIGINT '0') FROM (SELECT g, h, count(*) AS n FROM rel_facts GROUP BY g,h) p GROUP BY ALL GROUPING SETS ((g,h),(g),(g),())

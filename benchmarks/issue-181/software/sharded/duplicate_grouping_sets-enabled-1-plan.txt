@@ -1,0 +1,41 @@
+Trino version: testversion
+Fragment 0 [HASH]
+    Output layout: [g_gid, expr_0, count, sum]
+    Output partitioning: SINGLE []
+    Output[columnNames = [g, identity, _col2, _col3]]
+    │   Layout: [g_gid:varchar, expr_0:integer, count:bigint, sum:bigint]
+    │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+    │   g := g_gid
+    │   identity := expr_0
+    │   _col2 := count
+    │   _col3 := sum
+    └─ Project[]
+       │   Layout: [g_gid:varchar, count:bigint, sum:bigint, expr_0:integer]
+       │   Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+       │   expr_0 := $operator$subscript(array(integer) '[0, 0, 1]', $operator$add(groupid, bigint '1'))
+       └─ Aggregate[type = FINAL, keys = [g_gid, groupid]]
+          │   Layout: [g_gid:varchar, groupid:bigint, count:bigint, sum:bigint]
+          │   Estimates: {rows: ? (?), cpu: ?, memory: ?, network: 0B}
+          │   count := count(count_3)
+          │   sum := sum(sum_4)
+          └─ LocalExchange[partitioning = HASH, arguments = [g_gid::varchar, groupid::bigint]]
+             │   Layout: [g_gid:varchar, groupid:bigint, count_3:bigint, sum_4:bigint]
+             │   Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+             └─ RemoteSource[sourceFragmentIds = [1]]
+                    Layout: [g_gid:varchar, groupid:bigint, count_3:bigint, sum_4:bigint]
+
+Fragment 1 [SOURCE]
+    Output layout: [g_gid, groupid, count_3, sum_4]
+    Output partitioning: HASH [g_gid, groupid]
+    Aggregate[type = PARTIAL, keys = [g_gid, groupid]]
+    │   Layout: [g_gid:varchar, groupid:bigint, count_3:bigint, sum_4:bigint]
+    │   count_3 := count(*)
+    │   sum_4 := sum(expr_2)
+    └─ GroupId[symbols = [[g_1], [g_1], []]]
+       │   Layout: [g_gid:varchar, expr_2:bigint, groupid:bigint]
+       │   g_gid := g_1
+       └─ TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_facts, index=rel_facts, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[]}]
+              Layout: [g_1:varchar, expr_2:bigint]
+              Estimates: {rows: 32 (2kB), cpu: 2k, memory: 0B, network: 0B}
+              g_1 := RediSearchColumnHandle{name=g, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+              expr_2 := RediSearchColumnHandle{name=__widen_v_bigint, type=bigint, fieldType=NUMERIC, hidden=false, supportsPredicates=false, tagSeparator=Optional.empty, filterable=false, expression=@v}

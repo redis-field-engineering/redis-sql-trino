@@ -1,0 +1,36 @@
+Trino version: testversion
+Fragment 0 [HASH]
+    Output layout: [id, label]
+    Output partitioning: SINGLE []
+    Output[columnNames = [id, label]]
+    │   Layout: [id:integer, label:varchar]
+    │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+    └─ InnerJoin[criteria = (k = k_0), distribution = PARTITIONED]
+       │   Layout: [id:integer, label:varchar]
+       │   Estimates: {rows: ? (?), cpu: ?, memory: 660B, network: 0B}
+       │   Distribution: PARTITIONED
+       ├─ RemoteSource[sourceFragmentIds = [1]]
+       │      Layout: [id:integer, k:varchar]
+       └─ LocalExchange[partitioning = SINGLE]
+          │   Layout: [k_0:varchar, label:varchar]
+          │   Estimates: {rows: 6 (660B), cpu: 0, memory: 0B, network: 0B}
+          └─ RemoteSource[sourceFragmentIds = [2]]
+                 Layout: [k_0:varchar, label:varchar]
+
+Fragment 1 [SOURCE]
+    Output layout: [id, k]
+    Output partitioning: HASH [k]
+    TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_facts, index=rel_facts, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[]}]
+        Layout: [id:integer, k:varchar]
+        Estimates: {rows: 32 (1.88kB), cpu: 1.88k, memory: 0B, network: 0B}
+        id := RediSearchColumnHandle{name=id, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}
+        k := RediSearchColumnHandle{name=k, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+
+Fragment 2 [SOURCE]
+    Output layout: [k_0, label]
+    Output partitioning: HASH [k_0]
+    TableScan[table = relational_peer:RediSearchTableHandle{schemaTableName=tpch.rel_dims, index=rel_dims, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[]}]
+        Layout: [k_0:varchar, label:varchar]
+        Estimates: {rows: 6 (660B), cpu: 660, memory: 0B, network: 0B}
+        label := RediSearchColumnHandle{name=label, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+        k_0 := RediSearchColumnHandle{name=k, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}

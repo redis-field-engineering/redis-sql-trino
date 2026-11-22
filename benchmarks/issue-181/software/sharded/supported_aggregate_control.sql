@@ -1,0 +1,1 @@
+SELECT g, count(*), min(v) FROM rel_facts GROUP BY g

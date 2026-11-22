@@ -1,0 +1,1 @@
+SELECT g, count(*), min(v), array_agg(v ORDER BY id) FROM rel_facts GROUP BY g

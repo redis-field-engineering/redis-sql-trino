@@ -1,0 +1,44 @@
+Trino version: testversion
+Fragment 0 [HASH]
+    Output layout: [g_gid_gid, h_gid_gid, expr, expr_0]
+    Output partitioning: SINGLE []
+    Output[columnNames = [g, h, identity, _col3]]
+    │   Layout: [g_gid_gid:varchar, h_gid_gid:varchar, expr:integer, expr_0:bigint]
+    │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+    │   g := g_gid_gid
+    │   h := h_gid_gid
+    │   identity := expr
+    │   _col3 := expr_0
+    └─ Project[]
+       │   Layout: [g_gid_gid:varchar, h_gid_gid:varchar, expr:integer, expr_0:bigint]
+       │   Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+       │   expr := $operator$subscript(array(integer) '[0, 1, 1, 3]', $operator$add(groupid, bigint '1'))
+       │   expr_0 := COALESCE(sum, bigint '0')
+       └─ Aggregate[type = FINAL, keys = [g_gid_gid, h_gid_gid, groupid]]
+          │   Layout: [g_gid_gid:varchar, h_gid_gid:varchar, groupid:bigint, sum:bigint]
+          │   Estimates: {rows: ? (?), cpu: ?, memory: ?, network: 0B}
+          │   sum := sum(sum_1)
+          └─ LocalExchange[partitioning = HASH, arguments = [g_gid_gid::varchar, h_gid_gid::varchar, groupid::bigint]]
+             │   Layout: [g_gid_gid:varchar, h_gid_gid:varchar, groupid:bigint, sum_1:bigint]
+             │   Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+             └─ RemoteSource[sourceFragmentIds = [1]]
+                    Layout: [g_gid_gid:varchar, h_gid_gid:varchar, groupid:bigint, sum_1:bigint]
+
+Fragment 1 [SOURCE]
+    Output layout: [g_gid_gid, h_gid_gid, groupid, sum_1]
+    Output partitioning: HASH [g_gid_gid, h_gid_gid, groupid]
+    Aggregate[type = PARTIAL, keys = [g_gid_gid, h_gid_gid, groupid]]
+    │   Layout: [g_gid_gid:varchar, h_gid_gid:varchar, groupid:bigint, sum_1:bigint]
+    │   sum_1 := sum(syntheticcolumn0)
+    └─ GroupId[symbols = [[g, h], [g], [g], []]]
+       │   Layout: [g_gid_gid:varchar, h_gid_gid:varchar, syntheticcolumn0:bigint, groupid:bigint]
+       │   g_gid_gid := g
+       │   h_gid_gid := h
+       └─ TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_facts, index=rel_facts, filters={}, limit=OptionalLong.empty, sort=[], constraint={RediSearchColumnHandle{name=id, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}=[ SortedRangeSet[type=integer, ranges=1, {(<min>,0)}] ]}, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[RediSearchAggregationStage[terms=[g, h], metrics=[count()], groupingOnly=false]]}]
+              Layout: [g:varchar, h:varchar, syntheticcolumn0:bigint]
+              Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+              g := RediSearchColumnHandle{name=g, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+              syntheticcolumn0 := RediSearchColumnHandle{name=syntheticColumn0, type=bigint, fieldType=NUMERIC, hidden=false, supportsPredicates=false, tagSeparator=Optional.empty, filterable=false}
+              h := RediSearchColumnHandle{name=h, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+              RediSearchColumnHandle{name=id, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}
+                  :: [(<min>, 0)]

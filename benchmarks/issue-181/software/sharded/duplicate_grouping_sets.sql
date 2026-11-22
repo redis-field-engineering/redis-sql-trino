@@ -1,0 +1,1 @@
+SELECT g, grouping(g) AS identity, count(*), sum(v) FROM rel_facts GROUP BY ALL GROUPING SETS ((g),(g),())

@@ -1,0 +1,58 @@
+Trino version: testversion
+Fragment 0 [HASH]
+    Output layout: [g_gid_gid, h_gid_gid, expr, expr_0]
+    Output partitioning: SINGLE []
+    Output[columnNames = [g, h, identity, _col3]]
+    │   Layout: [g_gid_gid:varchar, h_gid_gid:varchar, expr:integer, expr_0:bigint]
+    │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+    │   g := g_gid_gid
+    │   h := h_gid_gid
+    │   identity := expr
+    │   _col3 := expr_0
+    └─ Project[]
+       │   Layout: [g_gid_gid:varchar, h_gid_gid:varchar, expr:integer, expr_0:bigint]
+       │   Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+       │   expr := $operator$subscript(array(integer) '[0, 1, 1, 3]', $operator$add(groupid, bigint '1'))
+       │   expr_0 := COALESCE(sum, bigint '0')
+       └─ Aggregate[type = FINAL, keys = [g_gid_gid, h_gid_gid, groupid]]
+          │   Layout: [g_gid_gid:varchar, h_gid_gid:varchar, groupid:bigint, sum:bigint]
+          │   Estimates: {rows: ? (?), cpu: ?, memory: ?, network: 0B}
+          │   sum := sum(sum_1)
+          └─ LocalExchange[partitioning = HASH, arguments = [g_gid_gid::varchar, h_gid_gid::varchar, groupid::bigint]]
+             │   Layout: [g_gid_gid:varchar, h_gid_gid:varchar, groupid:bigint, sum_1:bigint]
+             │   Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+             └─ RemoteSource[sourceFragmentIds = [1]]
+                    Layout: [g_gid_gid:varchar, h_gid_gid:varchar, groupid:bigint, sum_1:bigint]
+
+Fragment 1 [HASH]
+    Output layout: [g_gid_gid, h_gid_gid, groupid, sum_1]
+    Output partitioning: HASH [g_gid_gid, h_gid_gid, groupid]
+    Aggregate[type = PARTIAL, keys = [g_gid_gid, h_gid_gid, groupid]]
+    │   Layout: [g_gid_gid:varchar, h_gid_gid:varchar, groupid:bigint, sum_1:bigint]
+    │   sum_1 := sum(count)
+    └─ GroupId[symbols = [[g, h], [g], [g], []]]
+       │   Layout: [g_gid_gid:varchar, h_gid_gid:varchar, count:bigint, groupid:bigint]
+       │   g_gid_gid := g
+       │   h_gid_gid := h
+       └─ Aggregate[type = FINAL, keys = [g, h]]
+          │   Layout: [g:varchar, h:varchar, count:bigint]
+          │   Estimates: {rows: ? (?), cpu: 3.72k, memory: ?, network: 0B}
+          │   count := count(count_2)
+          └─ LocalExchange[partitioning = HASH, arguments = [g::varchar, h::varchar]]
+             │   Layout: [g:varchar, h:varchar, count_2:bigint]
+             │   Estimates: {rows: 32 (3.72kB), cpu: 3.72k, memory: 0B, network: 0B}
+             └─ RemoteSource[sourceFragmentIds = [2]]
+                    Layout: [g:varchar, h:varchar, count_2:bigint]
+
+Fragment 2 [SOURCE]
+    Output layout: [g, h, count_2]
+    Output partitioning: HASH [g, h]
+    Aggregate[type = PARTIAL, keys = [g, h]]
+    │   Layout: [g:varchar, h:varchar, count_2:bigint]
+    │   Estimates: {rows: 32 (3.72kB), cpu: ?, memory: ?, network: ?}
+    │   count_2 := count(*)
+    └─ TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_facts, index=rel_facts, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[]}]
+           Layout: [g:varchar, h:varchar]
+           Estimates: {rows: 32 (3.44kB), cpu: 3.44k, memory: 0B, network: 0B}
+           g := RediSearchColumnHandle{name=g, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+           h := RediSearchColumnHandle{name=h, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}

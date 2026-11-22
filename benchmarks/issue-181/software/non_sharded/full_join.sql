@@ -1,0 +1,1 @@
+SELECT f.id, f.k, d.k, d.label FROM rel_facts f FULL JOIN rel_dims d ON f.k = d.k

@@ -995,6 +995,8 @@ For an eligible document scan, dynamic filtering adds join keys collected from t
 The scan can wait up to `redisearch.dynamic-filtering.wait-timeout` (20 seconds by default).
 Large dynamic domains are compacted with a threshold of 256, so a range prefilter can replace many individual values; Trino still evaluates the join.
 A pushed-down limit or aggregation does not use this document-scan dynamic filtering path.
+Windows, ROLLUP/CUBE/GROUPING SETS and mixed unsupported aggregate nodes also retain Trino execution.
+Eligible leaf aggregations can reduce input to Trino relational operators when expressed explicitly; see link:sql-query-design.adoc#relational-assessment[the relational feasibility assessment] for limits and bounded evidence.
 
 Table row-count statistics come from cached `FT.INFO num_docs` values.
 They help Trino choose join order and distribution, but do not estimate predicate selectivity: the filtered estimate can still be the whole index count.

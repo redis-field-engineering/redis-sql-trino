@@ -1,0 +1,37 @@
+Trino version: testversion
+Fragment 0 [HASH]
+    Output layout: [id_7, g_8, v_9, sum, sum_1]
+    Output partitioning: SINGLE []
+    Output[columnNames = [id, g, v, rows_sum, peer_sum]]
+    │   Layout: [id_7:integer, g_8:varchar, v_9:integer, sum:bigint, sum_1:bigint]
+    │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+    │   id := id_7
+    │   g := g_8
+    │   v := v_9
+    │   rows_sum := sum
+    │   peer_sum := sum_1
+    └─ Project[]
+       │   Layout: [id_7:integer, g_8:varchar, v_9:integer, sum:bigint, sum_1:bigint]
+       │   Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+       └─ Window[partitionBy = [<g_8>], orderBy = [<v_9 ASC NULLS LAST>, id_7 ASC NULLS LAST]]
+          │   Layout: [expr_6:bigint, id_7:integer, g_8:varchar, v_9:integer, sum_1:bigint, sum:bigint]
+          │   sum := sum(expr_6) ROWS UNBOUNDED_PRECEDING CURRENT_ROW
+          └─ Window[partitionBy = [g_8], orderBy = [v_9 ASC NULLS LAST]]
+             │   Layout: [expr_6:bigint, id_7:integer, g_8:varchar, v_9:integer, sum_1:bigint]
+             │   sum_1 := sum(expr_6) RANGE UNBOUNDED_PRECEDING CURRENT_ROW
+             └─ LocalExchange[partitioning = HASH, arguments = [g_8::varchar]]
+                │   Layout: [expr_6:bigint, id_7:integer, g_8:varchar, v_9:integer]
+                │   Estimates: {rows: 32 (2.31kB), cpu: 2.31k, memory: 0B, network: 0B}
+                └─ RemoteSource[sourceFragmentIds = [1]]
+                       Layout: [expr_6:bigint, id_7:integer, g_8:varchar, v_9:integer]
+
+Fragment 1 [SOURCE]
+    Output layout: [expr_6, id_7, g_8, v_9]
+    Output partitioning: HASH [g_8]
+    TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_facts, index=rel_facts, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[]}]
+        Layout: [expr_6:bigint, id_7:integer, g_8:varchar, v_9:integer]
+        Estimates: {rows: 32 (2.31kB), cpu: 2.31k, memory: 0B, network: 0B}
+        g_8 := RediSearchColumnHandle{name=g, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+        id_7 := RediSearchColumnHandle{name=id, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}
+        v_9 := RediSearchColumnHandle{name=v, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}
+        expr_6 := RediSearchColumnHandle{name=__widen_v_bigint, type=bigint, fieldType=NUMERIC, hidden=false, supportsPredicates=false, tagSeparator=Optional.empty, filterable=false, expression=@v}

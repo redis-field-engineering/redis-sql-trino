@@ -1,0 +1,1 @@
+SELECT f.id, f.k, d.label FROM rel_facts f LEFT JOIN rel_dims d ON f.k = d.k AND d.label <> 'second'

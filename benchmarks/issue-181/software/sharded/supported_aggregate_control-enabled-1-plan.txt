@@ -1,0 +1,15 @@
+Trino version: testversion
+Fragment 0 [SOURCE]
+    Output layout: [g, syntheticcolumn0, syntheticcolumn1]
+    Output partitioning: SINGLE []
+    Output[columnNames = [g, _col1, _col2]]
+    │   Layout: [g:varchar, syntheticcolumn0:bigint, syntheticcolumn1:integer]
+    │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+    │   _col1 := syntheticcolumn0
+    │   _col2 := syntheticcolumn1
+    └─ TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_facts, index=rel_facts, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[RediSearchAggregationStage[terms=[g], metrics=[count(), min(v)], groupingOnly=false]]}]
+           Layout: [g:varchar, syntheticcolumn0:bigint, syntheticcolumn1:integer]
+           Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+           syntheticcolumn1 := RediSearchColumnHandle{name=syntheticColumn1, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=false, tagSeparator=Optional.empty, filterable=false}
+           g := RediSearchColumnHandle{name=g, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+           syntheticcolumn0 := RediSearchColumnHandle{name=syntheticColumn0, type=bigint, fieldType=NUMERIC, hidden=false, supportsPredicates=false, tagSeparator=Optional.empty, filterable=false}

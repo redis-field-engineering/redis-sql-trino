@@ -1,0 +1,1 @@
+SELECT f.id, d.label FROM rel_facts f JOIN relational_peer.tpch.rel_dims d ON f.k = d.k

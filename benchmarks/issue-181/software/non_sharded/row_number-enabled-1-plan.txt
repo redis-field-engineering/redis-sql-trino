@@ -1,0 +1,26 @@
+Trino version: testversion
+Fragment 0 [HASH]
+    Output layout: [id, g, v, row_number]
+    Output partitioning: SINGLE []
+    Output[columnNames = [id, g, v, rn]]
+    │   Layout: [id:integer, g:varchar, v:integer, row_number:bigint]
+    │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+    │   rn := row_number
+    └─ Window[partitionBy = [g], orderBy = [v ASC NULLS LAST, id ASC NULLS LAST]]
+       │   Layout: [id:integer, g:varchar, v:integer, row_number:bigint]
+       │   row_number := row_number() RANGE UNBOUNDED_PRECEDING CURRENT_ROW
+       └─ LocalExchange[partitioning = HASH, arguments = [g::varchar]]
+          │   Layout: [id:integer, g:varchar, v:integer]
+          │   Estimates: {rows: 32 (2.03kB), cpu: 2.03k, memory: 0B, network: 0B}
+          └─ RemoteSource[sourceFragmentIds = [1]]
+                 Layout: [id:integer, g:varchar, v:integer]
+
+Fragment 1 [SOURCE]
+    Output layout: [id, g, v]
+    Output partitioning: HASH [g]
+    TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_facts, index=rel_facts, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[]}]
+        Layout: [id:integer, g:varchar, v:integer]
+        Estimates: {rows: 32 (2.03kB), cpu: 2.03k, memory: 0B, network: 0B}
+        g := RediSearchColumnHandle{name=g, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+        id := RediSearchColumnHandle{name=id, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}
+        v := RediSearchColumnHandle{name=v, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}

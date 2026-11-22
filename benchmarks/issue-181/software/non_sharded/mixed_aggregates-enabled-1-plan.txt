@@ -1,0 +1,31 @@
+Trino version: testversion
+Fragment 0 [HASH]
+    Output layout: [g, count, min, array_agg]
+    Output partitioning: SINGLE []
+    Output[columnNames = [g, _col1, _col2, _col3]]
+    │   Layout: [g:varchar, count:bigint, min:integer, array_agg:array(integer)]
+    │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+    │   _col1 := count
+    │   _col2 := min
+    │   _col3 := array_agg
+    └─ Aggregate[keys = [g]]
+       │   Layout: [g:varchar, count:bigint, min:integer, array_agg:array(integer)]
+       │   Estimates: {rows: ? (?), cpu: 2.03k, memory: ?, network: 0B}
+       │   count := count(*)
+       │   min := min(v)
+       │   array_agg := array_agg(v [id ASC NULLS LAST])
+       └─ LocalExchange[partitioning = HASH, arguments = [g::varchar]]
+          │   Layout: [id:integer, g:varchar, v:integer]
+          │   Estimates: {rows: 32 (2.03kB), cpu: 2.03k, memory: 0B, network: 0B}
+          └─ RemoteSource[sourceFragmentIds = [1]]
+                 Layout: [id:integer, g:varchar, v:integer]
+
+Fragment 1 [SOURCE]
+    Output layout: [id, g, v]
+    Output partitioning: HASH [g]
+    TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_facts, index=rel_facts, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[]}]
+        Layout: [id:integer, g:varchar, v:integer]
+        Estimates: {rows: 32 (2.03kB), cpu: 2.03k, memory: 0B, network: 0B}
+        g := RediSearchColumnHandle{name=g, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+        id := RediSearchColumnHandle{name=id, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}
+        v := RediSearchColumnHandle{name=v, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}

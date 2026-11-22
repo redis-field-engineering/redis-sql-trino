@@ -23,7 +23,7 @@ Historical unsupported or not-planned decisions are context, not permanent restr
 |#178 |Canonical DOUBLE, HASH BOOLEAN and bounded Unicode CHAR grouping |Further exact numeric/decimal and arithmetic strategies
 |#179 |HASH NULL/VARCHAR/anchored LIKE filters and HASH/JSON acceptance for nullability, escapes, Unicode and residual-before-reduction ordering |Untranslated shapes keep the documented exact Trino residuals
 |#180 |HASH/JSON typed late-materialized TopN, explicit native/local/fallback eligibility and residual-before-selection acceptance coverage |Unsupported mappings and nonorderable values keep the documented Trino fallback
-|#181 |Grouping-only pushdown and relational feasibility design |Join/window execution and multiple grouping sets
+|#181 |Completed relational feasibility matrix, bounded plans/results/work measurements and read-isolation acceptance |Join/window/complex-grouping execution remains in Trino; explicit eligible leaf preaggregation is demonstrated
 |#182 |Categorized actionable aggregation/TopN/DISTINCT DEBUG diagnostics, proven grouping bounds and cached-count/runtime-precision coverage |Additional finite proofs and EXPLAIN annotations remain optional extensions
 |#183 |Reconciled statement/type/execution documentation |Keep references current as capabilities land
 |#184 |Explicit capability/skip inventory, restricted TopN/fallback tests and negative-date round trips |Keep the test contract current as capabilities change
