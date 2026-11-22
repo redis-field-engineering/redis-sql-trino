@@ -10,7 +10,7 @@ Historical unsupported or not-planned decisions are context, not permanent restr
 |===
 |Issue |Implemented |Remaining work
 |#167 |Cluster-compatible namespace design |Multiple schemas and schema lifecycle
-|#168 |Ordinary views, replace, comments, same-schema rename and drop |Materialized views, refresh and authorization changes
+|#168 |Ordinary views, saved type/context resolution, definer/invoker authorization, source drift and lifecycle acceptance |Materialized-view lifecycle is tracked separately in #193; owner transfer remains unsupported
 |#169 |ADD COLUMN FIRST/AFTER and stable unmanaged-index order for all positions |Physical rename, drop and type conversion
 |#170 |HASH/JSON TRUNCATE with key spool and pipelined UNLINK |Safe table replacement
 |#171 |Durable table/column/view comments, atomic metadata and batched initialization |Lifecycle with future schema evolution
@@ -21,7 +21,7 @@ Historical unsupported or not-planned decisions are context, not permanent restr
 |#176 |HASH COUNT(column) and COUNT_IF(stored BOOLEAN) |General FILTER masks and computed conditions
 |#177 |Exact bounded two-stage global/grouped DISTINCT counting in Redis |Wider canonical keys and additional aggregate shapes
 |#178 |Canonical DOUBLE, HASH BOOLEAN and bounded Unicode CHAR grouping |Further exact numeric/decimal and arithmetic strategies
-|#179 |HASH NULL, lexical VARCHAR and exact anchored LIKE/ESCAPE filters |Unanchored contains/middle residuals, general wildcards and broader JSON predicates
+|#179 |HASH NULL/VARCHAR/anchored LIKE filters and HASH/JSON acceptance for nullability, escapes, Unicode and residual-before-reduction ordering |Untranslated shapes keep the documented exact Trino residuals
 |#180 |HASH/JSON typed late-materialized TopN, explicit native/local/fallback eligibility and residual-before-selection acceptance coverage |Unsupported mappings and nonorderable values keep the documented Trino fallback
 |#181 |Grouping-only pushdown and relational feasibility design |Join/window execution and multiple grouping sets
 |#182 |Categorized actionable aggregation/TopN/DISTINCT DEBUG diagnostics, proven grouping bounds and cached-count/runtime-precision coverage |Additional finite proofs and EXPLAIN annotations remain optional extensions
@@ -87,3 +87,21 @@ Validation on November 21, 2026:
 * The HTML/PDF guide rebuilt successfully, and git diff --check passed. An independent subagent reviewed eligibility preservation, runtime guard behavior and diagnostic privacy.
 
 These selected acceptance results are a separate cohort from the earlier modernization counts above. They establish correctness and work accounting, without a new full-data performance claim.
+
+
+== Predicate and ordinary-view acceptance: #179 and #168
+
+Bounded HASH/JSON fixtures compare the same source with connector pushdown disabled for NULLs, empty strings, case, separators, whitespace, controls/NUL, quotes, backslash, Unicode, nullable compounds and LIKE/ESCAPE.
+Residual-before-LIMIT, ordering and aggregate checks retain exact SQL semantics. Existing JSON numeric first-match/ANY-match and invalid scalar-shape guards are included in the selected regression cohort.
+
+Ordinary-view tests verify persisted types/catalog/schema, caller-independent source resolution, SHOW/list/query/drop and referenced-table add/drop/recreate/type drift.
+Real Trino access-control checks distinguish definer owner authority from invoker source permissions, owner revocation and view/create/drop privileges.
+CURRENT_USER is asserted separately as the query caller in both modes, following Trino's contract. Materialized-view implementation remains unsupported and separately tracked in #193.
+
+Validation on November 21, 2026:
+
+* Across the selected Software/unit suites and final corrected view rerun, the latest selected reports contain 44 cases with no failures, errors or skips; the final normal package build passed all eight single-shard/sharded view cases.
+* The predicate and view suites passed nine cases each on Redis OSS 8.4 and 8.10.3: 18 additional cases with no failures, errors or skips. CI includes both new suites in that compatibility matrix.
+* Workflow actionlint and git diff --check passed. HTML/PDF guide generation was verified after the contract updates.
+
+One initial local Software database activation timed out before SQL assertions; its timeout was preserved and validation used fresh disposable clusters. The results above are selected acceptance cohorts rather than a new full-repository or full-data benchmark claim.

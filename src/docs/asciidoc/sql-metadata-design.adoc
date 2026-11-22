@@ -12,6 +12,16 @@ The supported lifecycle includes create, replace, list, query, comment, rename w
 the configured schema, and drop. Trino performs query planning and authorization;
 the Redis connector does not interpolate view SQL into native Redis commands.
 
+The saved catalog/schema and search path resolve source names independently of the caller's defaults.
+Definer views use the stored owner's authority to expose source columns; invoker views use caller access, and selecting the view itself remains subject to Trino access control.
+CURRENT_USER continues to identify the query caller in either mode, as specified by Trino's view semantics.
+Redis sees the configured catalog service account in either mode. Ordinary views do not introduce per-SQL-user Redis credentials or key isolation.
+The connector does not implement ALTER VIEW SET AUTHORIZATION.
+
+Source dependencies are reanalyzed by Trino rather than maintained as a connector dependency graph.
+An explicit projection can survive unrelated ADD COLUMN; changed SELECT * layouts and incompatible output types may be stale, while compatible coercions follow Trino rules.
+Dropping a source preserves its view definitions and makes their queries fail; compatible source recreation or CREATE OR REPLACE VIEW can restore use. No dependency cascade or result refresh is implied.
+
 Views are a bounded JSON string registry at `__trino:views:v1:<schema>`.
 All catalogs connected to the same Redis database and configured schema share it,
 just as they share the existing index-backed tables. The registry is limited to
@@ -77,7 +87,9 @@ name claims, case-insensitive catalogs, legacy discovery/adoption and Redis Clus
 slot behavior. Until that layer exists, schema creation and cross-schema renames
 remain unsupported. Historical #71's not-planned decision is explicitly being revisited.
 
-== Materialized views: #168 (design, not implemented)
+== Materialized views: #193 (design, not implemented)
+
+https://github.com/redis-field-engineering/redis-sql-trino/issues/193[Issue #193] retains the separate materialization milestone permitted by #168; completing ordinary-view acceptance does not implement this design.
 
 Ordinary view storage is not a materialization protocol. A materialized view needs
 a definition plus an owned storage-table generation and refresh state. Trino 484's
