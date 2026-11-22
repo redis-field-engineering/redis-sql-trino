@@ -1,0 +1,45 @@
+Trino version: testversion
+Fragment 0 [HASH]
+    Output layout: [g_gid, h_gid, expr_0, count, sum]
+    Output partitioning: SINGLE []
+    Output[columnNames = [g, h, identity, _col3, _col4]]
+    │   Layout: [g_gid:varchar, h_gid:varchar, expr_0:integer, count:bigint, sum:bigint]
+    │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+    │   g := g_gid
+    │   h := h_gid
+    │   identity := expr_0
+    │   _col3 := count
+    │   _col4 := sum
+    └─ Project[]
+       │   Layout: [g_gid:varchar, h_gid:varchar, count:bigint, sum:bigint, expr_0:integer]
+       │   Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+       │   expr_0 := $operator$subscript(array(integer) '[3, 1, 2, 0]', $operator$add(groupid, bigint '1'))
+       └─ Aggregate[type = FINAL, keys = [g_gid, h_gid, groupid]]
+          │   Layout: [g_gid:varchar, h_gid:varchar, groupid:bigint, count:bigint, sum:bigint]
+          │   Estimates: {rows: ? (?), cpu: ?, memory: ?, network: 0B}
+          │   count := count(count_1)
+          │   sum := sum(sum_2)
+          └─ LocalExchange[partitioning = HASH, arguments = [g_gid::varchar, h_gid::varchar, groupid::bigint]]
+             │   Layout: [g_gid:varchar, h_gid:varchar, groupid:bigint, count_1:bigint, sum_2:bigint]
+             │   Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+             └─ RemoteSource[sourceFragmentIds = [1]]
+                    Layout: [g_gid:varchar, h_gid:varchar, groupid:bigint, count_1:bigint, sum_2:bigint]
+
+Fragment 1 [SOURCE]
+    Output layout: [g_gid, h_gid, groupid, count_1, sum_2]
+    Output partitioning: HASH [g_gid, h_gid, groupid]
+    Aggregate[type = PARTIAL, keys = [g_gid, h_gid, groupid]]
+    │   Layout: [g_gid:varchar, h_gid:varchar, groupid:bigint, count_1:bigint, sum_2:bigint]
+    │   count_1 := count(*)
+    │   sum_2 := sum(expr)
+    └─ GroupId[symbols = [[], [g], [h], [g, h]]]
+       │   Layout: [g_gid:varchar, h_gid:varchar, expr:bigint, groupid:bigint]
+       │   g_gid := g
+       │   h_gid := h
+       └─ ScanProject[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_facts, index=rel_facts, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[], pushdownPolicy={aggregation=enabled_subject_to_expression_safety, cached_documents=32, floating_aggregates=resp3_transport, group_bound=document_count_fits, group_budget=1000000, integer_sum_row_limit=4194303, integer_sum_rows=cached_count_fits, local_topn=typed_candidate_selection, local_topn_candidate_budget=1000, normalization_case=not_yet_probed, reader=redis_cursor, smallint_sum_row_limit=274877906943, smallint_sum_rows=cached_count_fits, snapshot=planning_policy_not_rejection_history, tinyint_sum_row_limit=70368744177663, tinyint_sum_rows=cached_count_fits}, appliedPushdowns={indexed_constraint=none, loaded_filters=0, aggregation_stages=0, ordering=trino_or_unordered, limit=none, native_selection=none}}]
+              Layout: [g:varchar, h:varchar, expr:bigint]
+              Estimates: {rows: 32 (3.72kB), cpu: 3.59k, memory: 0B, network: 0B}/{rows: 32 (3.72kB), cpu: 3.72k, memory: 0B, network: 0B}
+              expr := CAST(v AS bigint)
+              v := RediSearchColumnHandle{name=v, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}
+              g := RediSearchColumnHandle{name=g, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+              h := RediSearchColumnHandle{name=h, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}

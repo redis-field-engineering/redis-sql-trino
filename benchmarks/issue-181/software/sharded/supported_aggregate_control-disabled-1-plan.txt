@@ -1,0 +1,33 @@
+Trino version: testversion
+Fragment 0 [HASH]
+    Output layout: [g, count, min]
+    Output partitioning: SINGLE []
+    Output[columnNames = [g, _col1, _col2]]
+    │   Layout: [g:varchar, count:bigint, min:integer]
+    │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+    │   _col1 := count
+    │   _col2 := min
+    └─ Aggregate[type = FINAL, keys = [g]]
+       │   Layout: [g:varchar, count:bigint, min:integer]
+       │   Estimates: {rows: ? (?), cpu: 2.16k, memory: ?, network: 0B}
+       │   count := count(count_0)
+       │   min := min(min_1)
+       └─ LocalExchange[partitioning = HASH, arguments = [g::varchar]]
+          │   Layout: [g:varchar, count_0:bigint, min_1:integer]
+          │   Estimates: {rows: 32 (2.16kB), cpu: 2.16k, memory: 0B, network: 0B}
+          └─ RemoteSource[sourceFragmentIds = [1]]
+                 Layout: [g:varchar, count_0:bigint, min_1:integer]
+
+Fragment 1 [SOURCE]
+    Output layout: [g, count_0, min_1]
+    Output partitioning: HASH [g]
+    Aggregate[type = PARTIAL, keys = [g]]
+    │   Layout: [g:varchar, count_0:bigint, min_1:integer]
+    │   Estimates: {rows: 32 (2.16kB), cpu: ?, memory: ?, network: ?}
+    │   count_0 := count(*)
+    │   min_1 := min(v)
+    └─ TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_facts, index=rel_facts, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[], pushdownPolicy={aggregation=enabled_subject_to_expression_safety, cached_documents=32, floating_aggregates=resp3_transport, group_bound=document_count_fits, group_budget=1000000, integer_sum_row_limit=4194303, integer_sum_rows=cached_count_fits, local_topn=typed_candidate_selection, local_topn_candidate_budget=1000, normalization_case=not_yet_probed, reader=redis_cursor, smallint_sum_row_limit=274877906943, smallint_sum_rows=cached_count_fits, snapshot=planning_policy_not_rejection_history, tinyint_sum_row_limit=70368744177663, tinyint_sum_rows=cached_count_fits}, appliedPushdowns={indexed_constraint=none, loaded_filters=0, aggregation_stages=0, ordering=trino_or_unordered, limit=none, native_selection=none}}]
+           Layout: [g:varchar, v:integer]
+           Estimates: {rows: 32 (1.88kB), cpu: 1.88k, memory: 0B, network: 0B}
+           v := RediSearchColumnHandle{name=v, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}
+           g := RediSearchColumnHandle{name=g, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}

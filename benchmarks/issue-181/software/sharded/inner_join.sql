@@ -1,0 +1,1 @@
+SELECT f.id, f.k, f.v, d.label FROM rel_facts f JOIN rel_dims d ON f.k = d.k

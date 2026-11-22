@@ -1,0 +1,1 @@
+SELECT g, h, grouping(g,h) AS identity, count(*), sum(v) FROM rel_facts GROUP BY ROLLUP(g,h)

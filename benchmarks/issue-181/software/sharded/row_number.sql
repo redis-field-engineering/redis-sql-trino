@@ -1,0 +1,1 @@
+SELECT id, g, v, row_number() OVER (PARTITION BY g ORDER BY v NULLS LAST, id) AS rn FROM rel_facts

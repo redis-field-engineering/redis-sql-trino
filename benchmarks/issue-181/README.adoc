@@ -1,0 +1,95 @@
+= Relational execution assessment (#181)
+
+This bounded assessment decides which work stays in Trino 484 and demonstrates eligible leaf aggregation without adding a relational engine to the connector.
+See link:../../src/docs/asciidoc/sql-query-design.adoc#relational-assessment[the capability matrix and implementation boundaries].
+
+== Method and scope
+
+`TestRelationalAssessment` and `TestShardedRelationalAssessment` create 32 HASH fact rows and six dimension rows.
+The eight-row fact seed is repeated four times with unique integer IDs; it contains duplicate keys, nullable values and NULL grouping keys.
+Dimensions contain duplicate matches, a NULL key and an unmatched key.
+The retained `fixtureSql` reconstructs these relations independently using typed VALUES, with a SHA256 checksum.
+
+Each of 16 workloads runs with connector pushdown enabled and disabled, in that order, three paired repetitions per deployment.
+Every attempt compares complete typed multisets against its VALUES oracle, preserving duplicates; a sorted canonical row serialization plus SQL types yields the retained SHA256.
+For weighted grouping-set compositions, the oracle is the original raw COUNT query rather than another copy of the composition.
+All source data is immutable throughout measured queries.
+A separate untimed probe verifies external mutation visibility between two queries in the same READ_UNCOMMITTED transaction and rejection of the three stronger isolation levels.
+No atomicity across source scans is claimed.
+
+Dynamic filtering is disabled to isolate eligible leaf aggregation.
+Both modes use identical SQL; disabling `allow_pushdown_into_connectors` supplies the fallback control.
+The second catalog points at the same Redis endpoint: this tests a catalog boundary, not distributed network performance.
+Cursor count is five to exercise bounded cursor batches on this tiny fixture.
+
+Elapsed time includes planning, execution and result retrieval in the in-process distributed Trino test runner.
+There is no warm-up exclusion, cache reset, randomized ordering, isolated server CPU measurement or statistical speedup claim.
+These measurements establish correctness, plan boundaries and returned-row reduction on a tiny dataset; they do not establish full-data throughput.
+`redis.rows.received` counts connector-received Redis rows, not all index entries inspected by Redis.
+Physical input bytes are Trino's accounting, not wire bytes; operator CPU is summed component time, not query elapsed time.
+
+== Evidence layout
+
+`software/non_sharded/assessment.json` and `software/sharded/assessment.json` retain every measured attempt's elapsed nanoseconds, result/oracle hashes, types, row count, operator names, connector counters and operator statistics.
+Alongside them, each workload has SQL and oracle SQL; each mode retains first-attempt raw result rows and representative EXPLAIN text.
+EXPLAIN is a separate untimed planning operation over the same immutable fixture.
+`provenance.json` records the base revision, exact tested source checksums, environment and validation totals.
+`summary.csv` is derived from all retained attempts, including each timing rather than selecting the fastest.
+Run `python3 benchmarks/issue-181/summarize.py` to validate cohort completeness and matching hashes and regenerate the CSV.
+
+== Reproduce
+
+Use Java 25, Docker and the repository's Maven wrapper. Run Software provisioning serially; the test JVM shares one Software cluster and creates separate single-shard and two-shard OSS Cluster API databases.
+
+[source,shell]
+----
+./mvnw -B -o package \
+  -Dtest=TestRelationalAssessment,TestShardedRelationalAssessment \
+  -Djunit.jupiter.execution.parallel.enabled=false \
+  -Dredisearch.test.cluster-label=relational-assessment \
+  -Dredisearch.relational-assessment.output=/tmp/relational-evidence \
+  -Dredisearch.relational-assessment.repeats=3
+----
+
+The output directory must be empty for a new cohort.
+The default is one repetition without retained evidence; the property accepts one through five repetitions.
+For OSS compatibility, run only `TestRelationalAssessment` with `-Dredisearch.test.oss-image=redis:8.4` or `redis:8.10.3` and an isolated `-Dredisearch.build-directory`.
+Those compatibility checks are correctness gates, separate from the retained Software timing cohort.
+
+== Validation result
+
+The final Software package run passed 112 selected test cases (including framework naming checks), with zero failures, errors or skips.
+Redis OSS 8.4 and 8.10.3 each passed 11 selected test cases.
+All 192 retained Software comparisons passed and match their typed VALUES-oracle hashes; both documentation formats and actionlint passed.
+
+== Decisions
+
+* Same-catalog and cross-catalog joins remain in Trino; NULL and duplicate multiplicity match the oracle.
+* ROW_NUMBER and ROWS/RANGE windows remain in Trino; tied values distinguish peer and row frames.
+* Complex grouping retains Trino's GroupId and aggregation, including duplicate sets and actual-NULL versus subtotal identity.
+* A mixed COUNT/MIN/ordered ARRAY_AGG node retains Trino aggregation as a whole.
+* Supported-only aggregation returns three groups instead of 32 source rows.
+* Explicit preaggregation before a LEFT JOIN returns five fact groups plus six dimension rows instead of 32 plus six; the join remains in Trino. This explicitly changes the requested fact grain and is not a transparent rewrite of a raw-row join.
+* Explicit COUNT-only finest-grain preaggregation returns six groups instead of 32 rows before Trino complex grouping. The normal, duplicate-set and empty-input results match raw COUNT oracles. Exact key/count bounds still apply; this does not prove arbitrary aggregate decomposition.
+
+== Regression discovered during assessment
+
+The initial single-shard and sharded run failed on the two-frame SUM window query: repeated optimizer projection calls could assign two Trino symbols to equal INTEGER-to-BIGINT widening handles, violating the planner's one-to-one scan assignment map.
+That run completed its isolation checks but did not complete either measurement cohort; its partial samples are excluded from the retained final cohort.
+The focused projection fix reuses an existing equivalent handle's assignment when translating another expression, while preserving all requested output expressions.
+The unchanged window workload is the live regression case.
+
+== Returned-row controls
+
+For both Software topologies and all three repetitions, the enabled/disabled pairs assert these exact connector-received row totals:
+
+[cols="3,1,1,2",options="header"]
+|===
+|Workload |Enabled |Disabled |Remaining Trino work
+|Supported COUNT/MIN by g |3 |32 |Final output
+|Explicit preaggregate then LEFT JOIN |11 |38 |Join (five fact groups plus six dimension rows)
+|Explicit COUNT-weighted grouping sets |6 |32 |GroupId and outer SUM
+|Explicit COUNT-weighted duplicate sets |6 |32 |GroupId and outer SUM, retaining duplicate-set multiplicity
+|===
+
+These controls measure transfer reduction. They do not imply fewer server index entries examined or faster elapsed execution.

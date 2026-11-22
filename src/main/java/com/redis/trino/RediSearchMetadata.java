@@ -746,10 +746,18 @@ public class RediSearchMetadata implements ConnectorMetadata {
 						.filter(RediSearchIndexInfo.KeyType.HASH::equals).isEmpty()) {
 			return Optional.empty();
 		}
+		return projectExpressions(table, projections, assignments);
+	}
+
+	static Optional<ProjectionApplicationResult<ConnectorTableHandle>> projectExpressions(RediSearchTableHandle table,
+			List<ConnectorExpression> projections, Map<String, ColumnHandle> assignments) {
 		ImmutableList.Builder<ConnectorExpression> newProjections = ImmutableList.builder();
 		Map<String, Assignment> newAssignments = new LinkedHashMap<>();
-		// The variable of each pushed-down column, which equal expressions share
+		// Repeated optimizer passes may already have materialized a requested expression. Reuse that variable,
+		// including when it is also projected unchanged, so a TableScan never gets two equal column handles.
 		Map<RediSearchColumnHandle, String> variables = new HashMap<>();
+		assignments.forEach((name, column) -> variables.putIfAbsent((RediSearchColumnHandle) column, name));
+		boolean translated = false;
 		for (ConnectorExpression projection : projections) {
 			Optional<RediSearchExpression> expression = projection instanceof Call
 					? RediSearchExpression.translate(projection, assignments)
@@ -765,6 +773,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 				continue;
 			}
 			RediSearchColumnHandle column = projected.get();
+			translated = true;
 			String variable = variables.computeIfAbsent(column, unused -> {
 				String name = "expr_" + variables.size();
 				while (assignments.containsKey(name) || newAssignments.containsKey(name)) {
@@ -775,7 +784,7 @@ public class RediSearchMetadata implements ConnectorMetadata {
 			newProjections.add(new Variable(variable, column.getType()));
 			newAssignments.putIfAbsent(variable, new Assignment(variable, column, column.getType()));
 		}
-		if (variables.isEmpty()) {
+		if (!translated) {
 			return Optional.empty();
 		}
 		return Optional.of(new ProjectionApplicationResult<>(table, newProjections.build(),

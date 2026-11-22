@@ -1,0 +1,1 @@
+SELECT a.k, a.c, d.label FROM (SELECT k, count(*) AS c FROM rel_facts GROUP BY k) a LEFT JOIN rel_dims d ON a.k = d.k

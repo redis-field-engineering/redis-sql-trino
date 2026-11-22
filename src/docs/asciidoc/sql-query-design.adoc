@@ -28,8 +28,8 @@ The acceptance tests accompanying code are the executable contract; the proposal
 |Bounded late-materialization TopN uses Trino typed ordering for multiple HASH keys, either direction and either NULL placement. A scan selects exact keys and order values; only winning documents' projected fields are fetched.
 |The configurable candidate budget defaults to 1,000 (zero disables, maximum 100,000). Exact DOUBLE/REAL/DECIMAL sort fields use narrow pipelined HMGET reads rather than loading wide source documents. Selection batches, typed retained keys and winner hydration reserve Trino memory, with failure cleanup. It still scans matching keys. JSON uses DIALECT 3 narrow scans and single-key JSON.GET winner hydration for validated modern paths, including bracket keys, array selectors, recursive members and wildcards; unsupported schemas and Flex retain fallback. JSON NUMERIC predicates retain SQL evaluation because ANY-value index matches and single-node paths do not establish scalar SQL equality. Missing worker-cache source columns trigger a targeted metadata reload.
 |#181
-|Grouping-only aggregation, formerly rejected because no SQL reducer was present, is now accepted within the existing exact grouping contract.
-|Joins, windows, multiple grouping sets and grouped-handle aggregates beyond the supported DISTINCT count stage still execute in Trino. Dynamic join filtering remains available.
+|Completed feasibility matrix, 16 bounded workload plans/result comparisons, source-work controls and real read-isolation acceptance on single-shard and sharded deployments.
+|Joins, windows, multiple grouping sets and mixed unsupported aggregate nodes still execute in Trino. Explicit preaggregation compositions demonstrate eligible leaf work reduction; dynamic join filtering remains available.
 |#182
 |Immutable EXPLAIN pushdownPolicy snapshots expose configuration/Flex policies, cached CASE capability, RESP2 restrictions, document/group budgets, integer SUM row safety and local TopN budgets. appliedPushdowns distinguishes accepted stage counts and server/connector ordering; ConnectorMetadata.getInfo exposes the same structured facts. Stateless DEBUG diagnostics identify operation, configuration/capability/correctness category, reason, safe context and action for aggregation, staged DISTINCT and TopN declines. Predicate-retention logs report type/nullability rather than domain literals.
 |No precision, residual-filter, cardinality, retry or RESP2 safeguard is removed. Finite BOOLEAN/CHAR(0) bounds and exact indexed HASH source singleton-set domains avoid unnecessary grouping fallback on large inputs. Eligible VARCHAR and normalized keys use the minimum type/domain/document bound; products are overflow-safe and include every intermediate DISTINCT key. Nullable/filter-only predicates, padded TAG values, JSON, ranges/complements and unnormalized numeric keys retain conservative bounds. Policy snapshots are serialized on handles and preserved by every transformation; missing legacy snapshots default empty. No mutable last-rejection state or diagnostic-only Redis probe is introduced. A snapshot describes policy, while categorized DEBUG messages describe individual optimizer attempts; retained Trino nodes remain part of their interpretation.
@@ -85,21 +85,84 @@ A missing ordering/projected source column in a worker cache causes a targeted t
 HASH sorts already requiring exact reads coalesce BIGINT and millisecond timestamp recovery into the same HMGET, retaining the narrow single-key-type strategy when no extra exact read is needed.
 Benchmarks should report keys scanned, exact value fetches, projected document fetches, cursor batches, heap memory and final rows, not only wall time.
 
-== #181: relational execution and Trino 484 planner boundaries
+[[relational-assessment]]
+== #181: relational execution assessment
 
-Trino 484's `PushAggregationIntoTableScan` rule accepts one grouping set, simple-reference aggregate arguments, no masks, and a direct TableScan source.
+The decision for Trino 484 is to retain joins, windows, complex grouping and mixed unsupported aggregation nodes in Trino.
+These SQL constructs already work. The assessment does not add a transparent relational pushdown path.
+Eligible filters, projections and single-grouping-set aggregations can still reduce work at the source beneath Trino operators.
+The executable contract is `TestRelationalAssessment` and its sharded subclass; link:../../../benchmarks/issue-181/README.adoc[retained bounded measurements and representative plans] record the evaluated cohort and reproduction commands.
+
+[cols="2,3,4",options="header"]
+|===
+|Operation |Current execution |Feasibility decision
+|Same-catalog INNER/LEFT/FULL joins
+|Trino Join; eligible source scans can use dynamic filters.
+|Keep Trino execution. The connector inherits the SPI's empty `applyJoin`; the Redis aggregate pipeline has no corresponding general relational join operator. A new implementation must prove duplicate multiplicity, unmatched/NULL extension, skew, memory accounting, cancellation and concurrent-read semantics.
+|Cross-catalog joins
+|Trino Join, even for two catalog aliases pointing to the same Redis endpoint.
+|Keep Trino execution. Trino's metadata manager rejects unequal catalog handles before invoking connector join pushdown. This is not a backend endpoint-equivalence check.
+|ROW_NUMBER and ordered ROWS/RANGE windows
+|Trino Window/RowNumber/TopNRanking, as selected by its planner.
+|Keep Trino execution. There is no generic connector window-pushdown hook. A grouped reducer does not preserve input-row cardinality, peer/frame boundaries or partition ordering. A future explicit bounded top-k-per-partition function needs capability/version gating and its own NULL, tie, ordering and memory contract; it is not a general window translation.
+|ROLLUP, CUBE, GROUPING SETS
+|Trino GroupId and aggregation preserve grouping identity and duplicate grouping sets.
+|Keep Trino execution. A single Redis GROUPBY does not encode omitted-key NULLs, GROUPING bits or duplicate set multiplicity. Do not replace one source read with independent aggregate scans plus UNION: those scans can observe different data.
+|Mixed supported/unsupported aggregates
+|Trino evaluates the entire aggregation node; supported-only nodes can push down independently.
+|Retain all-or-nothing translation. Trino's aggregation rule replaces the complete node and requires a returned projection per aggregate. `AggregationApplicationResult` has no residual aggregate list or raw-row side channel. Returning only COUNT while ARRAY_AGG still needs raw rows is not a valid partial translation.
+|===
+
+=== Planner and correctness boundaries
+
+The assessment exposed a repeated-projection bug in the two-frame INTEGER SUM window query.
+Projection translation now reuses an existing equivalent expression handle across optimizer passes, preserving output expressions and the planner's one-to-one scan assignments; variable-only passes still report no optimization progress.
+This repairs planning without pushing the window into Redis.
+
+Trino 484's `PushAggregationIntoTableScan` rule requires a SINGLE aggregation step, at most one grouping set, simple-reference aggregate arguments, no masks, and a direct TableScan source.
+The connector additionally requires exactly one grouping set and preserves its existing type, precision, completeness and group-budget guards.
 Trino 484 normally rewrites SQL aggregate FILTER into an aggregation mask. The rule's `hasNoMasks` prerequisite rejects that aggregate before the connector SPI, even when a direct stored BOOLEAN could be translated if supplied through `AggregateFunction.getFilter()`.
-General SQL FILTER pushdown therefore needs an engine-rule path that preserves/passes the condition, as well as a connector translator for nullable BOOLEAN expressions. Removing connector `getFilter()` checks or adding projection translation alone does not bypass the engine mask restriction. A future translator must preserve three-valued logic in scan evaluation and server APPLY expressions.
+General SQL FILTER pushdown therefore needs an engine-rule path that preserves/passes the condition, as well as a connector translator for nullable BOOLEAN expressions. Removing connector `getFilter()` checks or adding projection translation alone does not bypass the engine mask restriction; any future translator must preserve three-valued logic in scan evaluation and server APPLY expressions (see #176).
 
-Same-catalog joins could use connector `applyJoin` only after a proven backend execution strategy exists; Redis Query Engine has no general relational join operator corresponding to that SPI.
-Dynamic filtering, exact key lookups, late materialization or connector-side hash joins are possible separate strategies, each requiring a bounded memory and concurrency model.
-Cross-catalog joins continue to use Trino.
-Windows require partition-local ordering and frame semantics; Redis group reducers do not provide SQL windows.
-Possible first workloads are bounded top-k per partition with an explicit table function, while general windows remain in Trino.
-Multiple grouping sets can be decomposed into separate server aggregates plus a Trino union, but need snapshot/concurrency semantics and GROUPING identity handling; a direct single GROUPBY translation is insufficient.
+The tests compare complete typed multisets against independent VALUES relations and the same Redis query with connector pushdown disabled.
+Fixtures include repeated join keys on both sides, NULL keys, unmatched rows on both sides, real NULL grouping keys, subtotal NULLs distinguished by GROUPING bits, duplicate grouping sets, and ordered ARRAY_AGG in a mixed aggregation.
+ROW_NUMBER has a unique final order key; ROWS and peer-sensitive RANGE frames deliberately differ on ties.
+Dynamic filtering is disabled in this measurement cohort to isolate leaf aggregation work; production dynamic filtering remains available.
+The cross-catalog fixture uses two Redis catalogs over one endpoint and demonstrates the plan boundary, not distributed-network performance.
+
+The fixture is immutable during measured queries.
+The connector accepts READ_UNCOMMITTED only: a separate probe changes a value between two ordered reads in one transaction and verifies that the second read sees it; actual catalog queries reject READ_COMMITTED, REPEATABLE_READ and SERIALIZABLE.
+Neither the cursor nor follow-up exact reads provide a snapshot, and there is no atomic view across join inputs.
+Use quiescent data or an isolated copy for repeatable comparisons.
+
+=== Proven explicit compositions
+
+An explicit preaggregation before a join can return fewer rows while the join remains in Trino.
+The measured SQL groups fact rows by the join key first, then LEFT JOINs the dimension; this changes the query's requested grain explicitly and is not an automatic rewrite of an arbitrary join.
+The enabled/disabled comparison executes identical SQL in both modes.
+
+For COUNT-only complex grouping, an explicit finest-grain aggregate can retain one source scan:
+
+[source,sql]
+----
+SELECT g, h, GROUPING(g, h), COALESCE(SUM(n), BIGINT '0')
+FROM (SELECT g, h, COUNT(*) AS n FROM rel_facts GROUP BY g, h) p
+GROUP BY GROUPING SETS ((g, h), (g), ())
+----
+
+Trino retains the outer GroupId/aggregation and its identity bits.
+COALESCE preserves COUNT's zero for empty input, where SUM alone returns NULL.
+Tests compare this composition with raw COUNT grouping sets, including duplicate sets and empty input.
+The inner aggregate must independently satisfy exact grouping-key, COUNT precision and group-budget guards; it benefits transfer only when the finest-grain group count is smaller than the source count.
+This count-only evidence does not justify arbitrary SUM/AVG/DISTINCT rewrites: overflow, rounding, NULLs, decomposability and ordered state need separate proofs.
+No optimizer rewrite or new connector execution path is introduced by this assessment.
 
 == Primary references
 
 * https://redis.io/docs/latest/develop/ai/search-and-query/advanced-concepts/aggregations/[Redis aggregate pipeline, reducers and string/existence functions]
 * https://github.com/trinodb/trino/blob/484/core/trino-main/src/main/java/io/trino/sql/planner/iterative/rule/PushAggregationIntoTableScan.java[Trino 484 aggregation pushdown rule]
 * https://github.com/RediSearch/RediSearch/blob/v2.10.10/src/aggregate/reducers/count_distinct.c[Redis Search reducer NULL and hash-state implementation, historical version]
+* https://github.com/trinodb/trino/blob/484/core/trino-main/src/main/java/io/trino/metadata/MetadataManager.java[Trino 484 catalog-handle join boundary]
+* https://github.com/trinodb/trino/blob/484/core/trino-spi/src/main/java/io/trino/spi/connector/AggregationApplicationResult.java[Trino 484 aggregate result contract]
+* https://trino.io/docs/current/sql/select.html#grouping-sets[Grouping identity and repeated-read caveat]
+* https://redis.io/docs/latest/commands/ft.aggregate/[Redis aggregate pipeline command]

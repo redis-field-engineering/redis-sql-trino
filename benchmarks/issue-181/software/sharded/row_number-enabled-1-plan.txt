@@ -1,0 +1,26 @@
+Trino version: testversion
+Fragment 0 [HASH]
+    Output layout: [id, g, v, row_number]
+    Output partitioning: SINGLE []
+    Output[columnNames = [id, g, v, rn]]
+    │   Layout: [id:integer, g:varchar, v:integer, row_number:bigint]
+    │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
+    │   rn := row_number
+    └─ Window[partitionBy = [g], orderBy = [v ASC NULLS LAST, id ASC NULLS LAST]]
+       │   Layout: [id:integer, g:varchar, v:integer, row_number:bigint]
+       │   row_number := row_number() RANGE UNBOUNDED_PRECEDING CURRENT_ROW
+       └─ LocalExchange[partitioning = HASH, arguments = [g::varchar]]
+          │   Layout: [id:integer, g:varchar, v:integer]
+          │   Estimates: {rows: 32 (2.03kB), cpu: 2.03k, memory: 0B, network: 0B}
+          └─ RemoteSource[sourceFragmentIds = [1]]
+                 Layout: [id:integer, g:varchar, v:integer]
+
+Fragment 1 [SOURCE]
+    Output layout: [id, g, v]
+    Output partitioning: HASH [g]
+    TableScan[table = redisearch:RediSearchTableHandle{schemaTableName=tpch.rel_facts, index=rel_facts, filters={}, limit=OptionalLong.empty, sort=[], constraint=ALL, nativeQuery=Optional.empty, nativeParameterNames=[], aggregationStages=[], pushdownPolicy={aggregation=enabled_subject_to_expression_safety, cached_documents=32, floating_aggregates=resp3_transport, group_bound=document_count_fits, group_budget=1000000, integer_sum_row_limit=4194303, integer_sum_rows=cached_count_fits, local_topn=typed_candidate_selection, local_topn_candidate_budget=1000, normalization_case=not_yet_probed, reader=redis_cursor, smallint_sum_row_limit=274877906943, smallint_sum_rows=cached_count_fits, snapshot=planning_policy_not_rejection_history, tinyint_sum_row_limit=70368744177663, tinyint_sum_rows=cached_count_fits}, appliedPushdowns={indexed_constraint=none, loaded_filters=0, aggregation_stages=0, ordering=trino_or_unordered, limit=none, native_selection=none}}]
+        Layout: [id:integer, g:varchar, v:integer]
+        Estimates: {rows: 32 (2.03kB), cpu: 2.03k, memory: 0B, network: 0B}
+        v := RediSearchColumnHandle{name=v, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}
+        g := RediSearchColumnHandle{name=g, type=varchar, fieldType=TAG, hidden=false, supportsPredicates=true, tagSeparator=Optional[,], filterable=true}
+        id := RediSearchColumnHandle{name=id, type=integer, fieldType=NUMERIC, hidden=false, supportsPredicates=true, tagSeparator=Optional.empty, filterable=false}

@@ -26,7 +26,7 @@ jobs:
           ./mvnw -B test
           -Dredisearch.test.oss-image=redis:${{ matrix.redis }}
           -Djunit.jupiter.execution.parallel.enabled=false
-          -Dtest=TestWrites,TestAtomicHashWrites,TestAtomicHashAcl,TestNativeSearch,TestAggregationPushdown,TestTagAndLikePushdown,TestSqlRelationMetadata,TestCursorReads,TestExactDistinctPushdown,TestCanonicalGrouping,TestExactLocalTopN,TestResp2ExactTopN,TestGroupingFunctionProbes,TestLikePatternPushdown,TestFiniteGroupingBounds,TestJsonLocalTopN,TestResp2JsonLocalTopN,TestJsonValues,TestColumnOrdering,TestGroupingBounds,TestDomainGroupingBounds,TestDomainGroupingPushdown,TestNativeParameters,TestNativeSearchParameters,TestTableHandle,TestPredicateAcceptance,TestViewAcceptance,TestPlanDiagnostics,TestExplainDiagnostics,TestCountExpressionEligibility,TestExpressionCountPushdown
+          -Dtest=TestWrites,TestAtomicHashWrites,TestAtomicHashAcl,TestNativeSearch,TestAggregationPushdown,TestTagAndLikePushdown,TestSqlRelationMetadata,TestCursorReads,TestExactDistinctPushdown,TestCanonicalGrouping,TestExactLocalTopN,TestResp2ExactTopN,TestGroupingFunctionProbes,TestLikePatternPushdown,TestFiniteGroupingBounds,TestJsonLocalTopN,TestResp2JsonLocalTopN,TestJsonValues,TestColumnOrdering,TestGroupingBounds,TestDomainGroupingBounds,TestDomainGroupingPushdown,TestNativeParameters,TestNativeSearchParameters,TestTableHandle,TestPredicateAcceptance,TestViewAcceptance,TestPlanDiagnostics,TestExplainDiagnostics,TestCountExpressionEligibility,TestExpressionCountPushdown,TestRelationalAssessment
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v7

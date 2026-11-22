@@ -1,0 +1,1 @@
+[ [ "B", "X", 0, 4 ], [ "A", null, 1, 12 ], [ "B", null, 1, 12 ], [ "A", "Y", 0, 4 ], [ "B", null, 0, 8 ], [ "A", null, 1, 12 ], [ "B", null, 1, 12 ], [ null, null, 0, 4 ], [ null, null, 1, 8 ], [ null, null, 3, 32 ], [ "A", "X", 0, 8 ], [ null, null, 1, 8 ], [ null, "Y", 0, 4 ] ]

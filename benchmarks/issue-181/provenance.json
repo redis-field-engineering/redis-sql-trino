@@ -1,0 +1,243 @@
+{
+  "date": "2026-11-21",
+  "recordedAtUtc": "2026-11-22T03:40:54.510871+00:00",
+  "baseRevision": "c6920ac2cc9ed479cfd9b5de529c48e0c3ff5f94",
+  "testedSource": "Integrated code revision plus source checksums. Subsequent working-tree edits affect assessment documentation/evidence only.",
+  "sourceSha256": {
+    "pom.xml": "8b400d9a53110061149e5ad136662ce177201741bdb563b7af8f93891fcf20a7",
+    "src/main/java/com/redis/trino/RediSearchMetadata.java": "e39737bb5921eb61839ba9bffce6b946659472aa4f4a8787fd980c02f7e27e0c",
+    "src/test/java/com/redis/trino/TestRelationalAssessment.java": "dab4875ef56518feb2037aea73fe8d0fc9a60a0138cb7c6c95d7538a8b2a45a3",
+    "src/test/java/com/redis/trino/TestShardedRelationalAssessment.java": "07bf06687a82f6863a9897cda23e9d85ebcf23d73803af86de2b36cc6dbfc74e",
+    "src/test/java/com/redis/trino/TestProjectionAssignments.java": "5ff458095380f0a35c8b059d48be6472ae2dd049c07e33ab5071ca895b4a8b08",
+    "src/test/java/com/redis/trino/TestExpression.java": "d4d8295935f965040c010b8d70add8cc7a3bf581ec90e1751821e9558585dd6b",
+    "src/test/java/com/redis/trino/RedisEnterprise.java": "16237cc49074949c4bcee0df0f3635375fb9969940d01fee84f2bb2246cd4ea9",
+    "src/test/java/com/redis/trino/RediSearchServer.java": "260a0577910e240ca69828128362faf1a55456fad2339dd80dc7dffc8c99c664",
+    "src/test/java/com/redis/trino/RediSearchQueryRunner.java": "37629fa4099a54ed14415416fd2617f27315591e0b1e7a010b30e49184b8d3ed"
+  },
+  "java": "Temurin 25.0.4.1+1-LTS",
+  "trino": "484",
+  "connector": "0.4.3-SNAPSHOT",
+  "softwareImage": "redislabs/redis:8.2.0-78.18",
+  "softwareImageId": "sha256:d65d3551ac59f000ee284b296e4cadff4714bab10764d6db5fac7c4fc05d8d6b",
+  "topologies": [
+    "NON_SHARDED: one shard, proxy endpoint",
+    "SHARDED: two shards, OSS Cluster API"
+  ],
+  "host": {
+    "os": "macOS",
+    "architecture": "aarch64",
+    "model": "Mac16,1",
+    "logicalCpus": 10,
+    "memoryBytes": 17179869184
+  },
+  "docker": {
+    "serverVersion": "29.9.3",
+    "cpus": 8,
+    "memoryBytes": 12794454016
+  },
+  "softwareCommand": "./mvnw -B -o package -Dtest=TestRelationalAssessment,TestShardedRelationalAssessment,TestProjectionAssignments,TestExpression,TestAggregationPushdown,TestShardedAggregationPushdown,TestResp2AggregationPushdown,TestPlanDiagnostics,TestExplainDiagnostics,TestCountExpressionEligibility,TestExpressionCountPushdown,TestShardedExpressionCountPushdown,TestLikePatternPushdown,TestQueryBuilder -Djunit.jupiter.execution.parallel.enabled=false -Dredisearch.relational-assessment.output=/tmp/redis-relational-integrated-evidence -Dredisearch.relational-assessment.repeats=3 -Dredisearch.test.cluster-label=relational-assessment",
+  "softwareReports": {
+    "TestRelationalAssessment": {
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "10.155"
+    },
+    "TestShardedRelationalAssessment": {
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "10.112"
+    },
+    "TestProjectionAssignments": {
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.005"
+    },
+    "TestExpression": {
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.008"
+    },
+    "TestAggregationPushdown": {
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "10.372"
+    },
+    "TestShardedAggregationPushdown": {
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "48.779"
+    },
+    "TestResp2AggregationPushdown": {
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "4.027"
+    },
+    "TestPlanDiagnostics": {
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.024"
+    },
+    "TestExplainDiagnostics": {
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "3.225"
+    },
+    "TestCountExpressionEligibility": {
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.021"
+    },
+    "TestExpressionCountPushdown": {
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "5.306"
+    },
+    "TestShardedExpressionCountPushdown": {
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "4.807"
+    },
+    "TestLikePatternPushdown": {
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "14.832"
+    },
+    "TestQueryBuilder": {
+      "tests": "35",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.067"
+    }
+  },
+  "softwareMeasuredSamples": 192,
+  "initialFailure": {
+    "runs": 1,
+    "errors": 2,
+    "affectedClasses": [
+      "TestRelationalAssessment",
+      "TestShardedRelationalAssessment"
+    ],
+    "query": "window_sum_frames",
+    "cause": "Repeated projection passes assigned equal INTEGER-to-BIGINT widening handles to two scan symbols; ImmutableBiMap rejected the duplicate value.",
+    "resolution": "Reuse the existing equivalent projection assignment. Original window workload retained unchanged.",
+    "cohortPolicy": "Initial partial measurements excluded; both final cohorts generated in an empty directory after the fix."
+  },
+  "artifactSha256": {
+    "target/redis-sql-trino-0.4.3-SNAPSHOT.jar": "50f8a20ebb922dddcd5221e1b2b04fdf57a6b345c891ede0cf2e935c7e91be43",
+    "target/redis-sql-trino-0.4.3-SNAPSHOT.zip": "2ad4eefbd62ed7c0402c195749f1756b88aaa91c8f7a50400063c935a54be2e9"
+  },
+  "retainedFormatting": "Representative EXPLAIN text has trailing blank lines removed; SQL, rows and samples are unchanged.",
+  "ossCompatibility": {
+    "8.4": {
+      "image": "redis:8.4",
+      "reports": {
+        "TestRelationalAssessment": {
+          "tests": "3",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "37.835"
+        },
+        "TestProjectionAssignments": {
+          "tests": "4",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "0.008"
+        },
+        "TestExpression": {
+          "tests": "4",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "0.104"
+        }
+      },
+      "totalTests": 11,
+      "retainedTimingCohort": false,
+      "command": "./mvnw -B -o test -Dtest=TestRelationalAssessment,TestProjectionAssignments,TestExpression -Djunit.jupiter.execution.parallel.enabled=false -Dredisearch.test.oss-image=redis:8.4 -Dredisearch.build-directory=/tmp/redis-relational-oss-8.4",
+      "testedCodeRevision": "8be9ae6acc580a9c43d4cc6a2054b5a41b977bc6"
+    },
+    "8.10.3": {
+      "image": "redis:8.10.3",
+      "reports": {
+        "TestRelationalAssessment": {
+          "tests": "3",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "37.718"
+        },
+        "TestProjectionAssignments": {
+          "tests": "4",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "0.041"
+        },
+        "TestExpression": {
+          "tests": "4",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "0.034"
+        }
+      },
+      "totalTests": 11,
+      "retainedTimingCohort": false,
+      "command": "./mvnw -B -o test -Dtest=TestRelationalAssessment,TestProjectionAssignments,TestExpression -Djunit.jupiter.execution.parallel.enabled=false -Dredisearch.test.oss-image=redis:8.10.3 -Dredisearch.build-directory=/tmp/redis-relational-oss-8.10.3",
+      "testedCodeRevision": "8be9ae6acc580a9c43d4cc6a2054b5a41b977bc6"
+    }
+  },
+  "checks": {
+    "softwarePackage": "passed, 112 tests after current-master integration",
+    "oss8.4": "passed final integrated rerun, 11 tests",
+    "oss8.10.3": "passed final integrated rerun, 11 tests",
+    "measuredComparisons": "192 complete, all hashes match",
+    "htmlAndPdfDocumentation": "passed",
+    "actionlint": "passed",
+    "stagedDiffWhitespace": "passed"
+  },
+  "validationHistory": [
+    {
+      "baseRevision": "4f8f49f79f371001d131394f36fd69e93b8d5280",
+      "softwareTests": 49,
+      "ossTestsPerVersion": 11,
+      "result": "passed before current-master integration; its successful timing cohorts were replaced with fresh integrated cohorts"
+    },
+    {
+      "mergedMasterRevision": "c6920ac2cc9ed479cfd9b5de529c48e0c3ff5f94",
+      "reason": "PR #195 merged during validation; preserved incoming count-expression, LIKE and EXPLAIN changes and resolved docs/CI conflicts."
+    }
+  ],
+  "testedCodeRevision": "8be9ae6acc580a9c43d4cc6a2054b5a41b977bc6",
+  "softwareTotalTests": 112,
+  "surefireRandomSeed": "25003134569625"
+}
