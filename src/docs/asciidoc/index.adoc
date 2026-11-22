@@ -578,6 +578,18 @@ The test sources have no connector-owned `@Disabled` SQL tests; inherited skips 
 Ordinary SQL views are stored in the string key `__trino:views:v1:<schema>`, shared by catalogs using that schema on the same database.
 Table and column comments use `__trino:comments:v1:<index>`; view comments are part of the stored definition.
 Definitions preserve their owner/invoker mode, resolved catalog/schema and search path.
+Trino reanalyzes the saved SQL using that stored context when the view is queried; the caller's default catalog/schema does not rebind its unqualified source names.
+`SECURITY DEFINER` uses the stored owner's authority to expose the underlying columns, while `SECURITY INVOKER` uses the caller's access. Trino also checks access to the view itself.
+`CURRENT_USER` still reports the query caller in both modes; definer privileges do not change that function's value. See https://trino.io/docs/current/sql/create-view.html[Trino's view security contract].
+These are Trino SQL access-control checks. Redis connections continue to use the catalog's configured service account; a SQL view does not create a separate Redis user or key namespace.
+Protect the view registry with the service account's Redis command/key permissions.
+`ALTER VIEW ... SET AUTHORIZATION` remains unsupported by the connector; storing an owner does not add an owner-transfer API.
+
+Ordinary views store definitions and typed output columns, without copying source data or maintaining a dependency registry.
+Trino checks a reanalyzed definition against its stored output schema. Unrelated ADD COLUMN can preserve an explicit-column view, while SELECT * layout changes or incompatible source types can make a view stale. Compatible coercions follow Trino's normal view rules.
+Dropping a source table leaves the view definition in place, and querying it fails until a compatible source is restored or the view is replaced. DROP TABLE does not cascade to stored views.
+Materialized views, refresh scheduling and persisted result generations remain unsupported and are tracked separately in {project-url}/issues/193[issue #193]; see the metadata design for the proposed publication/failure contract.
+
 Registry updates use a single-key compare-and-set script, work on Redis Cluster and require `GET`, `SET`, `DEL` and `EVAL` access to the metadata keys.
 Each registry is limited to 1 MiB; metadata is cached for one Trino metadata transaction and invalidated by that transaction's own changes.
 Deleting or evicting these keys removes their definitions/comments. An ACL that denies optional metadata reads leaves index discovery available but hides that optional metadata; mutations fail explicitly.
@@ -794,6 +806,32 @@ Redis wildcard matching alone is insufficient for SQL LIKE correctness: its word
 
 For control characters, unsupported field names and padded CHAR comparisons, exact equality can remain in Trino even when Redis supplies a prefilter.
 Use `EXPLAIN` to check the chosen plan rather than assuming every indexed predicate is fully consumed.
+
+[[predicate-eligibility]]
+[cols="2,3,3",options="header"]
+.Predicate execution contract
+|===
+|Predicate/source |Eligible exact evaluation |Conservative behavior
+|HASH NULL tests, VARCHAR equality/ranges and single-column nullable domains
+|Loaded-value pipeline predicates can preserve SQL NULLs, case and stored strings before grouping, ordering or LIMIT. Native TAG/TEXT queries may provide a superset first.
+|Unsupported controls, field names or value representations retain exact filtering in Trino. A native token/tag match alone does not establish SQL equality.
+|HASH literal, prefix, suffix and anchored prefix%suffix LIKE
+|Eligible patterns use exact string/length expressions, including constant ESCAPE and Unicode literals. Literal escaped percent/underscore characters keep their SQL meaning.
+|Unescaped underscore, contains/multiple-interior patterns, unsupported controls and compound shapes without an exact translation retain a residual. Safe existence, length or anchored prefilters may still run first.
+|Nullable compound OR/NOT expressions
+|Consume only the part with a proven exact translation. SQL three-valued logic still applies to absent/NULL fields.
+|Keep a Trino residual whenever translation cannot represent the complete expression. An indexed predicate on one branch cannot remove matches from another branch.
+|JSON TAG/TEXT equality and IN
+|Eligible native supersets can reduce source matches; the ordinary scan's first-match decoder supplies the exact stored SQL value and reader checks.
+|Reader-side checks are not a server-side proof for early LIMIT or aggregation. Eligible string aggregation plans instead use an exact server FILTER under DIALECT 2 before GROUPBY. Case, separators, whitespace and multiple JSON matches still need the documented exact evaluation.
+|JSON NUMERIC, NULL, range and LIKE predicates
+|Eligible numeric native supersets are permitted where safe.
+|Retain required SQL residuals: ANY-value index matching is not first-match/scalar SQL equality. Modern JSONPath syntax alone does not establish scalar shape.
+|===
+
+A required residual must execute before LIMIT, TopN pruning or aggregate reduction can discard its input rows.
+Empty strings, absent HASH fields, absent JSON paths and explicit JSON null values follow the scanner's SQL decoding rules; they must not be collapsed into one indexed token assumption.
+The predicate acceptance fixtures compare identical source data with connector pushdown disabled, including NUL/newline/tab, separators, quotes, backslash, Unicode, NULLs and escaped/general LIKE.
 
 HASH BOOLEAN domains use loaded-value existence and case-insensitive true-value comparisons, matching the row reader even when an external writer stores `TRUE` or a non-true string.
 Missing fields remain SQL NULL; non-true nonmissing strings follow the reader's false-value interpretation.
