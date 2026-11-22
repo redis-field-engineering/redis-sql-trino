@@ -7,15 +7,22 @@ import static io.trino.testing.containers.environment.QueryResultAssert.assertTh
 import static io.trino.testing.containers.environment.Row.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 import com.redis.trino.RediSearchServer;
 
+import io.lettuce.core.codec.StringCodec;
 import io.lettuce.core.json.JsonPath;
+import io.lettuce.core.output.IntegerOutput;
+import io.lettuce.core.protocol.CommandArgs;
+import io.lettuce.core.protocol.CommandType;
 import io.lettuce.core.search.arguments.CreateArgs;
 import io.lettuce.core.search.arguments.NumericFieldArgs;
 import io.lettuce.core.search.arguments.TagFieldArgs;
+import io.lettuce.core.search.arguments.VectorFieldArgs;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -123,6 +130,48 @@ class TestPackagedPlugin {
 
 	@ParameterizedTest
 	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
+	void testNativeSearchBindsNumericParameters(String catalog, RediSearchEnvironment env) {
+		assertThat(env.executeTrino("SELECT id FROM TABLE(" + catalog
+				+ ".system.search(TABLE_NAME => 'beers', QUERY => '@abv:[$min +inf]', "
+				+ "PARAMETERS => MAP(ARRAY['min'], ARRAY[to_utf8('4.8')])))"))
+				.containsOnly(row("2"));
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
+	void testNativeVectorParametersPreserveKnnMembership(String catalog, RediSearchEnvironment env) {
+		String index = "vectors_" + Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36);
+		var redis = env.redis(catalog);
+		redis.ftCreate(index, CreateArgs.builder().withPrefix(index + ":").skipInitialScan().build(), List.of(
+				TagFieldArgs.builder().name("id").build(),
+				VectorFieldArgs.builder().name("vec").flat().type(VectorFieldArgs.VectorType.FLOAT32)
+						.dimensions(2).distanceMetric(VectorFieldArgs.DistanceMetric.L2).build()));
+		try {
+			String[] ids = {"nearest", "second", "far"};
+			float[] coordinates = {0, 1, 10};
+			for (int i = 0; i < ids.length; i++) {
+				byte[] vector = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
+						.putFloat(coordinates[i]).putFloat(0).array();
+				redis.dispatch(CommandType.HSET, new IntegerOutput<>(StringCodec.UTF8),
+						new CommandArgs<>(StringCodec.UTF8).addKey(index + ":" + i)
+								.add("id").addValue(ids[i]).add("vec").add(vector));
+			}
+			String source = "TABLE(" + catalog + ".system.search(TABLE_NAME => '" + index
+					+ "', QUERY => '*=>[KNN 2 @vec $blob]', PARAMETERS => "
+					+ "MAP(ARRAY['blob'], ARRAY[from_hex('0000000000000000')])))";
+			assertThat(env.executeTrino("SELECT id FROM " + source)).containsOnly(row("nearest"), row("second"));
+			assertThat(env.executeTrino("SELECT count(*) FROM " + source)).containsOnly(row(2L));
+			// Filtering the selected KNN rowset must not replace a neighbor with a farther matching document.
+			assertThat(env.executeTrino("SELECT count(*) FROM " + source + " WHERE id = 'far'")).containsOnly(row(0L));
+			assertThat(env.executeTrino("SELECT id FROM " + source + " ORDER BY id DESC LIMIT 1"))
+					.containsOnly(row("second"));
+		} finally {
+			redis.ftDropindex(index, true);
+		}
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
 	void testViewCommentsAndTruncate(String catalog, RediSearchEnvironment env) {
 		String suffix = Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36);
 		String target = table(catalog, "metadata_" + suffix);
@@ -218,6 +267,32 @@ class TestPackagedPlugin {
 					+ " ORDER BY rank DESC NULLS FIRST, id ASC LIMIT 3"))
 					.containsExactlyInOrder(row("n", "null first"), row("A", "upper"), row("a", "tie first"));
 			assertThat(env.executeTrino("SELECT id FROM " + target + " WHERE id = 'a' ORDER BY rank DESC LIMIT 1"))
+					.containsOnly(row("a"));
+		} finally {
+			redis.ftDropindex(index, true);
+		}
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
+	void testJsonTopNWithQuotedAndWildcardPaths(String catalog, RediSearchEnvironment env) {
+		String index = "json_paths_" + Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36);
+		var redis = env.redis(catalog);
+		redis.ftCreate(index, CreateArgs.builder().on(CreateArgs.TargetType.JSON)
+				.withPrefix(index + ":").skipInitialScan().build(), List.of(
+				TagFieldArgs.builder().name("$.id").as("id").build(),
+				NumericFieldArgs.builder().name("$['odd.key'][*]").as("rank").build(),
+				TagFieldArgs.builder().name("$['雪 key']").as("label").build()));
+		try {
+			redis.jsonSet(index + ":a", JsonPath.ROOT_PATH, "{\"id\":\"a\",\"odd.key\":[2,99],\"雪 key\":\"first\"}");
+			redis.jsonSet(index + ":b", JsonPath.ROOT_PATH, "{\"id\":\"b\",\"odd.key\":[1,88],\"雪 key\":\"second\"}");
+			redis.jsonSet(index + ":c", JsonPath.ROOT_PATH, "{\"id\":\"c\",\"odd.key\":[3,0],\"雪 key\":\"third\"}");
+			assertThat(env.executeTrino("SELECT id, label FROM " + table(catalog, index) + " ORDER BY rank ASC LIMIT 2"))
+					.containsExactlyInOrder(row("b", "second"), row("a", "first"));
+			// Numeric index matches on later array values are only a prefilter for SQL's first-value semantics.
+			assertThat(env.executeTrino("SELECT count(*) FROM " + table(catalog, index) + " WHERE rank > 50"))
+					.containsOnly(row(0L));
+			assertThat(env.executeTrino("SELECT id FROM " + table(catalog, index) + " WHERE rank > 1 ORDER BY rank ASC LIMIT 1"))
 					.containsOnly(row("a"));
 		} finally {
 			redis.ftDropindex(index, true);

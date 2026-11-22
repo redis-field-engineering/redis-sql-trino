@@ -73,14 +73,34 @@ final class RediSearchLocalTopN {
     private static RediSearchSession.AggregateResult readTracked(RediSearchSession session, RediSearchSession.Connection scan,
             RediSearchTableHandle table, List<RediSearchColumnHandle> outputs,
             RediSearchSession.ExactHashReader exactReader, RediSearchReadStats stats, Reservation memory) {
+        List<RediSearchColumnHandle> queryColumns = RediSearchTranslator.readColumns(outputs);
+        java.util.Set<String> required = new java.util.HashSet<>();
+        queryColumns.forEach(column -> required.add(column.getName()));
+        table.getSort().forEach(sort -> required.add(sort.getColumn()));
         RediSearchTable schema = session.getTable(table.getSchemaTableName());
+        java.util.Set<String> cached = schema.getColumns().stream().map(RediSearchColumnHandle::getName)
+                .collect(java.util.stream.Collectors.toSet());
+        if (!cached.containsAll(required)) { schema = session.refreshTable(table.getSchemaTableName()); }
         boolean json = schema.getIndexInfo().getKeyType().filter(RediSearchIndexInfo.KeyType.JSON::equals).isPresent();
         if (json && !RediSearchJsonValues.supportsSchema(schema)) {
             throw new io.trino.spi.TrinoException(io.trino.spi.StandardErrorCode.NOT_SUPPORTED,
-                    "JSON TopN requires simple object paths or the whole document column");
+                    "JSON TopN requires supported modern JSONPath mappings");
         }
         Map<String, RediSearchColumnHandle> schemaColumns = new HashMap<>();
         schema.getColumns().forEach(column -> schemaColumns.put(column.getName(), column));
+        // An unindexed HASH field can disappear from FT.SEARCH's small schema sample. Its query handle still
+        // describes the raw field; indexed aliases must resolve through the refreshed FT.INFO instead.
+        if (!json) {
+            queryColumns.stream().filter(column -> !column.isSupportsPredicates() && !column.isFilterable()
+                    && column.getFieldType() == RediSearchFieldType.TEXT
+                    && column.getType().equals(io.trino.spi.type.VarcharType.VARCHAR)
+                    && column.getExpression().isEmpty())
+                    .forEach(column -> schemaColumns.putIfAbsent(column.getName(), column));
+        }
+        if (!schemaColumns.keySet().containsAll(required)) {
+            throw new io.trino.spi.TrinoException(io.trino.spi.StandardErrorCode.NOT_SUPPORTED,
+                    "TopN query columns are no longer available in the table schema");
+        }
         Map<String, String> identifiers = new HashMap<>();
         schema.getIndexInfo().getFields().forEach(field -> identifiers.put(field.getAttribute(), field.getIdentifier()));
         List<RediSearchColumnHandle> orders = table.getSort().stream().map(sort -> schemaColumns.get(sort.getColumn())).toList();

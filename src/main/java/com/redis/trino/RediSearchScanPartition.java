@@ -89,7 +89,7 @@ public record RediSearchScanPartition(@JsonProperty("field") String field,
     }
 
     static boolean isDocumentScan(RediSearchTableHandle table) {
-        return table.getLimit().isEmpty() && table.getSort().isEmpty()
+        return !table.hasNativeParameters() && table.getLimit().isEmpty() && table.getSort().isEmpty()
                 && table.getTermAggregations().isEmpty() && table.getMetricAggregations().isEmpty();
     }
 }

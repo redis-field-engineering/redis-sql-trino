@@ -4,8 +4,11 @@ import static io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.function.table.ReturnTypeSpecification.GenericTable.GENERIC_TABLE;
 import static io.trino.spi.type.VarcharType.VARCHAR;
+import static io.trino.spi.type.VarbinaryType.VARBINARY;
 
 import java.util.List;
+import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -17,6 +20,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import io.trino.spi.TrinoException;
+import io.trino.spi.block.SqlMap;
+import io.trino.spi.type.MapType;
+import io.trino.spi.type.TypeOperators;
 import io.trino.spi.connector.ConnectorAccessControl;
 import io.trino.spi.connector.ColumnSchema;
 import io.trino.spi.connector.ConnectorSession;
@@ -33,14 +39,22 @@ import io.trino.spi.function.table.TableFunctionAnalysis;
 
 /** Explicit native Search predicates, using the normal typed cursor scan and SQL finish operators. */
 public final class RediSearchNativeSearch extends AbstractConnectorTableFunction {
+    private static final MapType PARAMETERS = new MapType(VARCHAR, VARBINARY, new TypeOperators());
     private final RediSearchSession redis;
+
+    private static SqlMap emptyParameters() {
+        var builder = PARAMETERS.createBlockBuilder(null, 1);
+        builder.buildEntry((keys, values) -> {});
+        return PARAMETERS.getObject(builder.build(), 0);
+    }
 
     public RediSearchNativeSearch(RediSearchSession redis) {
         super("system", "search", List.of(
                 ScalarArgumentSpecification.builder().name("TABLE_NAME").type(VARCHAR).build(),
                 ScalarArgumentSpecification.builder().name("QUERY").type(VARCHAR).build(),
                 ScalarArgumentSpecification.builder().name("SCHEMA_NAME").type(VARCHAR)
-                        .defaultValue(Slices.utf8Slice(redis.getConfig().getDefaultSchema())).build()), GENERIC_TABLE,
+                        .defaultValue(Slices.utf8Slice(redis.getConfig().getDefaultSchema())).build(),
+                ScalarArgumentSpecification.builder().name("PARAMETERS").type(PARAMETERS).defaultValue(emptyParameters()).build()), GENERIC_TABLE,
                 "Execute a native Redis Search predicate over a catalog table");
         this.redis = redis;
     }
@@ -51,6 +65,10 @@ public final class RediSearchNativeSearch extends AbstractConnectorTableFunction
         String schema = argument(arguments, "SCHEMA_NAME");
         String name = argument(arguments, "TABLE_NAME");
         String query = argument(arguments, "QUERY");
+        Map<String, String> parameters = parseParameters(((ScalarArgument) arguments.get("PARAMETERS")).getValue());
+        if (!parameters.isEmpty() && redis.getConfig().isFlexEnabled()) {
+            throw new TrinoException(NOT_SUPPORTED, "Parameterized native search requires cursor-based reads; Flex keyset paging cannot preserve ranked query membership");
+        }
         SchemaTableName tableName = new SchemaTableName(schema, name);
         if (!schema.equals(redis.getConfig().getDefaultSchema())) {
             throw new TableNotFoundException(tableName);
@@ -68,7 +86,30 @@ public final class RediSearchNativeSearch extends AbstractConnectorTableFunction
         Descriptor descriptor = Descriptor.descriptor(columns.stream().map(RediSearchColumnHandle::getName).toList(),
                 columns.stream().map(RediSearchColumnHandle::getType).toList());
         return TableFunctionAnalysis.builder().returnedType(descriptor)
-                .handle(new Handle(table.getTableHandle().withNativeQuery(query), columns)).build();
+                .handle(new Handle(table.getTableHandle().withNativeQuery(query, parameters), columns)).build();
+    }
+
+    static Map<String, String> parseParameters(Object value) {
+        if (!(value instanceof SqlMap map) || !PARAMETERS.equals(map.getMapType())) {
+            throw new TrinoException(INVALID_FUNCTION_ARGUMENT, "PARAMETERS must be a non-null MAP(VARCHAR, VARBINARY)");
+        }
+        Map<String, String> parameters = new LinkedHashMap<>();
+        for (int i = 0; i < map.getSize(); i++) {
+            int position = map.getRawOffset() + i;
+            if (map.getRawKeyBlock().isNull(position) || map.getRawValueBlock().isNull(position)) {
+                throw new TrinoException(INVALID_FUNCTION_ARGUMENT, "PARAMETERS keys and values must not be null");
+            }
+            Slice key = VARCHAR.getSlice(map.getRawKeyBlock(), position);
+            String name = key.toStringUtf8();
+            if (name.isEmpty() || name.indexOf('\0') >= 0 || !Slices.utf8Slice(name).equals(key)) {
+                throw new TrinoException(INVALID_FUNCTION_ARGUMENT, "PARAMETERS keys must be non-empty UTF-8 names without NUL");
+            }
+            String encoded = Base64.getEncoder().encodeToString(VARBINARY.getSlice(map.getRawValueBlock(), position).getBytes());
+            if (parameters.putIfAbsent(name, encoded) != null) {
+                throw new TrinoException(INVALID_FUNCTION_ARGUMENT, "PARAMETERS keys must be unique");
+            }
+        }
+        return Map.copyOf(parameters);
     }
 
     private static String argument(Map<String, Argument> arguments, String name) {
