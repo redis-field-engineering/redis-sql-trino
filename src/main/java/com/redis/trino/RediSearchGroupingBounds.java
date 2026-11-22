@@ -18,7 +18,7 @@ import static io.trino.spi.type.BooleanType.BOOLEAN;
 final class RediSearchGroupingBounds {
     private RediSearchGroupingBounds() {}
 
-    /** Combines a trustworthy document count with independent finite-domain proofs. */
+    /** Combines a cached document count with independent finite-domain proofs; the count is not a snapshot. */
     static OptionalLong upperBoundWithin(OptionalLong documents, List<? extends ColumnHandle> keys, long budget) {
         return upperBoundWithin(documents, keys, TupleDomain.all(), budget);
     }

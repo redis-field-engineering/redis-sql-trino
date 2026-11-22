@@ -110,6 +110,34 @@ public class TestExactLocalTopN extends AbstractTestQueryFramework {
     }
 
     @Test
+    public void testResidualArrayPredicateRunsBeforeTopNCandidatePruning() {
+        String sql = "SELECT id, payload FROM topn_wide WHERE a[1] = BIGINT '0' "
+                + "ORDER BY amount ASC NULLS FIRST, id DESC LIMIT 7";
+        assertExactOrder(sql, baseline(sql));
+        // NULL amounts come first. Among those, matching n values are multiples of both 13 and 7.
+        assertThat(computeActual(sql).getMaterializedRows().stream().map(row -> row.getField(0)).toList())
+                .containsExactly(9007199254742084L, 9007199254741993L, 9007199254741902L,
+                        9007199254741811L, 9007199254741720L, 9007199254741629L, 9007199254741538L);
+        Metrics selected = metrics(sql);
+        assertThat(metric(selected, "redis.rows.received")).isEqualTo(ROWS);
+        assertThat(metric(selected, "redis.local-topn.candidates")).isZero();
+        assertThat(metric(selected, "redis.local-topn.projected-hash-reads")).isZero();
+    }
+
+    @Test
+    public void testExactStringPredicateRunsBeforeLocalTopNCandidateSelection() {
+        String sql = "SELECT id, payload FROM topn_wide WHERE v = 'same' "
+                + "ORDER BY amount ASC NULLS FIRST, id DESC LIMIT 7";
+        assertExactOrder(sql, baseline(sql));
+        long matchingRows = java.util.stream.IntStream.range(0, ROWS)
+                .filter(n -> n % 3 == 2 && n % 11 != 0).count();
+        Metrics selected = metrics(sql);
+        assertThat(metric(selected, "redis.rows.received")).isEqualTo(matchingRows);
+        assertThat(metric(selected, "redis.local-topn.candidates")).isEqualTo(7);
+        assertThat(metric(selected, "redis.local-topn.projected-hash-reads")).isEqualTo(21);
+    }
+
+    @Test
     public void testNativeNumericTopNRemainsPreferred() {
         String sql = "SELECT speed, payload FROM topn_wide ORDER BY speed DESC LIMIT 5";
         assertExactOrder(sql, baseline(sql));
