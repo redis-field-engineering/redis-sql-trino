@@ -284,6 +284,12 @@
             <scope>provided</scope>
         </dependency>
 
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <!-- RedisEnterprise adds the SYS_RESOURCE capability the Redis Enterprise container needs -->
         <dependency>
             <groupId>com.github.docker-java</groupId>

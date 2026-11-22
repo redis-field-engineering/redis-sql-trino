@@ -291,8 +291,7 @@ public class RediSearchAggregation {
 			}
 			if (function.getArguments().size() != 1 || !(function.getArguments().get(0) instanceof Variable variable)
 					|| !(assignments.get(variable.getName()) instanceof RediSearchColumnHandle column)
-					|| column.isHidden() || column.getExpression().isPresent()
-					|| !RediSearchQueryBuilder.isProperty(column.getName())) {
+					|| column.isHidden() || !supportsCountArgument(column)) {
 				return Optional.empty();
 			}
 			return Optional.of(new RediSearchAggregation(COUNT, function.getOutputType(), Optional.of(column), alias, false, filter));
@@ -327,6 +326,17 @@ public class RediSearchAggregation {
 		}
 		return Optional.of(new RediSearchAggregation(functionName, function.getOutputType(), parameterColumnHandle,
 				alias, countingValues, filter));
+	}
+
+	private static boolean supportsCountArgument(RediSearchColumnHandle column) {
+		if (column.getExpression().isEmpty()) { return RediSearchQueryBuilder.isProperty(column.getName()); }
+		// Supported DOUBLE arithmetic never returns SQL NULL when every operand is present, including
+		// division by zero and NaN. A widening integer cast also preserves NULLness without overflow.
+		// Count presence rather than evaluating arithmetic in Redis or parsing its rounded result.
+		RediSearchExpression expression = column.getExpression().orElseThrow();
+		return (column.getType().equals(DOUBLE) || column.isIntegerWidening())
+				&& !expression.getColumns().isEmpty()
+				&& expression.getColumns().keySet().stream().allMatch(RediSearchQueryBuilder::isProperty);
 	}
 
 	@Override

@@ -333,6 +333,8 @@ public class RediSearchSession {
         return resp3;
     }
 
+    public Optional<Boolean> getCachedCaseSupport() { return Optional.ofNullable(caseSupported); }
+
     /**
      * Whether Redis evaluates {@code case()} in APPLY steps. Redis 8.2 and later do; Redis 8.0 and Redis Stack 7.4
      * have it only with unstable features enabled, and fail a query only once they evaluate it on a document. So the

@@ -18,13 +18,13 @@ Historical unsupported or not-planned decisions are context, not permanent restr
 |#173 |ARRAY/MAP/ROW, VARBINARY, JSON and full temporal precision on HASH |Native nested indexing and encoded-type predicates
 |#174 |Opt-in single-document HASH atomic update visibility |Multi-document transactions and retry-safe execution
 |#175 |Native text/GEO/vector parameter binding through optional MAP(VARCHAR, VARBINARY), with global ranked-selection guards |Score/distance outputs, typed wrappers and ranked Flex paging
-|#176 |HASH COUNT(column) and COUNT_IF(stored BOOLEAN) |General FILTER masks and computed conditions
+|#176 |HASH COUNT(column), COUNT of eligible DOUBLE arithmetic/integer widening and COUNT_IF(stored BOOLEAN) |General FILTER masks, DISTINCT expressions and computed conditions
 |#177 |Exact bounded two-stage global/grouped DISTINCT counting in Redis |Wider canonical keys and additional aggregate shapes
 |#178 |Canonical DOUBLE, HASH BOOLEAN and bounded Unicode CHAR grouping |Further exact numeric/decimal and arithmetic strategies
-|#179 |HASH NULL/VARCHAR/anchored LIKE filters and HASH/JSON acceptance for nullability, escapes, Unicode and residual-before-reduction ordering |Untranslated shapes keep the documented exact Trino residuals
-|#180 |HASH/JSON typed late-materialized TopN, explicit native/local/fallback eligibility and residual-before-selection acceptance coverage |Unsupported mappings and nonorderable values keep the documented Trino fallback
+|#179 |HASH NULL/VARCHAR, anchored LIKE and bounded multi-% boundary/length prefilters; HASH/JSON acceptance for nullability, escapes, Unicode and residual-before-reduction ordering |Untranslated shapes keep the documented exact Trino residuals
+|#180 |HASH/JSON typed late-materialized TopN, validated modern JSONPath selectors, targeted worker-schema refresh, coalesced numeric reads and explicit native/local/fallback acceptance coverage |Unsupported mappings and nonorderable values keep the documented Trino fallback; further measured tuning remains optional
 |#181 |Grouping-only pushdown and relational feasibility design |Join/window execution and multiple grouping sets
-|#182 |Categorized actionable aggregation/TopN/DISTINCT DEBUG diagnostics, proven grouping bounds and cached-count/runtime-precision coverage |Additional finite proofs and EXPLAIN annotations remain optional extensions
+|#182 |Immutable EXPLAIN policy/applied-operation and connector-info metadata, categorized actionable DEBUG decisions, proven grouping bounds and cached-count/runtime-precision coverage |Per-attempt plan annotations, nullable/filter-only domain tracking and additional finite proofs remain optional extensions
 |#183 |Reconciled statement/type/execution documentation |Keep references current as capabilities land
 |#184 |Explicit capability/skip inventory, restricted TopN/fallback tests and negative-date round trips |Keep the test contract current as capabilities change
 |===

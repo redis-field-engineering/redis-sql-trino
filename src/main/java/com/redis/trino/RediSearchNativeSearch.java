@@ -86,7 +86,7 @@ public final class RediSearchNativeSearch extends AbstractConnectorTableFunction
         Descriptor descriptor = Descriptor.descriptor(columns.stream().map(RediSearchColumnHandle::getName).toList(),
                 columns.stream().map(RediSearchColumnHandle::getType).toList());
         return TableFunctionAnalysis.builder().returnedType(descriptor)
-                .handle(new Handle(table.getTableHandle().withNativeQuery(query, parameters), columns)).build();
+                .handle(new Handle(RediSearchPlanDiagnostics.annotate(table, redis).withNativeQuery(query, parameters), columns)).build();
     }
 
     static Map<String, String> parseParameters(Object value) {

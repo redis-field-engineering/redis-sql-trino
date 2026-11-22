@@ -97,6 +97,9 @@ public class RediSearchQueryBuilder {
 	// The most values of a range of dates a tag query lists
 	private static final int MAX_TAG_VALUES = 1000;
 
+	// Bound the FILTER expression and its native parser depth for complex percent-only LIKE prefilters.
+	private static final int MAX_LIKE_PARTS = 32;
+
 	// 2^53: integers of smaller magnitude are doubles exactly
 	private static final long MAX_EXACT_LONG = 1L << 53;
 
@@ -406,17 +409,18 @@ public class RediSearchQueryBuilder {
 		if (parts.size() == 1) {
 			return Optional.of(new LikePredicate("exists(" + field + ") && " + field + " == " + stringLiteral(parts.getFirst()), true));
 		}
-		// At most one middle literal. Native contains() truncates at NUL, so retain a residual for it.
-		if (parts.size() > 3) { return Optional.empty(); }
+		// Each literal consumes disjoint bytes in any SQL match, even across Unicode or embedded NUL values.
+		// Native contains() truncates at NUL, so only boundaries and total minimum length are pushed for interiors.
+		if (parts.size() > MAX_LIKE_PARTS) { return Optional.empty(); }
 		String prefix = parts.getFirst();
 		String suffix = parts.getLast();
-		String middle = parts.size() == 3 ? parts.get(1) : "";
+		boolean interior = parts.size() > 2;
 		List<String> predicates = new ArrayList<>();
 		predicates.add("exists(" + field + ")");
 		List<String> lengths = parts.stream().filter(value -> !value.isEmpty())
 				.map(value -> "strlen(" + stringLiteral(value) + ")").toList();
 		// Redis strlen/substr both use bytes; lengths of literals use that same representation.
-		if (!suffix.isEmpty() || !middle.isEmpty()) {
+		if (!suffix.isEmpty() || interior) {
 			predicates.add("strlen(" + field + ") >= " + String.join(" + ", lengths));
 		}
 		if (!prefix.isEmpty()) {
@@ -427,7 +431,7 @@ public class RediSearchQueryBuilder {
 			predicates.add("substr(" + field + ", strlen(" + field + ") - strlen(" + quoted
 					+ "), strlen(" + quoted + ")) == " + quoted);
 		}
-		return Optional.of(new LikePredicate(String.join(" && ", predicates), middle.isEmpty()));
+		return Optional.of(new LikePredicate(String.join(" && ", predicates), !interior));
 	}
 
 	/** Only HASH callers may use these: a missing field is SQL NULL, including for unindexed columns. */
