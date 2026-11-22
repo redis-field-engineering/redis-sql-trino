@@ -105,3 +105,18 @@ Validation on November 21, 2026:
 * Workflow actionlint and git diff --check passed. HTML/PDF guide generation was verified after the contract updates.
 
 One initial local Software database activation timed out before SQL assertions; its timeout was preserved and validation used fresh disposable clusters. The results above are selected acceptance cohorts rather than a new full-repository or full-data benchmark claim.
+== Expression counts, LIKE and EXPLAIN follow-up
+
+The next pushdown batch adds HASH COUNT over supported DOUBLE arithmetic and integer-widening projections, bounded multi-`%` LIKE prefilters, and immutable EXPLAIN/getInfo planning facts.
+It also aligns table-property guarantees with the JSON NUMERIC residual policy: ANY-member index matching is a prefilter, not a guaranteed SQL domain.
+The implementation includes the merged ordering/diagnostic acceptance above.
+
+Validation on November 21, 2026:
+
+* The full regression build passed 762 cases with 12 expected skips. After incorporating the incoming acceptance changes and final metadata-reuse fix, a normal `package` build passed 138 affected cases. Latest per-class reports contain 778 cases, zero failures/errors and 12 expected skips.
+* The final packaged plugin passed 36 stock-Trino product cases across normal and sharded catalogs, including expression counts, multi-wildcard LIKE and EXPLAIN policy output.
+* Focused aggregation, LIKE, diagnostics and native-search suites passed on Redis OSS 8.4 and 8.10.3. All test JVMs used isolated build directories and Redis environments; combined Software provisioning remained serialized.
+* The mixed aggregate fixture returns one server row instead of six source rows, with no cursor reads. The aliased Unicode/NUL LIKE fixture reduces 1,050 source rows to 40 candidates and 30 SQL matches. Interior LIKE matches retain SQL residuals.
+* With metadata caching disabled, planning describes the table once; diagnostics and connector-info extraction add no description or CASE capability probe.
+
+These are bounded correctness and work-reduction checks. No full-data throughput or Cloud qualification claim is added.
