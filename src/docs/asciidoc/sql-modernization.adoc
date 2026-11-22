@@ -18,13 +18,13 @@ Historical unsupported or not-planned decisions are context, not permanent restr
 |#173 |ARRAY/MAP/ROW, VARBINARY, JSON and full temporal precision on HASH |Native nested indexing and encoded-type predicates
 |#174 |Opt-in single-document HASH atomic update visibility |Multi-document transactions and retry-safe execution
 |#175 |Native text/GEO/vector parameter binding through optional MAP(VARCHAR, VARBINARY), with global ranked-selection guards |Score/distance outputs, typed wrappers and ranked Flex paging
-|#176 |HASH COUNT(column) and COUNT_IF(stored BOOLEAN) |General FILTER masks and computed conditions
+|#176 |HASH COUNT(column), COUNT of eligible DOUBLE arithmetic/integer widening and COUNT_IF(stored BOOLEAN) |General FILTER masks, DISTINCT expressions and computed conditions
 |#177 |Exact bounded two-stage global/grouped DISTINCT counting in Redis |Wider canonical keys and additional aggregate shapes
 |#178 |Canonical DOUBLE, HASH BOOLEAN and bounded Unicode CHAR grouping |Further exact numeric/decimal and arithmetic strategies
-|#179 |HASH NULL/VARCHAR/anchored LIKE filters and HASH/JSON acceptance for nullability, escapes, Unicode and residual-before-reduction ordering |Untranslated shapes keep the documented exact Trino residuals
-|#180 |HASH/JSON typed late-materialized TopN, explicit native/local/fallback eligibility and residual-before-selection acceptance coverage |Unsupported mappings and nonorderable values keep the documented Trino fallback
+|#179 |HASH NULL/VARCHAR, anchored LIKE and bounded multi-% boundary/length prefilters; HASH/JSON acceptance for nullability, escapes, Unicode and residual-before-reduction ordering |Untranslated shapes keep the documented exact Trino residuals
+|#180 |HASH/JSON typed late-materialized TopN, validated modern JSONPath selectors, targeted worker-schema refresh, coalesced numeric reads and explicit native/local/fallback acceptance coverage |Unsupported mappings and nonorderable values keep the documented Trino fallback; further measured tuning remains optional
 |#181 |Grouping-only pushdown and relational feasibility design |Join/window execution and multiple grouping sets
-|#182 |Categorized actionable aggregation/TopN/DISTINCT DEBUG diagnostics, proven grouping bounds and cached-count/runtime-precision coverage |Additional finite proofs and EXPLAIN annotations remain optional extensions
+|#182 |Immutable EXPLAIN policy/applied-operation and connector-info metadata, categorized actionable DEBUG decisions, proven grouping bounds and cached-count/runtime-precision coverage |Per-attempt plan annotations, nullable/filter-only domain tracking and additional finite proofs remain optional extensions
 |#183 |Reconciled statement/type/execution documentation |Keep references current as capabilities land
 |#184 |Explicit capability/skip inventory, restricted TopN/fallback tests and negative-date round trips |Keep the test contract current as capabilities change
 |===
@@ -105,3 +105,18 @@ Validation on November 21, 2026:
 * Workflow actionlint and git diff --check passed. HTML/PDF guide generation was verified after the contract updates.
 
 One initial local Software database activation timed out before SQL assertions; its timeout was preserved and validation used fresh disposable clusters. The results above are selected acceptance cohorts rather than a new full-repository or full-data benchmark claim.
+== Expression counts, LIKE and EXPLAIN follow-up
+
+The next pushdown batch adds HASH COUNT over supported DOUBLE arithmetic and integer-widening projections, bounded multi-`%` LIKE prefilters, and immutable EXPLAIN/getInfo planning facts.
+It also aligns table-property guarantees with the JSON NUMERIC residual policy: ANY-member index matching is a prefilter, not a guaranteed SQL domain.
+The implementation includes the merged ordering/diagnostic acceptance above.
+
+Validation on November 21, 2026:
+
+* The full regression build passed 762 cases with 12 expected skips. After incorporating the incoming acceptance changes and final metadata-reuse fix, a normal `package` build passed 138 affected cases. Latest per-class reports contain 778 cases, zero failures/errors and 12 expected skips.
+* The final packaged plugin passed 36 stock-Trino product cases across normal and sharded catalogs, including expression counts, multi-wildcard LIKE and EXPLAIN policy output.
+* Focused aggregation, LIKE, diagnostics and native-search suites passed on Redis OSS 8.4 and 8.10.3. All test JVMs used isolated build directories and Redis environments; combined Software provisioning remained serialized.
+* The mixed aggregate fixture returns one server row instead of six source rows, with no cursor reads. The aliased Unicode/NUL LIKE fixture reduces 1,050 source rows to 40 candidates and 30 SQL matches. Interior LIKE matches retain SQL residuals.
+* With metadata caching disabled, planning describes the table once; diagnostics and connector-info extraction add no description or CASE capability probe.
+
+These are bounded correctness and work-reduction checks. No full-data throughput or Cloud qualification claim is added.

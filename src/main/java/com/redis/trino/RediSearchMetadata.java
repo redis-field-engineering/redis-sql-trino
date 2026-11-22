@@ -131,13 +131,20 @@ public class RediSearchMetadata implements ConnectorMetadata {
 
 		if (tableName.getSchemaName().equals(schemaName)) {
 			try {
-				return rediSearchSession.getTable(tableName).getTableHandle();
+				return RediSearchPlanDiagnostics.annotate(rediSearchSession.getTable(tableName), rediSearchSession);
 			} catch (TableNotFoundException e) {
 				// ignore and return null
 			}
 		}
 		return null;
 	}
+
+    @Override
+    public Optional<Object> getInfo(ConnectorSession session, ConnectorTableHandle table) {
+        RediSearchTableHandle handle = (RediSearchTableHandle) table;
+        return Optional.of(Map.of("planningPolicy", handle.getPushdownPolicy(),
+                "appliedPushdowns", RediSearchPlanDiagnostics.applied(handle)));
+    }
 
 	@Override
 	public ConnectorTableMetadata getTableMetadata(ConnectorSession session, ConnectorTableHandle tableHandle) {
@@ -510,10 +517,11 @@ public class RediSearchMetadata implements ConnectorMetadata {
 	@Override
 	public ConnectorTableProperties getTableProperties(ConnectorSession session, ConnectorTableHandle table) {
 		RediSearchTableHandle handle = (RediSearchTableHandle) table;
-		// A TAG or TEXT prefilter without a FILTER doesn't guarantee its domain: Redis also returns rows that Trino
-		// then filters out
+		// Prefilters do not guarantee their domains: TAG/TEXT can overmatch, and JSON NUMERIC indexes
+		// match ANY array member. Use the same exactness policy as applyFilter so optimizer rules cannot
+		// discard a residual that the connector still requires.
 		TupleDomain<ColumnHandle> predicate = handle.getConstraint()
-				.filter((column, domain) -> RediSearchQueryBuilder.isExact((RediSearchColumnHandle) column, domain));
+				.filter((column, domain) -> rediSearchSession.isQueryExact(handle, (RediSearchColumnHandle) column, domain));
 		return new ConnectorTableProperties(predicate, Optional.empty(), Optional.empty(), List.of());
 	}
 

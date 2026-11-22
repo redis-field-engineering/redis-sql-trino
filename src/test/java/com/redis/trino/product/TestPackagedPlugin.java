@@ -54,6 +54,13 @@ class TestPackagedPlugin {
 
 	@ParameterizedTest
 	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
+	void testExplainShowsPushdownPolicy(String catalog, RediSearchEnvironment env) {
+		String plan = (String) env.executeTrino("EXPLAIN SELECT count(*) FROM " + table(catalog, "beers")).getOnlyValue();
+		assertThat(plan).contains("pushdownPolicy", "aggregation=enabled_subject_to_expression_safety", "appliedPushdowns");
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
 	void testUnindexedFieldIsQueryable(String catalog, RediSearchEnvironment env) {
 		assertThat(env.executeTrino("SELECT DISTINCT last_mod FROM " + table(catalog, "beers")))
 				.containsOnly(row("2010-07-22 20:00:20 UTC"));
@@ -73,6 +80,28 @@ class TestPackagedPlugin {
 	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
 	void testAggregation(String catalog, RediSearchEnvironment env) {
 		assertThat(env.executeTrino("SELECT count(*) FROM " + table(catalog, "beers"))).containsOnly(row(2L));
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { CATALOG, SHARDED_CATALOG })
+	void testArithmeticCountsAndMultiWildcardLike(String catalog, RediSearchEnvironment env) {
+		String target = table(catalog, "expression_count_" + Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36));
+		try {
+			env.executeTrinoUpdate("CREATE TABLE " + target + " (g varchar, d double, e double, value varchar)");
+			env.executeTrinoUpdate("INSERT INTO " + target + " VALUES "
+					+ "('a', 0e0, 0e0, 'pre-one-mid-two-suf'), ('a', 2e0, 0e0, 'pre-one-mid-three-suf'), "
+					+ "('b', 4e0, 2e0, 'unrelated'), ('b', NULL, 3e0, NULL), ('null', NULL, NULL, 'presuf')");
+			assertThat(env.executeTrino("SELECT count(d + e), count(d / e), sum(d + e), count(*) FROM " + target))
+					.containsOnly(row(3L, 3L, 8.0, 5L));
+			assertThat(env.executeTrino("SELECT g, count(d / e) FROM " + target + " GROUP BY g"))
+					.containsOnly(row("a", 2L), row("b", 1L), row("null", 0L));
+			assertThat(env.executeTrino("SELECT count(d + e) FROM " + target + " WHERE g = 'missing'"))
+					.containsOnly(row(0L));
+			assertThat(env.executeTrino("SELECT value FROM " + target + " WHERE value LIKE 'pre%one%mid%two%suf'"))
+					.containsOnly(row("pre-one-mid-two-suf"));
+		} finally {
+			env.executeTrinoUpdate("DROP TABLE IF EXISTS " + target);
+		}
 	}
 
 	@ParameterizedTest

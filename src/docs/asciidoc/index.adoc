@@ -762,6 +762,21 @@ A query that cannot reduce rows in Redis can read every document in the index, e
 
 Redis evaluates these parts of a query. Trino evaluates everything else on the rows Redis returns.
 
+[[plan-diagnostics]]
+==== Reading pushdown diagnostics
+
+`EXPLAIN SELECT ...` includes a `pushdownPolicy` planning snapshot and an `appliedPushdowns` summary on each Redis scan handle. These annotations describe policy and accepted handle operations; they are not a history of optimizer rejection attempts.
+
+* `aggregation=disabled_by_configuration` identifies the catalog switch; `disabled_on_flex` identifies the reader restriction. An enabled policy still requires expression/type safety.
+* `floating_aggregates=blocked_by_resp2_precision` identifies the floating transport restriction. RESP3 removes that protocol restriction while retaining the other checks.
+* `normalization_case` reports the existing capability cache as `available`, `capability_unavailable` or `not_yet_probed`. Explaining a query does not issue an extra capability probe for diagnostics.
+* `cached_documents`, `group_budget` and `group_bound` show the document-count proof. `finite_type_or_exact_source_domain_proof_required` means another finite bound is necessary; it does not by itself mean aggregation was rejected.
+* The `tinyint_sum_row_limit`, `smallint_sum_row_limit` and `integer_sum_row_limit` fields show conservative widened-SUM precision limits. Their corresponding `*_sum_rows` values distinguish an unknown count from a known count above the precision limit. These use the unfiltered cached document count.
+* `local_topn` and `local_topn_candidate_budget` show candidate-selection policy. `appliedPushdowns.ordering` distinguishes `redis_numeric_sort`, `connector_typed_topn` and `trino_or_unordered`; `aggregation_stages` counts accepted Redis aggregation stages.
+
+Read these fields alongside the remaining Trino Filter, Aggregation, TopN and Sort nodes. For example, a JSON numeric residual can retain a Trino aggregate even when catalog aggregation policy is enabled. Categorized per-attempt reasons, actions and unsupported-expression details are described under <<pushdown-diagnostics,understanding pushdown decisions>>.
+The snapshot stays immutable through optimizer rewrites and worker serialization; table growth or later capability discovery does not rewrite an existing plan. Legacy handles without a snapshot report an empty policy. The same structured `planningPolicy` and `appliedPushdowns` facts are exposed through Trino's connector-info API for query input/event metadata. The added facts contain no query literals or binary parameter values.
+
 [[filters]]
 ==== Filters
 
@@ -800,7 +815,7 @@ Other string predicates::
 On HASH indexes, loaded-value pipeline filters handle `IS NULL`, `IS NOT NULL`, and eligible VARCHAR equality, inequality, ranges and nullable domains.
 These filters can reduce transferred rows and allow later LIMIT/grouping; they do not imply an indexed lexical range lookup.
 Literal, prefix, suffix and anchored `prefix%suffix` LIKE patterns run in Redis, including constant ESCAPE characters and Unicode literals. Overlap guards compare Redis byte lengths.
-Contains-style and middle-literal patterns retain a Trino residual; safe prefix/suffix/length prefilters can still reduce input. Redis contains() stops at embedded NUL bytes, so it cannot implement SQL VARCHAR containment exactly.
+Patterns with multiple `%` separators can use safe boundary and minimum-length prefilters for up to 32 parts after consecutive `%` collapse. Prefix/suffix tests and the sum of all literal byte lengths reject impossible matches without evaluating interior containment in Redis. Interior literals retain an exact Trino residual; patterns above this part budget retain Trino evaluation. Redis contains() stops at embedded NUL bytes, so it cannot implement SQL VARCHAR containment exactly.
 Unescaped `_`, invalid escapes, unsupported controls and JSON LIKE retain Trino evaluation; JSON NULL/range predicates also retain their existing fallback.
 Redis wildcard matching alone is insufficient for SQL LIKE correctness: its word boundaries, case handling and expansion limits differ.
 
@@ -847,6 +862,7 @@ If one aggregate in the same aggregation cannot be translated, or Trino must fil
 
 On HASH indexes, `count(column)` sums loaded-field existence indicators instead of Redis's document COUNT, so it excludes SQL NULLs, including on unindexed fields.
 `count_if(boolean_column)` counts stored true values. Indicator sums use the same exact-integer row-count and runtime growth guards as integer sums.
+Eligible HASH `count(expression)` also counts non-NULL results of the existing DOUBLE arithmetic translator (`+`, `-`, `*`, `/`, unary minus, finite constants with source operands and integer-to-DOUBLE casts), plus value-preserving integer widening. It tests each distinct source operand's presence instead of executing the arithmetic in Redis: NaN, infinity and signed zero remain non-NULL SQL values. Grouped/global and empty inputs preserve SQL count semantics, and these counts can compose with supported SUM/AVG reducers. The existing indicator row-count/precision guards remain. Integer/REAL arithmetic, erroring casts, DISTINCT expressions, aggregate FILTER masks and JSON expression counts retain Trino execution.
 FILTER clauses currently become Trino aggregation masks and remain in Trino, even when the underlying BOOLEAN field is stored directly.
 Eligible HASH `SELECT DISTINCT` groups exact keys in Redis within the existing group budget. Supported single-DISTINCT count rewrites add a second GROUPBY/REDUCE stage, returning final global or grouped counts rather than transferring every distinct key. All-NULL groups and empty global input preserve SQL zero-count semantics.
 Unsafe BIGINT/DECIMAL and encoded grouping retain Trino execution; no approximate distinct reducer replaces SQL's exact answer.
@@ -908,7 +924,7 @@ Common reason codes include:
 |The local winner set exceeds the configured bound. Keep Trino ordering or explicitly size a bounded candidate budget for the query's memory allowance.
 |===
 
-These are stateless DEBUG diagnostics, not a last-rejection field on a shared table handle or an annotation added to EXPLAIN.
+These DEBUG messages describe individual attempts and remain stateless. The separate <<plan-diagnostics,immutable EXPLAIN policy snapshot>> describes planning facts and accepted handle operations, rather than a mutable last-rejection history.
 One query can produce multiple optimizer attempts and reasons.
 Trino can also retain a Filter or Project that prevents an optimization hook from being called at all; use EXPLAIN to inspect that plan boundary rather than inferring acceptance from the absence of a rejection log.
 The diagnostics do not log source-domain literal values.
